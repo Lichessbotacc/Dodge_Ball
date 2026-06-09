@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Finger Dodge</title>
+<title>Ball Dodge</title>
 
 <style>
 *{
@@ -142,19 +142,18 @@ function createBall(){
     if(Math.random()<0.5) speedX *= -1;
     if(Math.random()<0.5) speedY *= -1;
 
-    // Mittelpunkt des Canvas
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+    let x, y;
+    let safeDistance = 200; // Abstand zum Spieler
 
-    // Spieler relativ zum Zentrum
-    const dx = player.x - centerX;
-    const dy = player.y - centerY;
+    do {
+        x = Math.random() * canvas.width;
+        y = Math.random() * canvas.height;
 
-    // Gegner spawnt auf der Gegenseite
-    const spawnDistance = 300;
+        const dx = player.x - x;
+        const dy = player.y - y;
+        const distance = Math.sqrt(dx*dx + dy*dy);
 
-    const x = centerX - dx + (Math.random() * 100 - 50);
-    const y = centerY - dy + (Math.random() * 100 - 50);
+    } while (distance < safeDistance);
 
     balls.push({
         x,
