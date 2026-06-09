@@ -122,6 +122,7 @@ window.addEventListener("resize", resize);
 let balls = [];
 let running = false;
 let startTime = 0;
+let spawnTimer = null;
 let fingerActive = false;
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -180,11 +181,13 @@ function restartGame(){
     startGame();
 }
 
+
+
 function spawnLoop(){
 
     if(!running) return;
 
-    setTimeout(()=>{
+    spawnTimer = setTimeout(()=>{
         if(running){
             createBall();
             spawnLoop();
