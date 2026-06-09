@@ -142,12 +142,25 @@ function createBall(){
     if(Math.random()<0.5) speedX *= -1;
     if(Math.random()<0.5) speedY *= -1;
 
+    let x, y;
+    let safeDistance = 200; // Abstand zum Spieler
+
+    do {
+        x = Math.random() * canvas.width;
+        y = Math.random() * canvas.height;
+
+        const dx = player.x - x;
+        const dy = player.y - y;
+        const distance = Math.sqrt(dx*dx + dy*dy);
+
+    } while (distance < safeDistance);
+
     balls.push({
-        x: Math.random()*canvas.width,
-        y: Math.random()*canvas.height,
+        x,
+        y,
         radius,
-        vx:speedX,
-        vy:speedY
+        vx: speedX,
+        vy: speedY
     });
 
     document.getElementById("balls").textContent = balls.length;
