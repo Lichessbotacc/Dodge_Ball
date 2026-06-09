@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finger Dodge</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    overflow:hidden;
+    background:#111;
+    font-family:Arial,sans-serif;
+}
+
+canvas{
+    display:block;
+    touch-action:none;
+}
+
+#ui{
+    position:absolute;
+    top:20px;
+    left:20px;
+    color:white;
+    font-size:24px;
+    font-weight:bold;
+}
+
+#menu{
+    position:absolute;
+    inset:0;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    background:#111;
+    color:white;
+}
+
+h1{
+    font-size:50px;
+    margin-bottom:20px;
+}
+
+button{
+    padding:15px 35px;
+    font-size:22px;
+    border:none;
+    border-radius:12px;
+    cursor:pointer;
+}
+
+#gameOver{
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,0.8);
+    display:none;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    color:white;
+}
+
+#gameOver h2{
+    font-size:50px;
+    margin-bottom:15px;
+}
+
+#gameOver p{
+    font-size:25px;
+    margin-bottom:20px;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+    Zeit: <span id="time">0</span>s<br>
+    Bälle: <span id="balls">3</span>
+</div>
+
+<div id="menu">
+    <h1>Finger Dodge</h1>
+    <p style="margin-bottom:20px">
+        Berühre den Bildschirm und weiche den Bällen aus!
+    </p>
+    <button onclick="startGame()">START</button>
+</div>
+
+<div id="gameOver">
+    <h2>GAME OVER</h2>
+    <p>Überlebt: <span id="finalTime">0</span>s</p>
+    <button onclick="restartGame()">Nochmal</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+let balls = [];
+let running = false;
+let startTime = 0;
+let fingerActive = false;
+
+const player = {
+    x: canvas.width/2,
+    y: canvas.height/2,
+    radius: 18
+};
+
+function createBall(){
+    const radius = 15 + Math.random()*20;
+
+    let speedX = (Math.random()*4+2);
+    let speedY = (Math.random()*4+2);
+
+    if(Math.random()<0.5) speedX *= -1;
+    if(Math.random()<0.5) speedY *= -1;
+
+    balls.push({
+        x: Math.random()*canvas.width,
+        y: Math.random()*canvas.height,
+        radius,
+        vx:speedX,
+        vy:speedY
+    });
+
+    document.getElementById("balls").textContent = balls.length;
+}
+
+function startGame(){
+    document.getElementById("menu").style.display = "none";
+
+    balls = [];
+
+    for(let i=0;i<3;i++){
+        createBall();
+    }
+
+    running = true;
+    startTime = Date.now();
+
+    spawnLoop();
+}
+
+function restartGame(){
+    document.getElementById("gameOver").style.display = "none";
+    startGame();
+}
+
+function spawnLoop(){
+
+    if(!running) return;
+
+    const delay = 5000 + Math.random()*5000;
+
+    setTimeout(()=>{
+        if(running){
+            createBall();
+            spawnLoop();
+        }
+    }, delay);
+}
+
+function gameOver(){
+
+    running = false;
+
+    const survived =
+        Math.floor((Date.now()-startTime)/1000);
+
+    document.getElementById("finalTime")
+        .textContent = survived;
+
+    document.getElementById("gameOver")
+        .style.display = "flex";
+}
+
+function update(){
+
+    if(running){
+
+        let survived =
+            Math.floor((Date.now()-startTime)/1000);
+
+        document.getElementById("time")
+            .textContent = survived;
+
+        for(const ball of balls){
+
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            if(ball.x-ball.radius < 0 ||
+               ball.x+ball.radius > canvas.width){
+                ball.vx *= -1;
+            }
+
+            if(ball.y-ball.radius < 0 ||
+               ball.y+ball.radius > canvas.height){
+                ball.vy *= -1;
+            }
+
+            if(fingerActive){
+
+                const dx = player.x - ball.x;
+                const dy = player.y - ball.y;
+
+                const distance =
+                    Math.sqrt(dx*dx + dy*dy);
+
+                if(distance <
+                    player.radius + ball.radius){
+
+                    gameOver();
+                }
+            }
+        }
+    }
+}
+
+function draw(){
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    for(const ball of balls){
+
+        ctx.beginPath();
+        ctx.arc(
+            ball.x,
+            ball.y,
+            ball.radius,
+            0,
+            Math.PI*2
+        );
+
+        ctx.fillStyle = "#ff4444";
+        ctx.fill();
+    }
+
+    if(fingerActive){
+
+        ctx.beginPath();
+        ctx.arc(
+            player.x,
+            player.y,
+            player.radius,
+            0,
+            Math.PI*2
+        );
+
+        ctx.fillStyle = "#00ff88";
+        ctx.fill();
+    }
+}
+
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+loop();
+
+function movePlayer(x,y){
+    player.x = x;
+    player.y = y;
+}
+
+canvas.addEventListener("touchstart",(e)=>{
+    fingerActive = true;
+
+    movePlayer(
+        e.touches[0].clientX,
+        e.touches[0].clientY
+    );
+});
+
+canvas.addEventListener("touchmove",(e)=>{
+
+    e.preventDefault();
+
+    movePlayer(
+        e.touches[0].clientX,
+        e.touches[0].clientY
+    );
+});
+
+canvas.addEventListener("touchend",()=>{
+    fingerActive = false;
+});
+
+canvas.addEventListener("mousedown",(e)=>{
+    fingerActive = true;
+    movePlayer(e.clientX,e.clientY);
+});
+
+canvas.addEventListener("mousemove",(e)=>{
+    if(fingerActive){
+        movePlayer(e.clientX,e.clientY);
+    }
+});
+
+canvas.addEventListener("mouseup",()=>{
+    fingerActive = false;
+});
+</script>
+
+</body>
+</html>
