@@ -364,6 +364,11 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("mouseup",()=>{
     fingerActive = false;
 });
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden && running) {
+        gameOver();
+    }
+});
 </script>
 
 </body>
