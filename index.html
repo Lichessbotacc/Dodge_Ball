@@ -158,12 +158,14 @@ function startGame(){
 
     balls = [];
 
-    createBall();
+    // 🔥 START: 3 Bälle
+    for(let i = 0; i < 3; i++){
+        createBall();
+    }
 
     running = true;
     startTime = Date.now();
 
-    // 🔥 alte Timer killen
     if(spawnTimer){
         clearTimeout(spawnTimer);
     }
