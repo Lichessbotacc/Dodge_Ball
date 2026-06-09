@@ -167,16 +167,14 @@ function spawnLoop(){
 
     if(!running) return;
 
-    const delay = 5000 + Math.random()*5000;
-
     setTimeout(()=>{
         if(running){
             createBall();
             spawnLoop();
         }
-    }, delay);
+    }, 5000);
 }
-
+    
 function gameOver(){
 
     running = false;
