@@ -99,7 +99,9 @@ button{
     Rekord zurücksetzen
 </button>
 </div>
-
+<button onclick="openMultiplayerMenu()">
+    Multiplayer
+</button>
 <div id="gameOver">
     <h2>GAME OVER</h2>
     <p>Überlebt: <span id="finalTime">0</span>s</p>
@@ -107,7 +109,29 @@ button{
 </div>
 
 <canvas id="game"></canvas>
+<div id="mpMenu" style="display:none; position:absolute; inset:0; background:#111; color:white; flex-direction:column; justify-content:center; align-items:center;">
+    
+    <h1>Multiplayer</h1>
 
+    <p>Spieler 1 wählen:</p>
+    <select id="p1">
+        <option value="green">Grün</option>
+        <option value="blue">Blau</option>
+        <option value="yellow">Gelb</option>
+    </select>
+
+    <p>Spieler 2 wählen:</p>
+    <select id="p2">
+        <option value="red">Rot</option>
+        <option value="purple">Lila</option>
+        <option value="cyan">Cyan</option>
+    </select>
+
+    <br><br>
+
+    <button onclick="startMultiplayer()">START</button>
+    <button onclick="backToMenu()">Zurück</button>
+</div>
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -121,6 +145,8 @@ window.addEventListener("resize", resize);
 
 let balls = [];
 let running = false;
+let player1 = {x:100,y:100,radius:18,color:"green"};
+let player2 = {x:300,y:300,radius:18,color:"red"};
 let startTime = 0;
 let fingerActive = false;
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
@@ -289,6 +315,23 @@ function draw(){
 
         ctx.fillStyle = "#ff4444";
         ctx.fill();
+        // PLAYER 1
+let dx = player1.x - ball.x;
+let dy = player1.y - ball.y;
+let dist = Math.sqrt(dx*dx + dy*dy);
+
+if(dist < player1.radius + ball.radius){
+    gameOver();
+}
+
+// PLAYER 2
+dx = player2.x - ball.x;
+dy = player2.y - ball.y;
+dist = Math.sqrt(dx*dx + dy*dy);
+
+if(dist < player2.radius + ball.radius){
+    gameOver();
+}
     }
 
     
@@ -305,7 +348,17 @@ function draw(){
         ctx.fillStyle = "#00ff88";
         ctx.fill();
     }
+// Spieler 1
+ctx.beginPath();
+ctx.arc(player1.x, player1.y, player1.radius, 0, Math.PI*2);
+ctx.fillStyle = player1.color;
+ctx.fill();
 
+// Spieler 2
+ctx.beginPath();
+ctx.arc(player2.x, player2.y, player2.radius, 0, Math.PI*2);
+ctx.fillStyle = player2.color;
+ctx.fill();
 
 function loop(){
     update();
@@ -332,6 +385,18 @@ canvas.addEventListener("touchmove",(e)=>{
 
     e.preventDefault();
 
+    if(e.touches[0]){
+        player1.x = e.touches[0].clientX;
+        player1.y = e.touches[0].clientY;
+    }
+
+    if(e.touches[1]){
+        player2.x = e.touches[1].clientX;
+        player2.y = e.touches[1].clientY;
+    }
+});
+    e.preventDefault();
+
     movePlayer(
         e.touches[0].clientX,
         e.touches[0].clientY
@@ -356,6 +421,33 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("mouseup",()=>{
     fingerActive = false;
 });
+function openMultiplayerMenu(){
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("mpMenu").style.display = "flex";
+}
+
+function backToMenu(){
+    document.getElementById("mpMenu").style.display = "none";
+    document.getElementById("menu").style.display = "flex";
+}
+function startMultiplayer(){
+
+    document.getElementById("mpMenu").style.display = "none";
+
+    balls = [];
+
+    for(let i=0;i<3;i++){
+        createBall();
+    }
+
+    player1.color = document.getElementById("p1").value;
+    player2.color = document.getElementById("p2").value;
+
+    running = true;
+    startTime = Date.now();
+
+    spawnLoop();
+}
 </script>
 
 </body>
