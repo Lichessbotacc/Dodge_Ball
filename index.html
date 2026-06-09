@@ -270,95 +270,68 @@ function update(){
 
         for(const ball of balls){
 
-            ball.x += ball.vx;
-            ball.y += ball.vy;
+    ball.x += ball.vx;
+    ball.y += ball.vy;
 
-            if(ball.x-ball.radius < 0 ||
-               ball.x+ball.radius > canvas.width){
-                ball.vx *= -1;
-            }
+    if(ball.x-ball.radius < 0 ||
+       ball.x+ball.radius > canvas.width){
+        ball.vx *= -1;
+    }
 
-            if(ball.y-ball.radius < 0 ||
-               ball.y+ball.radius > canvas.height){
-                ball.vy *= -1;
-            }
+    if(ball.y-ball.radius < 0 ||
+       ball.y+ball.radius > canvas.height){
+        ball.vy *= -1;
+    }
 
-            const dx = player.x - ball.x;
-const dy = player.y - ball.y;
+    // PLAYER 1
+    let dx = player1.x - ball.x;
+    let dy = player1.y - ball.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
 
-const distance =
-    Math.sqrt(dx*dx + dy*dy);
+    if(dist < player1.radius + ball.radius){
+        gameOver();
+    }
 
-if(distance <
-    player.radius + ball.radius){
+    // PLAYER 2
+    dx = player2.x - ball.x;
+    dy = player2.y - ball.y;
+    dist = Math.sqrt(dx*dx + dy*dy);
 
-    gameOver();
-}
-        }
+    if(dist < player2.radius + ball.radius){
+        gameOver();
     }
 }
-
+    }
+}
 function draw(){
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
+    // BÄLLE
     for(const ball of balls){
 
         ctx.beginPath();
-        ctx.arc(
-            ball.x,
-            ball.y,
-            ball.radius,
-            0,
-            Math.PI*2
-        );
-
+        ctx.arc(ball.x,ball.y,ball.radius,0,Math.PI*2);
         ctx.fillStyle = "#ff4444";
         ctx.fill();
-        // PLAYER 1
-let dx = player1.x - ball.x;
-let dy = player1.y - ball.y;
-let dist = Math.sqrt(dx*dx + dy*dy);
 
-if(dist < player1.radius + ball.radius){
-    gameOver();
-}
-
-// PLAYER 2
-dx = player2.x - ball.x;
-dy = player2.y - ball.y;
-dist = Math.sqrt(dx*dx + dy*dy);
-
-if(dist < player2.radius + ball.radius){
-    gameOver();
-}
+        
     }
 
-    
+  
 
-        ctx.beginPath();
-        ctx.arc(
-            player.x,
-            player.y,
-            player.radius,
-            0,
-            Math.PI*2
-        );
+    // PLAYER 1
+    ctx.beginPath();
+    ctx.arc(player1.x,player1.y,player1.radius,0,Math.PI*2);
+    ctx.fillStyle = player1.color;
+    ctx.fill();
 
-        ctx.fillStyle = "#00ff88";
-        ctx.fill();
-    }
-// Spieler 1
-ctx.beginPath();
-ctx.arc(player1.x, player1.y, player1.radius, 0, Math.PI*2);
-ctx.fillStyle = player1.color;
-ctx.fill();
-
-// Spieler 2
-ctx.beginPath();
-ctx.arc(player2.x, player2.y, player2.radius, 0, Math.PI*2);
-ctx.fillStyle = player2.color;
-ctx.fill();
+    // PLAYER 2
+    ctx.beginPath();
+    ctx.arc(player2.x,player2.y,player2.radius,0,Math.PI*2);
+    ctx.fillStyle = player2.color;
+    ctx.fill();
+}
 
 function loop(){
     update();
@@ -395,13 +368,7 @@ canvas.addEventListener("touchmove",(e)=>{
         player2.y = e.touches[1].clientY;
     }
 });
-    e.preventDefault();
-
-    movePlayer(
-        e.touches[0].clientX,
-        e.touches[0].clientY
-    );
-});
+   
 
 canvas.addEventListener("touchend",()=>{
     fingerActive = false;
