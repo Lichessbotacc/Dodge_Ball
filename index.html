@@ -82,6 +82,7 @@ button{
 
 <div id="ui">
     Zeit: <span id="time">0</span>s<br>
+    Rekord: <span id="record">0</span>s<br>
     Bälle: <span id="balls">3</span>
 </div>
 
@@ -116,7 +117,9 @@ let balls = [];
 let running = false;
 let startTime = 0;
 let fingerActive = false;
-
+let record = localStorage.getItem("fingerDodgeRecord") || 0;
+document.getElementById("record").textContent = record;
+    
 const player = {
     x: canvas.width/2,
     y: canvas.height/2,
@@ -181,6 +184,19 @@ function gameOver(){
 
     const survived =
         Math.floor((Date.now()-startTime)/1000);
+
+    if(survived > record){
+
+    record = survived;
+
+    localStorage.setItem(
+        "fingerDodgeRecord",
+        record
+    );
+
+    document.getElementById("record")
+        .textContent = record;
+}
 
     document.getElementById("finalTime")
         .textContent = survived;
