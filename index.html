@@ -125,8 +125,9 @@ let startTime = 0;
 let fingerActive = false;
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
-    
-const player = {
+let spawnTimer = null;    
+
+    const player = {
     x: canvas.width/2,
     y: canvas.height/2,
     radius: 18
@@ -157,12 +158,15 @@ function startGame(){
 
     balls = [];
 
-    for(let i=0;i<3;i++){
-        createBall();
-    }
+    createBall();
 
     running = true;
     startTime = Date.now();
+
+    // 🔥 alte Timer killen
+    if(spawnTimer){
+        clearTimeout(spawnTimer);
+    }
 
     spawnLoop();
 }
@@ -176,7 +180,7 @@ function spawnLoop(){
 
     if(!running) return;
 
-    setTimeout(()=>{
+    spawnTimer = setTimeout(()=>{
         if(running){
             createBall();
             spawnLoop();
