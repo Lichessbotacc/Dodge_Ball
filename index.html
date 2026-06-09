@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ball Dodge</title>
+<title>Finger Dodge</title>
 
 <style>
 *{
@@ -142,25 +142,12 @@ function createBall(){
     if(Math.random()<0.5) speedX *= -1;
     if(Math.random()<0.5) speedY *= -1;
 
-    let x, y;
-    let safeDistance = 200; // Abstand zum Spieler
-
-    do {
-        x = Math.random() * canvas.width;
-        y = Math.random() * canvas.height;
-
-        const dx = player.x - x;
-        const dy = player.y - y;
-        const distance = Math.sqrt(dx*dx + dy*dy);
-
-    } while (distance < safeDistance);
-
     balls.push({
-        x,
-        y,
+        x: Math.random()*canvas.width,
+        y: Math.random()*canvas.height,
         radius,
-        vx: speedX,
-        vy: speedY
+        vx:speedX,
+        vy:speedY
     });
 
     document.getElementById("balls").textContent = balls.length;
