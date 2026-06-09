@@ -153,6 +153,10 @@ function createBall(){
 }
 
 function startGame(){
+    if (spawnTimer) {
+    clearTimeout(spawnTimer);
+    spawnTimer = null;
+}
     document.getElementById("menu").style.display = "none";
 
     balls = [];
@@ -168,6 +172,10 @@ function startGame(){
 }
 
 function restartGame(){
+    if (spawnTimer) {
+    clearTimeout(spawnTimer);
+    spawnTimer = null;
+}
     document.getElementById("gameOver").style.display = "none";
     startGame();
 }
