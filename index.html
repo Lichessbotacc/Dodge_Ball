@@ -262,19 +262,17 @@ function update(){
                 ball.vy *= -1;
             }
 
-            if(fingerActive){
+            const dx = player.x - ball.x;
+const dy = player.y - ball.y;
 
-                const dx = player.x - ball.x;
-                const dy = player.y - ball.y;
+const distance =
+    Math.sqrt(dx*dx + dy*dy);
 
-                const distance =
-                    Math.sqrt(dx*dx + dy*dy);
+if(distance <
+    player.radius + ball.radius){
 
-                if(distance <
-                    player.radius + ball.radius){
-
-                    gameOver();
-                }
+    gameOver();
+}
             }
         }
     }
