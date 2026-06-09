@@ -167,6 +167,7 @@ function startGame(){
     }
 
     running = true;
+    document.getElementById("time").textContent = "0";
     startTime = Date.now();
 
     spawnLoop();
@@ -272,7 +273,8 @@ if(distance <
     player.radius + ball.radius){
 
     gameOver();
-
+running = false;
+startTime = 0;
             }
         }
     }
