@@ -336,7 +336,10 @@ function update(){
         if(keys["arrowleft"]) player2.x -= 5;
         if(keys["arrowright"]) player2.x += 5;
     }
-
+if(mode === "multi"){
+    applyJoystick(joystick1, player1);
+    applyJoystick(joystick2, player2);
+}
     // --- PLAYER BOUNDARIES ---
     player1.x = Math.max(player1.radius,
         Math.min(canvas.width - player1.radius, player1.x));
@@ -366,10 +369,7 @@ function update(){
     check(player1);
     if(mode==="multi") check(player2);
 }
-if(mode === "multi"){
-    applyJoystick(joystick1, player1);
-    applyJoystick(joystick2, player2);
-}
+
 
 // ---------------- COLLISION ----------------
 function check(p){
@@ -411,6 +411,7 @@ function draw(){
         ctx.fillStyle="white";
         ctx.fill();
     }
+    
     if(mode === "multi"){
     drawJoystick(joystick1);
     drawJoystick(joystick2);
