@@ -213,7 +213,18 @@ function update(){
         if(keys["arrowleft"]) player2.x-=5;
         if(keys["arrowright"]) player2.x+=5;
     }
+// Spieler im Bildschirm halten
+player1.x = Math.max(player1.radius,
+    Math.min(canvas.width - player1.radius, player1.x));
 
+player1.y = Math.max(player1.radius,
+    Math.min(canvas.height - player1.radius, player1.y));
+
+player2.x = Math.max(player2.radius,
+    Math.min(canvas.width - player2.radius, player2.x));
+
+player2.y = Math.max(player2.radius,
+    Math.min(canvas.height - player2.radius, player2.y));
     // --- BOUNCE BALLS ---
     for(const ball of balls){
         ball.x+=ball.vx;
