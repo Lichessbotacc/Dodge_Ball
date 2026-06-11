@@ -181,7 +181,8 @@ document.getElementById("balls").textContent = balls.length;
 
 // ---------------- AI ----------------
 function updateAI(p){
-    // 1. nächster Ball finden
+
+    // ---------------- 1. gefährlichsten Ball finden ----------------
     let closest = null;
     let minDist = Infinity;
 
@@ -196,13 +197,12 @@ function updateAI(p){
         }
     }
 
-    // 2. Zentrum des Screens
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+    // ---------------- 2. Zentrum ----------------
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
 
-    // 3. Vektor weg vom Ball
-    let avoidX = 0;
-    let avoidY = 0;
+    // ---------------- 3. VEKTOR: weg vom Ball ----------------
+    let avoidX = 0, avoidY = 0;
 
     if(closest){
         avoidX = p.x - closest.x;
@@ -213,25 +213,58 @@ function updateAI(p){
         avoidY /= len;
     }
 
-    // 4. Vektor zur Mitte (wichtig!)
-    let centerXv = centerX - p.x;
-    let centerYv = centerY - p.y;
+    // ---------------- 4. VEKTOR: zur Mitte (STARK!) ----------------
+    let centerX = cx - p.x;
+    let centerY = cy - p.y;
 
-    const centerLen = Math.sqrt(centerXv*centerXv + centerYv*centerYv) || 1;
-    centerXv /= centerLen;
-    centerYv /= centerLen;
+    const centerLen = Math.sqrt(centerX*centerX + centerY*centerY) || 1;
+    centerX /= centerLen;
+    centerY /= centerLen;
 
-    // 5. Gewichtung (HIER steuerst du Verhalten)
-    const avoidStrength = 4.2;   // stark weg vom Ball
-    const centerStrength = 1.6;  // zieht in die Mitte zurück
+    // ---------------- 5. ANTI-ECKEN SYSTEM ----------------
+    let cornerX = 0;
+    let cornerY = 0;
 
-    // 6. Bewegung kombinieren
-    p.x += avoidX * avoidStrength + centerXv * centerStrength;
-    p.y += avoidY * avoidStrength + centerYv * centerStrength;
+    const margin = 180;
 
-    // 7. leichte Unruhe (macht es “lebendig”)
-    p.x += (Math.random() - 0.5) * 1.2;
-    p.y += (Math.random() - 0.5) * 1.2;
+    if(p.x < margin) cornerX += 1;
+    if(p.x > canvas.width - margin) cornerX -= 1;
+    if(p.y < margin) cornerY += 1;
+    if(p.y > canvas.height - margin) cornerY -= 1;
+
+    const cornerLen = Math.sqrt(cornerX*cornerX + cornerY*cornerY) || 1;
+    if(cornerLen > 0){
+        cornerX /= cornerLen;
+        cornerY /= cornerLen;
+    }
+
+    // ---------------- 6. GEWICHTUNG (DAS IST DIE INTELLIGENZ) ----------------
+    const avoidStrength = 5.0;     // Ball ist wichtig
+    const centerStrength = 3.2;    // Zentrum ist SEHR wichtig
+    const cornerStrength = 4.0;    // Ecken werden aktiv vermieden
+
+    // ---------------- 7. Bewegung kombinieren ----------------
+    let vx =
+        avoidX * avoidStrength +
+        centerX * centerStrength +
+        cornerX * cornerStrength;
+
+    let vy =
+        avoidY * avoidStrength +
+        centerY * centerStrength +
+        cornerY * cornerStrength;
+
+    // ---------------- 8. glätten (kein Zittern) ----------------
+    const speed = 4.2;
+
+    const len = Math.sqrt(vx*vx + vy*vy) || 1;
+
+    p.x += (vx / len) * speed;
+    p.y += (vy / len) * speed;
+
+    // ---------------- 9. leichte Unruhe ----------------
+    p.x += (Math.random() - 0.5) * 0.6;
+    p.y += (Math.random() - 0.5) * 0.6;
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
