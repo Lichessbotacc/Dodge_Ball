@@ -4,78 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Finger Dodge</title>
-
 <style>
-*{
-    margin:0;
-    padding:0;
-    box-sizing:border-box;
-}
-
-body{
-    overflow:hidden;
-    background:#111;
-    font-family:Arial,sans-serif;
-}
-
-canvas{
-    display:block;
-    touch-action:none;
-}
-
-#ui{
-    position:absolute;
-    top:20px;
-    left:20px;
-    color:white;
-    font-size:24px;
-    font-weight:bold;
-}
-
-#menu{
-    position:absolute;
-    inset:0;
-    display:flex;
-    flex-direction:column;
-    justify-content:center;
-    align-items:center;
-    background:#111;
-    color:white;
-}
-
-h1{
-    font-size:50px;
-    margin-bottom:20px;
-}
-
-button{
-    padding:15px 35px;
-    font-size:22px;
-    border:none;
-    border-radius:12px;
-    cursor:pointer;
-}
-
-#gameOver{
-    position:absolute;
-    inset:0;
-    background:rgba(0,0,0,0.8);
-    display:none;
-    flex-direction:column;
-    justify-content:center;
-    align-items:center;
-    color:white;
-}
-
-#gameOver h2{
-    font-size:50px;
-    margin-bottom:15px;
-}
-
-#gameOver p{
-    font-size:25px;
-    margin-bottom:20px;
-}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{overflow:hidden;background:#111;font-family:Arial,sans-serif;}
+canvas{display:block;touch-action:none;}
+#ui{position:absolute;top:20px;left:20px;color:white;font-size:24px;font-weight:bold;}
+#menu{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:#111;color:white;}
+h1{font-size:50px;margin-bottom:20px;}
+button{padding:15px 35px;font-size:22px;border:none;border-radius:12px;cursor:pointer;}
+#gameOver{position:absolute;inset:0;background:rgba(0,0,0,0.8);display:none;flex-direction:column;justify-content:center;align-items:center;color:white;}
+#gameOver h2{font-size:50px;margin-bottom:15px;}
+#gameOver p{font-size:25px;margin-bottom:20px;}
 </style>
 </head>
 <body>
@@ -92,12 +31,8 @@ button{
         Berühre den Bildschirm und weiche den Bällen aus!
     </p>
     <button onclick="startGame()">START</button>
-
 <br><br>
-
-<button onclick="resetRecord()">
-    Rekord zurücksetzen
-</button>
+<button onclick="resetRecord()">Rekord zurücksetzen</button>
 </div>
 
 <div id="gameOver">
@@ -112,6 +47,13 @@ button{
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+function resize(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
 let balls = [];
 let running = false;
 let startTime = 0;
@@ -120,136 +62,112 @@ let fingerActive = false;
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
-// --- Dynamische Skalierung für alle Geräte ---
-function resize(){
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener("resize", resize);
-
 const player = {
     x: canvas.width/2,
     y: canvas.height/2,
     radius: 18
 };
 
-// --- BALL ERZEUGEN ---
 function createBall(){
     const radius = 15 + Math.random()*20;
-
     let x, y;
-    const safeDistance = player.radius + radius + 80; // Abstand zum Spieler
-
+    const safeDistance = player.radius + radius + 80;
     let valid = false;
     while(!valid){
-        x = radius + Math.random() * (canvas.width - 2*radius);
-        y = radius + Math.random() * (canvas.height - 2*radius);
+        x = radius + Math.random()*(canvas.width-2*radius);
+        y = radius + Math.random()*(canvas.height-2*radius);
         const dx = player.x - x;
         const dy = player.y - y;
         valid = Math.sqrt(dx*dx + dy*dy) > safeDistance;
     }
-
-    let speedX = (Math.random()*4+2) * (Math.random()<0.5?-1:1);
-    let speedY = (Math.random()*4+2) * (Math.random()<0.5?-1:1);
-
-    balls.push({x, y, radius, vx:speedX, vy:speedY});
+    let speedX = (Math.random()*4+2)*(Math.random()<0.5?-1:1);
+    let speedY = (Math.random()*4+2)*(Math.random()<0.5?-1:1);
+    balls.push({x,y,radius,vx:speedX,vy:speedY});
     document.getElementById("balls").textContent = balls.length;
 }
 
-// --- SPIEL START / RESTART ---
 function startGame(){
-    if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
-    document.getElementById("menu").style.display = "none";
-    balls = [];
+    if(spawnTimer){clearTimeout(spawnTimer); spawnTimer=null;}
+    document.getElementById("menu").style.display="none";
+    balls=[];
     player.x = canvas.width/2;
     player.y = canvas.height/2;
     for(let i=0;i<3;i++) createBall();
-    running = true;
-    document.getElementById("time").textContent = "0";
-    startTime = Date.now();
+    running=true;
+    document.getElementById("time").textContent="0";
+    startTime=Date.now();
     spawnLoop();
 }
 
 function restartGame(){
-    if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
-    document.getElementById("gameOver").style.display = "none";
+    if(spawnTimer){clearTimeout(spawnTimer); spawnTimer=null;}
+    document.getElementById("gameOver").style.display="none";
     startGame();
 }
 
 function spawnLoop(){
     if(!running) return;
-    spawnTimer = setTimeout(()=>{
+    spawnTimer=setTimeout(()=>{
         if(running){
             createBall();
             spawnLoop();
         }
-    }, 5000);
+    },5000);
 }
 
 function resetRecord(){
     if(confirm("Rekord wirklich löschen?")){
-        record = 0;
-        localStorage.setItem("fingerDodgeRecord", 0);
-        document.getElementById("record").textContent = 0;
+        record=0;
+        localStorage.setItem("fingerDodgeRecord",0);
+        document.getElementById("record").textContent=0;
     }
 }
 
-// --- GAME OVER ---
 function gameOver(){
-    running = false;
-    const survived = Math.floor((Date.now()-startTime)/1000);
-    if(survived > record){
-        record = survived;
-        localStorage.setItem("fingerDodgeRecord", record);
-        document.getElementById("record").textContent = record;
+    running=false;
+    const survived=Math.floor((Date.now()-startTime)/1000);
+    if(survived>record){
+        record=survived;
+        localStorage.setItem("fingerDodgeRecord",record);
+        document.getElementById("record").textContent=record;
     }
-    document.getElementById("finalTime").textContent = survived;
-    document.getElementById("gameOver").style.display = "flex";
+    document.getElementById("finalTime").textContent=survived;
+    document.getElementById("gameOver").style.display="flex";
 }
 
-// --- SPIEL LOGIK ---
 function update(){
     if(running){
-        const survived = Math.floor((Date.now()-startTime)/1000);
-        document.getElementById("time").textContent = survived;
-
+        document.getElementById("time").textContent=Math.floor((Date.now()-startTime)/1000);
         for(const ball of balls){
-            ball.x += ball.vx;
-            ball.y += ball.vy;
-
-            // --- WANDKOLLISION ---
-            if(ball.x-ball.radius < 0){ ball.x=ball.radius; ball.vx*=-1; }
-            if(ball.x+ball.radius > canvas.width){ ball.x=canvas.width-ball.radius; ball.vx*=-1; }
-            if(ball.y-ball.radius < 0){ ball.y=ball.radius; ball.vy*=-1; }
-            if(ball.y+ball.radius > canvas.height){ ball.y=canvas.height-ball.radius; ball.vy*=-1; }
-
-            const dx = player.x - ball.x;
-            const dy = player.y - ball.y;
-            const distance = Math.sqrt(dx*dx + dy*dy);
-            if(distance < player.radius + ball.radius){
+            ball.x+=ball.vx;
+            ball.y+=ball.vy;
+            if(ball.x-ball.radius<0){ball.x=ball.radius;ball.vx*=-1;}
+            if(ball.x+ball.radius>canvas.width){ball.x=canvas.width-ball.radius;ball.vx*=-1;}
+            if(ball.y-ball.radius<0){ball.y=ball.radius;ball.vy*=-1;}
+            if(ball.y+ball.radius>canvas.height){ball.y=canvas.height-ball.radius;ball.vy*=-1;}
+            const dx=player.x-ball.x;
+            const dy=player.y-ball.y;
+            const distance=Math.sqrt(dx*dx+dy*dy);
+            if(distance<player.radius+ball.radius){
                 gameOver();
-                running = false;
-                startTime = 0;
+                running=false;
+                startTime=0;
             }
         }
     }
 }
 
-// --- ZEICHNEN ---
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
-
     for(const ball of balls){
         ctx.beginPath();
-        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2);
-        ctx.fillStyle = "#ff4444";
+        ctx.arc(ball.x,ball.y,ball.radius,0,Math.PI*2);
+        ctx.fillStyle="#ff4444";
         ctx.fill();
     }
-
     ctx.beginPath();
-    ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
-    ctx.fillStyle = "#00ff88";
+    ctx.arc(player.x,player.y,player.radius,0,Math.PI*2);
+    ctx.fillStyle="#00ff88";
     ctx.fill();
 }
 
@@ -260,30 +178,19 @@ function loop(){
 }
 loop();
 
-// --- SPIELER BEWEGEN ---
 function movePlayer(x,y){
-    player.x = Math.max(player.radius, Math.min(canvas.width-player.radius, x));
-    player.y = Math.max(player.radius, Math.min(canvas.height-player.radius, y));
+    player.x=Math.max(player.radius,Math.min(canvas.width-player.radius,x));
+    player.y=Math.max(player.radius,Math.min(canvas.height-player.radius,y));
 }
 
-// --- TOUCH / MOUSE EVENTS ---
-canvas.addEventListener("touchstart",(e)=>{
-    fingerActive = true;
-    movePlayer(e.touches[0].clientX, e.touches[0].clientY);
-});
-canvas.addEventListener("touchmove",(e)=>{
-    e.preventDefault();
-    movePlayer(e.touches[0].clientX, e.touches[0].clientY);
-});
-canvas.addEventListener("touchend",()=>{ fingerActive=false; });
+canvas.addEventListener("touchstart",(e)=>{fingerActive=true;movePlayer(e.touches[0].clientX,e.touches[0].clientY);});
+canvas.addEventListener("touchmove",(e)=>{e.preventDefault();movePlayer(e.touches[0].clientX,e.touches[0].clientY);});
+canvas.addEventListener("touchend",()=>{fingerActive=false;});
+canvas.addEventListener("mousedown",(e)=>{fingerActive=true;movePlayer(e.clientX,e.clientY);});
+canvas.addEventListener("mousemove",(e)=>{if(fingerActive) movePlayer(e.clientX,e.clientY);});
+canvas.addEventListener("mouseup",()=>{fingerActive=false;});
 
-canvas.addEventListener("mousedown",(e)=>{ fingerActive=true; movePlayer(e.clientX,e.clientY); });
-canvas.addEventListener("mousemove",(e)=>{ if(fingerActive) movePlayer(e.clientX,e.clientY); });
-canvas.addEventListener("mouseup",()=>{ fingerActive=false; });
-
-document.addEventListener("visibilitychange", () => {
-    if (document.hidden && running) gameOver();
-});
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&running) gameOver();});
 </script>
 
 </body>
