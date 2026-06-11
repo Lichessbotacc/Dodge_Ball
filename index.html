@@ -309,10 +309,14 @@ function applyJoystick(j, p){
     const dx = j.x - j.baseX;
     const dy = j.y - j.baseY;
 
-    const speed = 0.08;
+    const speed = 0.12;
 
     p.x += dx * speed;
     p.y += dy * speed;
+
+    // 👉 RESET damit er nicht “zieht”
+    j.x = j.baseX;
+    j.y = j.baseY;
 }
 // ---------------- UPDATE ----------------
 function update(){
@@ -459,36 +463,34 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("touchmove",(e)=>{
     if(!running) return;
 
-    const touches = e.touches;
+    for(let t of e.touches){
+        touchesMap[t.identifier] = t;
 
-    for(let t of touches){
-        const x = t.clientX;
-        const y = t.clientY;
-
-        // LINKS = PLAYER 1
-        if(x < canvas.width / 2){
+        if(t.clientX < canvas.width / 2){
             joystick1.active = true;
-            joystick1.x = x;
-            joystick1.y = y;
-        }
-
-        // RECHTS = PLAYER 2
-        else{
+            joystick1.x = t.clientX;
+            joystick1.y = t.clientY;
+        } else {
             joystick2.active = true;
-            joystick2.x = x;
-            joystick2.y = y;
+            joystick2.x = t.clientX;
+            joystick2.y = t.clientY;
         }
     }
-});
-    canvas.addEventListener("touchend",()=>{
-    joystick1.active = false;
-    joystick2.active = false;
+canvas.addEventListener("touchend",(e)=>{
+    for(let t of e.changedTouches){
+        delete touchesMap[t.identifier];
+    }
 
-    joystick1.x = joystick1.baseX;
-    joystick1.y = joystick1.baseY;
+    if(Object.keys(touchesMap).length === 0){
+        joystick1.active = false;
+        joystick2.active = false;
 
-    joystick2.x = joystick2.baseX;
-    joystick2.y = joystick2.baseY;
+        joystick1.x = joystick1.baseX;
+        joystick1.y = joystick1.baseY;
+
+        joystick2.x = joystick2.baseX;
+        joystick2.y = joystick2.baseY;
+    }
 });
 </script>
 
