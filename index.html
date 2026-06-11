@@ -476,6 +476,8 @@ canvas.addEventListener("touchmove",(e)=>{
             joystick2.y = t.clientY;
         }
     }
+});
+
 canvas.addEventListener("touchend",(e)=>{
     for(let t of e.changedTouches){
         delete touchesMap[t.identifier];
