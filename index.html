@@ -77,22 +77,37 @@ const p2={x:400,y:200,r:18,c:"cyan"};
 
 // ---------------- AI ----------------
 function ai(p){
-let target=null;
-let dMin=99999;
+let dangerX = 0;
+let dangerY = 0;
 
+// 1. gefährliche Richtung berechnen (Bälle)
 for(let b of balls){
-let dx=p.x-b.x;
-let dy=p.y-b.y;
-let d=Math.hypot(dx,dy);
-if(d<dMin){dMin=d;target=b;}
+let dx = p.x - b.x;
+let dy = p.y - b.y;
+let d = Math.hypot(dx,dy);
+
+// je näher der Ball, desto stärker die Flucht
+if(d < 150){
+dangerX += dx / (d*d);
+dangerY += dy / (d*d);
+}
 }
 
-if(target){
-if(target.x>p.x)p.x+=2;
-if(target.x<p.x)p.x-=2;
-if(target.y>p.y)p.y+=2;
-if(target.y<p.y)p.y-=2;
-}
+// 2. Ziel (sicherster Raum + random movement)
+let moveX = dangerX;
+let moveY = dangerY;
+
+// leichte Zufallsbewegung damit KI nicht stuckt
+moveX += (Math.random()-0.5)*0.5;
+moveY += (Math.random()-0.5)*0.5;
+
+// 3. Bewegung anwenden
+p.x += moveX * 6;
+p.y += moveY * 6;
+
+// 4. im Bildschirm halten
+p.x = Math.max(p.r, Math.min(c.width - p.r, p.x));
+p.y = Math.max(p.r, Math.min(c.height - p.r, p.y));
 }
 
 // ---------------- BALLS ----------------
