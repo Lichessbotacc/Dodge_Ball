@@ -181,26 +181,58 @@ document.getElementById("balls").textContent = balls.length;
 
 // ---------------- AI ----------------
 function updateAI(p){
-let closest = null;
-let distMin = 1e9;
+    // 1. nächster Ball finden
+    let closest = null;
+    let minDist = Infinity;
 
-for(const b of balls){
-const dx=b.x-p.x;
-const dy=b.y-p.y;
-const d=Math.sqrt(dx*dx+dy*dy);
-if(d<distMin){distMin=d;closest=b;}
+    for(const b of balls){
+        const dx = b.x - p.x;
+        const dy = b.y - p.y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+
+        if(d < minDist){
+            minDist = d;
+            closest = b;
+        }
+    }
+
+    // 2. Zentrum des Screens
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    // 3. Vektor weg vom Ball
+    let avoidX = 0;
+    let avoidY = 0;
+
+    if(closest){
+        avoidX = p.x - closest.x;
+        avoidY = p.y - closest.y;
+
+        const len = Math.sqrt(avoidX*avoidX + avoidY*avoidY) || 1;
+        avoidX /= len;
+        avoidY /= len;
+    }
+
+    // 4. Vektor zur Mitte (wichtig!)
+    let centerXv = centerX - p.x;
+    let centerYv = centerY - p.y;
+
+    const centerLen = Math.sqrt(centerXv*centerXv + centerYv*centerYv) || 1;
+    centerXv /= centerLen;
+    centerYv /= centerLen;
+
+    // 5. Gewichtung (HIER steuerst du Verhalten)
+    const avoidStrength = 4.2;   // stark weg vom Ball
+    const centerStrength = 1.6;  // zieht in die Mitte zurück
+
+    // 6. Bewegung kombinieren
+    p.x += avoidX * avoidStrength + centerXv * centerStrength;
+    p.y += avoidY * avoidStrength + centerYv * centerStrength;
+
+    // 7. leichte Unruhe (macht es “lebendig”)
+    p.x += (Math.random() - 0.5) * 1.2;
+    p.y += (Math.random() - 0.5) * 1.2;
 }
-
-if(!closest) return;
-
-let dx = p.x - closest.x;
-let dy = p.y - closest.y;
-let len = Math.sqrt(dx*dx+dy*dy)||1;
-
-p.x += (dx/len)*3.8 + (Math.random()-0.5)*1.5;
-p.y += (dy/len)*3.8 + (Math.random()-0.5)*1.5;
-}
-
 // ---------------- START ----------------
 function startGame(selectedMode){
 mode = selectedMode;
