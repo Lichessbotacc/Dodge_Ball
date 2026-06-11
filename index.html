@@ -182,15 +182,28 @@ document.getElementById("balls").textContent = balls.length;
 // ---------------- AI ----------------
 function updateAI(p){
 
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
+    // ---------------- 1. Ziel speichern ----------------
+    if(!p.targetX || !p.targetY || Math.random() < 0.01){
 
-    let dangerX = 0;
-    let dangerY = 0;
+        // neues zufälliges Ziel im Feld
+        const margin = 80;
 
-    let closestDist = Infinity;
+        p.targetX = margin + Math.random() * (canvas.width - margin*2);
+        p.targetY = margin + Math.random() * (canvas.height - margin*2);
+    }
 
-    // ---------------- 1. Gefahrenanalyse (mit Gewichtung) ----------------
+    // ---------------- 2. Richtung zum Ziel ----------------
+    let moveX = p.targetX - p.x;
+    let moveY = p.targetY - p.y;
+
+    const moveLen = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+    moveX /= moveLen;
+    moveY /= moveLen;
+
+    // ---------------- 3. Gefahr durch Bälle ----------------
+    let avoidX = 0;
+    let avoidY = 0;
+
     for(const b of balls){
 
         const dx = p.x - b.x;
@@ -198,25 +211,23 @@ function updateAI(p){
 
         const dist = Math.sqrt(dx*dx + dy*dy);
 
-        if(dist < closestDist) closestDist = dist;
+        const safeRadius = 120;
 
-        // 🧠 starke Gewichtung bei Nähe (EXPONENTIELL statt linear!)
-        const dangerWeight = 1 / (dist * dist + 200);
+        if(dist < safeRadius && dist > 0){
 
-        // zusätzlich: Richtung weg vom Ball
-        dangerX += (dx / (dist || 1)) * dangerWeight;
-        dangerY += (dy / (dist || 1)) * dangerWeight;
+            // stärker je näher der Ball ist
+            const strength = (safeRadius - dist) / safeRadius;
+
+            avoidX += (dx / dist) * strength;
+            avoidY += (dy / dist) * strength;
+        }
     }
 
-    // ---------------- 2. ZENTRUM (stabil, nicht zu stark) ----------------
-    let centerX = cx - p.x;
-    let centerY = cy - p.y;
+    const avoidLen = Math.sqrt(avoidX*avoidX + avoidY*avoidY) || 1;
+    avoidX /= avoidLen;
+    avoidY /= avoidLen;
 
-    const centerLen = Math.sqrt(centerX*centerX + centerY*centerY) || 1;
-    centerX /= centerLen;
-    centerY /= centerLen;
-
-    // ---------------- 3. SEPARATION ----------------
+    // ---------------- 4. leichte Separation ----------------
     let sepX = 0, sepY = 0;
 
     for(const o of players){
@@ -227,7 +238,7 @@ function updateAI(p){
 
         const d = Math.sqrt(dx*dx + dy*dy);
 
-        if(d < 80 && d > 0){
+        if(d < 70 && d > 0){
             sepX += dx / d;
             sepY += dy / d;
         }
@@ -237,77 +248,36 @@ function updateAI(p){
     sepX /= sepLen;
     sepY /= sepLen;
 
-    // ---------------- 4. ANTI ECKEN ----------------
-    let cornerX = 0;
-    let cornerY = 0;
+    // ---------------- 5. Gewichtung ----------------
+    const moveStrength = 2.5;   // 🎯 randomness / wandering
+    const avoidStrength = 6.5;  // 💣 survival priority
+    const sepStrength = 4.5;    // 🤝 spacing
 
-    const margin = 160;
-
-    if(p.x < margin) cornerX += 1;
-    if(p.x > canvas.width - margin) cornerX -= 1;
-    if(p.y < margin) cornerY += 1;
-    if(p.y > canvas.height - margin) cornerY -= 1;
-
-    const cornerLen = Math.sqrt(cornerX*cornerX + cornerY*cornerY) || 1;
-    cornerX /= cornerLen;
-    cornerY /= cornerLen;
-
-    // ---------------- 5. 🧠 CRITICAL FIX: "SAFETY BUBBLE" ----------------
-    // Wenn ein Ball zu nah ist → harte Flucht (Override!)
-    let panicX = 0;
-    let panicY = 0;
-
-    for(const b of balls){
-        const dx = p.x - b.x;
-        const dy = p.y - b.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-
-        if(dist < 90){ // 🚨 Gefahrzone
-            panicX += dx / (dist || 1);
-            panicY += dy / (dist || 1);
-        }
-    }
-
-    const panicLen = Math.sqrt(panicX*panicX + panicY*panicY) || 1;
-    panicX /= panicLen;
-    panicY /= panicLen;
-
-    // ---------------- 6. GEWICHTUNG ----------------
-    const dangerStrength = 4.5;
-    const centerStrength = 2.0;
-    const sepStrength = 5.0;
-    const cornerStrength = 3.5;
-    const panicStrength = 9.0; // 🔥 WICHTIGSTER FIX
-
-    // ---------------- 7. FINAL VEKTOR ----------------
     let vx =
-        dangerX * dangerStrength +
-        centerX * centerStrength +
-        sepX * sepStrength +
-        cornerX * cornerStrength +
-        panicX * panicStrength;
+        moveX * moveStrength +
+        avoidX * avoidStrength +
+        sepX * sepStrength;
 
     let vy =
-        dangerY * dangerStrength +
-        centerY * centerStrength +
-        sepY * sepStrength +
-        cornerY * cornerStrength +
-        panicY * panicStrength;
+        moveY * moveStrength +
+        avoidY * avoidStrength +
+        sepY * sepStrength;
 
-    // ---------------- 8. Bewegung (smooth + kein Überschießen) ----------------
+    // ---------------- 6. Bewegung ----------------
     const speed = 4.2;
 
     const len = Math.sqrt(vx*vx + vy*vy) || 1;
 
-    // leichter “Dämpfer” damit sie nicht in Bälle reinrasen
-    const damping = Math.min(1, 25 / len);
+    p.x += (vx / len) * speed;
+    p.y += (vy / len) * speed;
 
-    p.x += (vx / len) * speed * damping;
-    p.y += (vy / len) * speed * damping;
+    // ---------------- 7. leichte “Unruhe” ----------------
+    p.x += (Math.random() - 0.5) * 0.6;
+    p.y += (Math.random() - 0.5) * 0.6;
 
-    // ---------------- 9. kleine Unruhe ----------------
-    p.x += (Math.random() - 0.5) * 0.3;
-    p.y += (Math.random() - 0.5) * 0.3;
+    // ---------------- 8. im Feld halten ----------------
+    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
