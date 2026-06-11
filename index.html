@@ -91,6 +91,14 @@ align-items:center;
 
 <br><br>
 
+<br><br>
+
+<label>Steuerung</label>
+<select id="controlMode">
+    <option value="touch" selected>Touch / Maus</option>
+    <option value="joystick">Joystick</option>
+</select>
+
 <button onclick="saveSettings()">Speichern</button>
 
 </div>
@@ -176,6 +184,9 @@ function saveSettings(){
 
     playerRadiusSetting =
         Number(document.getElementById("playerSize").value);
+
+    controlMode =
+        document.getElementById("controlMode").value;
 
     document.getElementById("settings").style.display="none";
     document.getElementById("menu").style.display="flex";
