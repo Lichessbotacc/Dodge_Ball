@@ -115,6 +115,8 @@ function resize(){
     joystick.x = joystick.baseX;
     joystick.y = joystick.baseY;
 }
+resize();
+window.addEventListener("resize", resize);
 
 // ---------------- GAME STATE ----------------
 let balls = [];
