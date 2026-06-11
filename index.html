@@ -110,6 +110,8 @@ function resize(){
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
+joystick.baseY = canvas.height - 120;
+joystick.y = joystick.baseY;
 resize();
 window.addEventListener("resize", resize);
 
@@ -123,6 +125,19 @@ let startBallCount = 3;
 let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
+let controlMode = "touch"; // "touch" oder "joystick"
+canvas.addEventListener("touchend",()=>{
+    joystick.active = false;
+    joystick.x = joystick.baseX;
+    joystick.y = joystick.baseY;
+});
+let joystick = {
+    active:false,
+    baseX:120,
+    baseY:120,
+    x:120,
+    y:120
+};
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -313,6 +328,25 @@ player2.y = Math.max(player2.radius,
 
     if(mode==="multi") check(player2);
 }
+    if(controlMode==="joystick" && joystick.active){
+
+        const dx = joystick.x - joystick.baseX;
+        const dy = joystick.y - joystick.baseY;
+
+        const speed = 0.08;
+
+        // Singleplayer
+        if(mode==="single"){
+            player1.x += dx * speed;
+            player1.y += dy * speed;
+        }
+
+        // Multiplayer optional beide bewegen
+        if(mode==="multi"){
+            player1.x += dx * speed;
+            player2.x += dx * speed;
+        }
+    }
 
 // ---------------- COLLISION ----------------
 function check(p){
@@ -341,6 +375,19 @@ function draw(){
     drawPlayer(player1);
 
     if(mode==="multi") drawPlayer(player2);
+        if(controlMode==="joystick" && mode==="single"){
+
+        ctx.beginPath();
+        ctx.arc(joystick.baseX, joystick.baseY, 50, 0, Math.PI*2);
+        ctx.strokeStyle="white";
+        ctx.lineWidth=3;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(joystick.x, joystick.y, 25, 0, Math.PI*2);
+        ctx.fillStyle="white";
+        ctx.fill();
+    }
 }
 
 function drawPlayer(p){
@@ -371,8 +418,19 @@ canvas.addEventListener("mousemove",(e)=>{
 });
 
 canvas.addEventListener("touchmove",(e)=>{
-    if(mode==="single" && running){
-        movePlayerSingle(e.touches[0].clientX,e.touches[0].clientY);
+
+    if(!running) return;
+
+    const t = e.touches[0];
+
+    if(controlMode==="touch"){
+        if(mode==="single"){
+            movePlayerSingle(t.clientX,t.clientY);
+        }
+    }else{
+        joystick.active = true;
+        joystick.x = t.clientX;
+        joystick.y = t.clientY;
     }
 });
 </script>
