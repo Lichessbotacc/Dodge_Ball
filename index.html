@@ -274,76 +274,72 @@ function gameOver(){
 // ---------------- UPDATE ----------------
 function update(){
     if(!running) return;
-if(controlMode==="joystick" && joystick.active){
+
+    // --- TIMER ---
     document.getElementById("time").textContent =
         Math.floor((Date.now()-startTime)/1000);
 
-    // --- MOVEMENT ---
-    if(mode==="single"){
-        // Maus / Touch = player1
-    }
-
-    if(mode==="multi"){
-        // Player 1 WASD
-        if(keys["w"]) player1.y-=5;
-        if(keys["s"]) player1.y+=5;
-        if(keys["a"]) player1.x-=5;
-        if(keys["d"]) player1.x+=5;
-
-        // Player 2 Arrows
-        if(keys["arrowup"]) player2.y-=5;
-        if(keys["arrowdown"]) player2.y+=5;
-        if(keys["arrowleft"]) player2.x-=5;
-        if(keys["arrowright"]) player2.x+=5;
-    }
-// Spieler im Bildschirm halten
-player1.x = Math.max(player1.radius,
-    Math.min(canvas.width - player1.radius, player1.x));
-
-player1.y = Math.max(player1.radius,
-    Math.min(canvas.height - player1.radius, player1.y));
-
-player2.x = Math.max(player2.radius,
-    Math.min(canvas.width - player2.radius, player2.x));
-
-player2.y = Math.max(player2.radius,
-    Math.min(canvas.height - player2.radius, player2.y));
-    // --- BOUNCE BALLS ---
-    for(const ball of balls){
-        ball.x+=ball.vx;
-        ball.y+=ball.vy;
-
-        if(ball.x-ball.radius<0||ball.x+ball.radius>canvas.width)
-            ball.vx*=-1;
-
-        if(ball.y-ball.radius<0||ball.y+ball.radius>canvas.height)
-            ball.vy*=-1;
-    }
-
-    // --- COLLISION ---
-    check(player1);
-
-    if(mode==="multi") check(player2);
-}
-    
+    // --- JOYSTICK MOVEMENT (global) ---
+    if(controlMode==="joystick" && joystick.active){
 
         const dx = joystick.x - joystick.baseX;
         const dy = joystick.y - joystick.baseY;
 
         const speed = 0.08;
 
-        // Singleplayer
         if(mode==="single"){
             player1.x += dx * speed;
             player1.y += dy * speed;
         }
 
-        // Multiplayer optional beide bewegen
         if(mode==="multi"){
             player1.x += dx * speed;
             player2.x += dx * speed;
         }
     }
+
+    // --- KEYBOARD MOVEMENT (MULTI ONLY) ---
+    if(mode==="multi"){
+        if(keys["w"]) player1.y -= 5;
+        if(keys["s"]) player1.y += 5;
+        if(keys["a"]) player1.x -= 5;
+        if(keys["d"]) player1.x += 5;
+
+        if(keys["arrowup"]) player2.y -= 5;
+        if(keys["arrowdown"]) player2.y += 5;
+        if(keys["arrowleft"]) player2.x -= 5;
+        if(keys["arrowright"]) player2.x += 5;
+    }
+
+    // --- PLAYER BOUNDARIES ---
+    player1.x = Math.max(player1.radius,
+        Math.min(canvas.width - player1.radius, player1.x));
+
+    player1.y = Math.max(player1.radius,
+        Math.min(canvas.height - player1.radius, player1.y));
+
+    player2.x = Math.max(player2.radius,
+        Math.min(canvas.width - player2.radius, player2.x));
+
+    player2.y = Math.max(player2.radius,
+        Math.min(canvas.height - player2.radius, player2.y));
+
+    // --- BALL MOVEMENT ---
+    for(const ball of balls){
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+
+        if(ball.x - ball.radius < 0 || ball.x + ball.radius > canvas.width)
+            ball.vx *= -1;
+
+        if(ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height)
+            ball.vy *= -1;
+    }
+
+    // --- COLLISION ---
+    check(player1);
+    if(mode==="multi") check(player2);
+}
 
 // ---------------- COLLISION ----------------
 function check(p){
