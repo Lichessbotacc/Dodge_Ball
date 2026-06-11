@@ -12,7 +12,27 @@ canvas{display:block;touch-action:none;}
 
 #ui{
     position:absolute;top:20px;left:20px;color:white;
-    font-size:18px;font-weight:bold;
+    font-size:20px;font-weight:bold;
+}
+
+#menu{
+    position:absolute;inset:0;display:flex;
+    flex-direction:column;justify-content:center;
+    align-items:center;background:#111;color:white;
+}
+
+h1{font-size:50px;margin-bottom:20px;}
+
+button{
+    padding:15px 35px;font-size:22px;
+    border:none;border-radius:12px;cursor:pointer;
+    margin:10px;
+}
+
+#gameOver{
+    position:absolute;inset:0;background:rgba(0,0,0,0.8);
+    display:none;flex-direction:column;
+    justify-content:center;align-items:center;color:white;
 }
 </style>
 </head>
@@ -20,7 +40,64 @@ canvas{display:block;touch-action:none;}
 <body>
 
 <div id="ui">
-Zeit: <span id="time">0</span>s
+    Zeit: <span id="time">0</span>s<br>
+    Rekord: <span id="record">0</span>s<br>
+    Bälle: <span id="balls">0</span><br>
+    Modus: <span id="mode">-</span>
+</div>
+
+<div id="menu">
+    <h1>Finger Dodge</h1>
+    <button onclick="startGame('single')">Singleplayer</button>
+    <button onclick="startGame('multi')">Multiplayer (lokal)</button>
+    <button onclick="openSettings()">Settings</button>
+    <button onclick="resetRecord()">Rekord zurücksetzen</button>
+</div>
+<div id="settings" style="
+display:none;
+position:absolute;
+inset:0;
+background:#111;
+color:white;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+">
+
+<h2>Settings</h2>
+
+<label>Start-Bälle</label>
+<input id="startBalls" type="number" value="3" min="1" max="20">
+
+<br><br>
+
+<label>Spawn-Zeit</label>
+<input id="spawnTime" type="number" value="5" min="1" max="30">
+
+<br><br>
+
+<label>Ball-Speed</label>
+<select id="ballSpeed">
+<option value="0.5">Langsam</option>
+<option value="1" selected>Normal</option>
+<option value="1.5">Schnell</option>
+<option value="2">Extrem</option>
+</select>
+
+<br><br>
+
+<label>Spielergröße</label>
+<input id="playerSize" type="number" value="18" min="5" max="50">
+
+<br><br>
+
+<button onclick="saveSettings()">Speichern</button>
+
+</div>
+<div id="gameOver">
+    <h2>GAME OVER</h2>
+    <p>Überlebt: <span id="finalTime">0</span>s</p>
+    <button onclick="restartGame()">Nochmal</button>
 </div>
 
 <canvas id="game"></canvas>
@@ -32,77 +109,221 @@ const ctx = canvas.getContext("2d");
 function resize(){
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-
-    joystick1.baseX = 120;
-    joystick1.baseY = canvas.height - 120;
-
-    joystick2.baseX = canvas.width - 120;
-    joystick2.baseY = canvas.height - 120;
 }
+resize();
 window.addEventListener("resize", resize);
 
-// ---------------- JOYSTICKS ----------------
-const joystick1 = {
-    active:false,
-    x:0, y:0,
-    baseX:120, baseY:0
-};
-
-const joystick2 = {
-    active:false,
-    x:0, y:0,
-    baseX:0, baseY:0
-};
+// ---------------- GAME STATE ----------------
+let balls = [];
+let running = false;
+let startTime = 0;
+let spawnTimer = null;
+let mode = "single";
+let startBallCount = 3;
+let spawnDelay = 5000;
+let ballSpeedMultiplier = 1;
+let playerRadiusSetting = 18;
+// ---------------- RECORD ----------------
+let record = localStorage.getItem("fingerDodgeRecord") || 0;
+document.getElementById("record").textContent = record;
 
 // ---------------- PLAYERS ----------------
-const player1 = {x:200,y:200,r:18,color:"#00ff88"};
-const player2 = {x:400,y:200,r:18,color:"#4488ff"};
+const player1 = {
+    x: 200, y: 200, radius: 18, color:"#00ff88"
+};
 
-// ---------------- BALLS ----------------
-let balls = [];
+const player2 = {
+    x: 400, y: 200, radius: 18, color:"#4488ff"
+};
 
-function createBall(){
-    balls.push({
-        x: Math.random()*canvas.width,
-        y: Math.random()*canvas.height,
-        r: 15,
-        vx:(Math.random()*4-2),
-        vy:(Math.random()*4-2)
-    });
+// ---------------- INPUT ----------------
+const keys = {};
+
+document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
+document.addEventListener("keyup",(e)=>keys[e.key.toLowerCase()]=false);
+
+function openSettings(){
+    document.getElementById("menu").style.display="none";
+    document.getElementById("settings").style.display="flex";
 }
 
-// ---------------- GAME ----------------
-let running = true;
+function saveSettings(){
 
-// ---------------- JOYSTICK MOVEMENT ----------------
-function applyJoystick(j, p){
-    if(!j.active) return;
+    startBallCount =
+        Number(document.getElementById("startBalls").value);
 
-    let dx = j.x - j.baseX;
-    let dy = j.y - j.baseY;
+    spawnDelay =
+        Number(document.getElementById("spawnTime").value) * 1000;
 
-    let dist = Math.sqrt(dx*dx + dy*dy);
-    if(dist < 10) return;
+    ballSpeedMultiplier =
+        Number(document.getElementById("ballSpeed").value);
 
-    let speed = 0.15;
+    playerRadiusSetting =
+        Number(document.getElementById("playerSize").value);
 
-    p.x += dx * speed;
-    p.y += dy * speed;
+    document.getElementById("settings").style.display="none";
+    document.getElementById("menu").style.display="flex";
+}
+// ---------------- BALLS ----------------
+function createBall(){
+    const radius = 15 + Math.random()*20;
+    let x,y;
+
+    const safeDistance = 120;
+    let valid=false;
+
+    while(!valid){
+        x = radius + Math.random()*(canvas.width-2*radius);
+        y = radius + Math.random()*(canvas.height-2*radius);
+
+        const dx = player1.x-x;
+        const dy = player1.y-y;
+
+        valid = Math.sqrt(dx*dx+dy*dy) > safeDistance;
+    }
+
+    balls.push({
+        x,y,radius,
+        vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
+        vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
+    });
+
+    document.getElementById("balls").textContent = balls.length;
+}
+
+// ---------------- START ----------------
+function startGame(selectedMode){
+    mode = selectedMode;
+    document.getElementById("mode").textContent = mode;
+
+    document.getElementById("menu").style.display="none";
+    document.getElementById("gameOver").style.display="none";
+
+    balls = [];
+
+   player1.x = 200;
+   player1.y = 200;
+   player1.radius = playerRadiusSetting;
+
+   player2.x = 400;
+   player2.y = 200;
+   player2.radius = playerRadiusSetting;
+
+    running = true;
+    startTime = Date.now();
+
+    for(let i=0;i<startBallCount;i++) createBall();
+
+    spawnLoop();
+}
+
+// ---------------- SPAWN ----------------
+function spawnLoop(){
+    if(!running) return;
+    spawnTimer=setTimeout(()=>{
+        if(running){
+            createBall();
+            spawnLoop();
+        }
+    },spawnDelay);
+}
+
+// ---------------- RESTART ----------------
+function restartGame(){
+    if(spawnTimer) clearTimeout(spawnTimer);
+    startGame(mode);
+}
+
+// ---------------- RECORD ----------------
+function resetRecord(){
+    if(confirm("Rekord löschen?")){
+        record=0;
+        localStorage.setItem("fingerDodgeRecord",0);
+        document.getElementById("record").textContent=0;
+    }
+}
+
+// ---------------- GAME OVER ----------------
+function gameOver(){
+    running=false;
+
+    const survived=Math.floor((Date.now()-startTime)/1000);
+
+    if(survived>record){
+        record=survived;
+        localStorage.setItem("fingerDodgeRecord",record);
+        document.getElementById("record").textContent=record;
+    }
+
+    document.getElementById("finalTime").textContent=survived;
+    document.getElementById("gameOver").style.display="flex";
 }
 
 // ---------------- UPDATE ----------------
 function update(){
+    if(!running) return;
 
-    applyJoystick(joystick1, player1);
-    applyJoystick(joystick2, player2);
+    document.getElementById("time").textContent =
+        Math.floor((Date.now()-startTime)/1000);
 
-    // balls move
-    for(let b of balls){
-        b.x += b.vx;
-        b.y += b.vy;
+    // --- MOVEMENT ---
+    if(mode==="single"){
+        // Maus / Touch = player1
+    }
 
-        if(b.x < 0 || b.x > canvas.width) b.vx *= -1;
-        if(b.y < 0 || b.y > canvas.height) b.vy *= -1;
+    if(mode==="multi"){
+        // Player 1 WASD
+        if(keys["w"]) player1.y-=5;
+        if(keys["s"]) player1.y+=5;
+        if(keys["a"]) player1.x-=5;
+        if(keys["d"]) player1.x+=5;
+
+        // Player 2 Arrows
+        if(keys["arrowup"]) player2.y-=5;
+        if(keys["arrowdown"]) player2.y+=5;
+        if(keys["arrowleft"]) player2.x-=5;
+        if(keys["arrowright"]) player2.x+=5;
+    }
+// Spieler im Bildschirm halten
+player1.x = Math.max(player1.radius,
+    Math.min(canvas.width - player1.radius, player1.x));
+
+player1.y = Math.max(player1.radius,
+    Math.min(canvas.height - player1.radius, player1.y));
+
+player2.x = Math.max(player2.radius,
+    Math.min(canvas.width - player2.radius, player2.x));
+
+player2.y = Math.max(player2.radius,
+    Math.min(canvas.height - player2.radius, player2.y));
+    // --- BOUNCE BALLS ---
+    for(const ball of balls){
+        ball.x+=ball.vx;
+        ball.y+=ball.vy;
+
+        if(ball.x-ball.radius<0||ball.x+ball.radius>canvas.width)
+            ball.vx*=-1;
+
+        if(ball.y-ball.radius<0||ball.y+ball.radius>canvas.height)
+            ball.vy*=-1;
+    }
+
+    // --- COLLISION ---
+    check(player1);
+
+    if(mode==="multi") check(player2);
+}
+
+// ---------------- COLLISION ----------------
+function check(p){
+    for(const b of balls){
+        const dx=p.x-b.x;
+        const dy=p.y-b.y;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+
+        if(dist<p.radius+b.radius){
+            gameOver();
+        }
     }
 }
 
@@ -110,40 +331,22 @@ function update(){
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    // balls
-    for(let b of balls){
+    for(const b of balls){
         ctx.beginPath();
-        ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
-        ctx.fillStyle="red";
+        ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+        ctx.fillStyle="#ff4444";
         ctx.fill();
     }
 
     drawPlayer(player1);
-    drawPlayer(player2);
 
-    drawJoystick(joystick1);
-    drawJoystick(joystick2);
+    if(mode==="multi") drawPlayer(player2);
 }
 
 function drawPlayer(p){
     ctx.beginPath();
-    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
     ctx.fillStyle=p.color;
-    ctx.fill();
-}
-
-function drawJoystick(j){
-    if(!j.active) return;
-
-    ctx.beginPath();
-    ctx.arc(j.baseX,j.baseY,50,0,Math.PI*2);
-    ctx.strokeStyle="white";
-    ctx.lineWidth=2;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(j.x,j.y,25,0,Math.PI*2);
-    ctx.fillStyle="white";
     ctx.fill();
 }
 
@@ -153,46 +356,25 @@ function loop(){
     draw();
     requestAnimationFrame(loop);
 }
+loop();
 
-// ---------------- TOUCH CONTROLS ----------------
-let touches = {};
+// ---------------- CONTROLS SINGLEPLAYER ----------------
+function movePlayerSingle(x,y){
+    player1.x=Math.max(player1.radius,Math.min(canvas.width-player1.radius,x));
+    player1.y=Math.max(player1.radius,Math.min(canvas.height-player1.radius,y));
+}
+
+canvas.addEventListener("mousemove",(e)=>{
+    if(mode==="single" && running){
+        movePlayerSingle(e.clientX,e.clientY);
+    }
+});
 
 canvas.addEventListener("touchmove",(e)=>{
-
-    for(let t of e.touches){
-        touches[t.identifier] = t;
-
-        if(t.clientX < canvas.width/2){
-            joystick1.active = true;
-            joystick1.x = t.clientX;
-            joystick1.y = t.clientY;
-        } else {
-            joystick2.active = true;
-            joystick2.x = t.clientX;
-            joystick2.y = t.clientY;
-        }
+    if(mode==="single" && running){
+        movePlayerSingle(e.touches[0].clientX,e.touches[0].clientY);
     }
 });
-
-canvas.addEventListener("touchend",(e)=>{
-
-    for(let t of e.changedTouches){
-        delete touches[t.identifier];
-    }
-
-    if(Object.keys(touches).length === 0){
-        joystick1.active = false;
-        joystick2.active = false;
-    }
-});
-
-// ---------------- START ----------------
-resize();
-createBall();
-createBall();
-createBall();
-
-loop();
 </script>
 
 </body>
