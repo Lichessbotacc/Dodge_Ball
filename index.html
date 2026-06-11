@@ -106,6 +106,14 @@ align-items:center;
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+let joystick = {
+    active:false,
+    baseX:120,
+    baseY:120,
+    x:120,
+    y:120
+};
+    
 function resize(){
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -130,13 +138,7 @@ let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let controlMode = "touch"; // "touch" oder "joystick"
 
-let joystick = {
-    active:false,
-    baseX:120,
-    baseY:120,
-    x:120,
-    y:120
-};
+
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -184,20 +186,21 @@ function createBall(){
     let x,y;
 
     const safeDistance = 120;
-    let valid=false;
+    let valid = false;
 
     while(!valid){
         x = radius + Math.random()*(canvas.width-2*radius);
         y = radius + Math.random()*(canvas.height-2*radius);
 
-        const dx1 = player1.x-x;
-        const dx2 = player2.x-x;
+        const dx1 = player1.x - x;
+        const dy1 = player1.y - y;
+
+        const dx2 = player2.x - x;
+        const dy2 = player2.y - y;
 
         valid =
-            Math.sqrt(dx1*dx1 + dy*dy) > safeDistance &&
-            Math.sqrt(dx2*dx2 + dy*dy) > safeDistance;
-
-        valid = Math.sqrt(dx*dx+dy*dy) > safeDistance;
+            Math.sqrt(dx1*dx1 + dy1*dy1) > safeDistance &&
+            Math.sqrt(dx2*dx2 + dy2*dy2) > safeDistance;
     }
 
     balls.push({
