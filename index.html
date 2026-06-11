@@ -190,8 +190,12 @@ function createBall(){
         x = radius + Math.random()*(canvas.width-2*radius);
         y = radius + Math.random()*(canvas.height-2*radius);
 
-        const dx = player1.x-x;
-        const dy = player1.y-y;
+        const dx1 = player1.x-x;
+        const dx2 = player2.x-x;
+
+        valid =
+            Math.sqrt(dx1*dx1 + dy*dy) > safeDistance &&
+            Math.sqrt(dx2*dx2 + dy*dy) > safeDistance;
 
         valid = Math.sqrt(dx*dx+dy*dy) > safeDistance;
     }
