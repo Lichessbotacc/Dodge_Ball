@@ -50,9 +50,50 @@ button{
     <h1>Finger Dodge</h1>
     <button onclick="startGame('single')">Singleplayer</button>
     <button onclick="startGame('multi')">Multiplayer (lokal)</button>
+    <button onclick="openSettings()">Settings</button>
     <button onclick="resetRecord()">Rekord zurücksetzen</button>
 </div>
+<div id="settings" style="
+display:none;
+position:absolute;
+inset:0;
+background:#111;
+color:white;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+">
 
+<h2>Settings</h2>
+
+<label>Start-Bälle</label>
+<input id="startBalls" type="number" value="3" min="1" max="20">
+
+<br><br>
+
+<label>Spawn-Zeit</label>
+<input id="spawnTime" type="number" value="5" min="1" max="30">
+
+<br><br>
+
+<label>Ball-Speed</label>
+<select id="ballSpeed">
+<option value="0.5">Langsam</option>
+<option value="1" selected>Normal</option>
+<option value="1.5">Schnell</option>
+<option value="2">Extrem</option>
+</select>
+
+<br><br>
+
+<label>Spielergröße</label>
+<input id="playerSize" type="number" value="18" min="5" max="50">
+
+<br><br>
+
+<button onclick="saveSettings()">Speichern</button>
+
+</div>
 <div id="gameOver">
     <h2>GAME OVER</h2>
     <p>Überlebt: <span id="finalTime">0</span>s</p>
@@ -78,7 +119,10 @@ let running = false;
 let startTime = 0;
 let spawnTimer = null;
 let mode = "single";
-
+let startBallCount = 3;
+let spawnDelay = 5000;
+let ballSpeedMultiplier = 1;
+let playerRadiusSetting = 18;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -98,6 +142,28 @@ const keys = {};
 document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
 document.addEventListener("keyup",(e)=>keys[e.key.toLowerCase()]=false);
 
+function openSettings(){
+    document.getElementById("menu").style.display="none";
+    document.getElementById("settings").style.display="flex";
+}
+
+function saveSettings(){
+
+    startBallCount =
+        Number(document.getElementById("startBalls").value);
+
+    spawnDelay =
+        Number(document.getElementById("spawnTime").value) * 1000;
+
+    ballSpeedMultiplier =
+        Number(document.getElementById("ballSpeed").value);
+
+    playerRadiusSetting =
+        Number(document.getElementById("playerSize").value);
+
+    document.getElementById("settings").style.display="none";
+    document.getElementById("menu").style.display="flex";
+}
 // ---------------- BALLS ----------------
 function createBall(){
     const radius = 15 + Math.random()*20;
@@ -118,8 +184,8 @@ function createBall(){
 
     balls.push({
         x,y,radius,
-        vx:(Math.random()*4+2)*(Math.random()<0.5?-1:1),
-        vy:(Math.random()*4+2)*(Math.random()<0.5?-1:1)
+        vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
+        vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
     });
 
     document.getElementById("balls").textContent = balls.length;
@@ -135,13 +201,18 @@ function startGame(selectedMode){
 
     balls = [];
 
-    player1.x = 200; player1.y = 200;
-    player2.x = 400; player2.y = 200;
+   player1.x = 200;
+   player1.y = 200;
+   player1.radius = playerRadiusSetting;
+
+   player2.x = 400;
+   player2.y = 200;
+   player2.radius = playerRadiusSetting;
 
     running = true;
     startTime = Date.now();
 
-    for(let i=0;i<3;i++) createBall();
+    for(let i=0;i<startBallCount;i++) createBall();
 
     spawnLoop();
 }
@@ -154,7 +225,7 @@ function spawnLoop(){
             createBall();
             spawnLoop();
         }
-    },5000);
+    },spawnDelay);
 }
 
 // ---------------- RESTART ----------------
