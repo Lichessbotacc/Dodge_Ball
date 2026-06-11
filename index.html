@@ -109,11 +109,12 @@ const ctx = canvas.getContext("2d");
 function resize(){
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+
+    joystick.baseX = 120;
+    joystick.baseY = canvas.height - 120;
+    joystick.x = joystick.baseX;
+    joystick.y = joystick.baseY;
 }
-joystick.baseY = canvas.height - 120;
-joystick.y = joystick.baseY;
-resize();
-window.addEventListener("resize", resize);
 
 // ---------------- GAME STATE ----------------
 let balls = [];
@@ -126,11 +127,7 @@ let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let controlMode = "touch"; // "touch" oder "joystick"
-canvas.addEventListener("touchend",()=>{
-    joystick.active = false;
-    joystick.x = joystick.baseX;
-    joystick.y = joystick.baseY;
-});
+
 let joystick = {
     active:false,
     baseX:120,
@@ -277,7 +274,7 @@ function gameOver(){
 // ---------------- UPDATE ----------------
 function update(){
     if(!running) return;
-
+if(controlMode==="joystick" && joystick.active){
     document.getElementById("time").textContent =
         Math.floor((Date.now()-startTime)/1000);
 
@@ -328,7 +325,7 @@ player2.y = Math.max(player2.radius,
 
     if(mode==="multi") check(player2);
 }
-    if(controlMode==="joystick" && joystick.active){
+    
 
         const dx = joystick.x - joystick.baseX;
         const dy = joystick.y - joystick.baseY;
@@ -432,6 +429,11 @@ canvas.addEventListener("touchmove",(e)=>{
         joystick.x = t.clientX;
         joystick.y = t.clientY;
     }
+});
+    canvas.addEventListener("touchend",()=>{
+    joystick.active = false;
+    joystick.x = joystick.baseX;
+    joystick.y = joystick.baseY;
 });
 </script>
 
