@@ -201,7 +201,7 @@ function updateAI(p){
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // ---------------- 3. VEKTOR: weg vom Ball ----------------
+    // ---------------- 3. Richtung weg vom Ball ----------------
     let avoidX = 0, avoidY = 0;
 
     if(closest){
@@ -213,7 +213,7 @@ function updateAI(p){
         avoidY /= len;
     }
 
-    // ---------------- 4. VEKTOR: zur Mitte (STARK!) ----------------
+    // ---------------- 4. Richtung zur Mitte ----------------
     let centerX = cx - p.x;
     let centerY = cy - p.y;
 
@@ -221,11 +221,34 @@ function updateAI(p){
     centerX /= centerLen;
     centerY /= centerLen;
 
-    // ---------------- 5. ANTI-ECKEN SYSTEM ----------------
+    // ---------------- 5. 🧠 SEPARATION (WICHTIG!) ----------------
+    let sepX = 0;
+    let sepY = 0;
+
+    for(const other of players){
+        if(other === p) continue;
+
+        const dx = p.x - other.x;
+        const dy = p.y - other.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        const safeDist = 60; // Abstand zwischen Bots
+
+        if(dist < safeDist && dist > 0){
+            sepX += dx / dist;
+            sepY += dy / dist;
+        }
+    }
+
+    const sepLen = Math.sqrt(sepX*sepX + sepY*sepY) || 1;
+    sepX /= sepLen;
+    sepY /= sepLen;
+
+    // ---------------- 6. Ecken vermeiden ----------------
     let cornerX = 0;
     let cornerY = 0;
 
-    const margin = 180;
+    const margin = 160;
 
     if(p.x < margin) cornerX += 1;
     if(p.x > canvas.width - margin) cornerX -= 1;
@@ -233,38 +256,38 @@ function updateAI(p){
     if(p.y > canvas.height - margin) cornerY -= 1;
 
     const cornerLen = Math.sqrt(cornerX*cornerX + cornerY*cornerY) || 1;
-    if(cornerLen > 0){
-        cornerX /= cornerLen;
-        cornerY /= cornerLen;
-    }
+    cornerX /= cornerLen;
+    cornerY /= cornerLen;
 
-    // ---------------- 6. GEWICHTUNG (DAS IST DIE INTELLIGENZ) ----------------
-    const avoidStrength = 5.0;     // Ball ist wichtig
-    const centerStrength = 3.2;    // Zentrum ist SEHR wichtig
-    const cornerStrength = 4.0;    // Ecken werden aktiv vermieden
+    // ---------------- 7. GEWICHTUNG ----------------
+    const avoidStrength = 5.0;
+    const centerStrength = 3.0;
+    const sepStrength = 6.0;     // <<< DAS FIXT DAS ÜBERLAPPEN
+    const cornerStrength = 4.0;
 
-    // ---------------- 7. Bewegung kombinieren ----------------
+    // ---------------- 8. kombinierte Bewegung ----------------
     let vx =
         avoidX * avoidStrength +
         centerX * centerStrength +
+        sepX * sepStrength +
         cornerX * cornerStrength;
 
     let vy =
         avoidY * avoidStrength +
         centerY * centerStrength +
+        sepY * sepStrength +
         cornerY * cornerStrength;
 
-    // ---------------- 8. glätten (kein Zittern) ----------------
-    const speed = 4.2;
-
+    // ---------------- 9. normalisieren + bewegen ----------------
+    const speed = 4.0;
     const len = Math.sqrt(vx*vx + vy*vy) || 1;
 
     p.x += (vx / len) * speed;
     p.y += (vy / len) * speed;
 
-    // ---------------- 9. leichte Unruhe ----------------
-    p.x += (Math.random() - 0.5) * 0.6;
-    p.y += (Math.random() - 0.5) * 0.6;
+    // ---------------- 10. leichte Zufälligkeit ----------------
+    p.x += (Math.random() - 0.5) * 0.5;
+    p.y += (Math.random() - 0.5) * 0.5;
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
