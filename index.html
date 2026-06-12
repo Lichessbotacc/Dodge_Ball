@@ -384,7 +384,7 @@ createPlayer(
 );
 }
 
-if(mode==="ai"){
+if(mode === "ai") {
 
 eliminated = [];
 
@@ -392,45 +392,34 @@ if(currentRound === 1){
 
 ranking = [];
 
-for(let i=0;i<aiBotCount;i++){
-
-const hue = (i * 360 / aiBotCount);
-
-for(let i=0;i<aiBotCount;i++){
+for(let i = 0; i < aiBotCount; i++){
 
 const bot = createBot(i);
-
 players.push(bot);
 ranking.push(bot);
 
 }
 
-}
+} else {
 
-}else{
+players = [];
 
 for(const oldBot of ranking){
 
-const bot = createPlayer(
-Math.random()*canvas.width,
-Math.random()*canvas.height,
-oldBot.color,
-oldBot.name
-);
+const bot = createBot(0);
+
+bot.x = Math.random()*canvas.width;
+bot.y = Math.random()*canvas.height;
+
+bot.name = oldBot.name;
+bot.color = oldBot.color;
 
 bot.points = oldBot.points;
 bot.elo = oldBot.elo;
 
 players.push(bot);
-
 }
-
 }
-
-}
-
-for(let i=0;i<startBallCount;i++) createBall();
-spawnLoop();
 }
 
 // ---------------- SPAWN ----------------
