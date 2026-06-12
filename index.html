@@ -338,14 +338,17 @@ targetY: 0
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
+
+// Reset Runde nur wenn NICHT AI-Continuing
 if(mode !== "ai"){
 currentRound = 1;
 }
+
 mode = selectedMode;
 document.getElementById("mode").textContent = mode;
 
-document.getElementById("menu").style.display="none";
-document.getElementById("gameOver").style.display="none";
+document.getElementById("menu").style.display = "none";
+document.getElementById("gameOver").style.display = "none";
 
 balls = [];
 players = [];
@@ -353,37 +356,28 @@ players = [];
 running = true;
 startTime = Date.now();
 
-if(mode==="single"){
+
+// ---------------- SINGLEPLAYER ----------------
+if(mode === "single"){
 players.push(
-createPlayer(
-300,
-300,
-"#00ff88",
-"Spieler"
-)
+createPlayer(300, 300, "#00ff88", "Spieler")
 );
 }
 
-if(mode==="multi"){
+
+// ---------------- MULTIPLAYER ----------------
+if(mode === "multi"){
 players.push(
-createPlayer(
-200,
-200,
-"#00ff88",
-"Spieler 1"
-)
+createPlayer(200, 200, "#00ff88", "Spieler 1")
 );
 
 players.push(
-createPlayer(
-400,
-200,
-"#4488ff",
-"Spieler 2"
-)
+createPlayer(400, 200, "#4488ff", "Spieler 2")
 );
 }
 
+
+// ---------------- AI MODE ----------------
 if(mode === "ai") {
 
 eliminated = [];
@@ -393,23 +387,22 @@ if(currentRound === 1){
 ranking = [];
 
 for(let i = 0; i < aiBotCount; i++){
-
-const bot = createBot(Math.floor(Math.random() * aiBotCount));
+const bot = createBot(i);
 players.push(bot);
 ranking.push(bot);
-
 }
 
 } else {
 
+// neue Runde mit alten Stats
 players = [];
 
 for(const oldBot of ranking){
 
 const bot = createBot(0);
 
-bot.x = Math.random()*canvas.width;
-bot.y = Math.random()*canvas.height;
+bot.x = Math.random() * canvas.width;
+bot.y = Math.random() * canvas.height;
 
 bot.name = oldBot.name;
 bot.color = oldBot.color;
@@ -419,14 +412,18 @@ bot.elo = oldBot.elo;
 
 players.push(bot);
 }
-
 }
+}
+
+
+// ---------------- STARTBÄLLE ----------------
 for(let i = 0; i < startBallCount; i++){
 createBall();
 }
 
+
+// ---------------- SPAWN STARTEN ----------------
 spawnLoop();
-}
 }
 // ---------------- SPAWN ----------------
 function spawnLoop(){
