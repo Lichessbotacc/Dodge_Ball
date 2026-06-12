@@ -88,7 +88,10 @@ Modus: <span id="mode">-</span>
 </select>
 
 <br><br>
+<label>AI Bots</label>
+<input id="botCount" type="number" value="10" min="2">
 
+<br><br>
 <label>Spielergröße</label>
 <input id="playerSize" type="number" value="18" min="5" max="50">
 
@@ -101,6 +104,17 @@ Modus: <span id="mode">-</span>
 <h2>GAME OVER</h2>
 <p>Überlebt: <span id="finalTime">0</span>s</p>
 <button onclick="restartGame()">Nochmal</button>
+<div id="ranking" style="
+position:absolute;
+top:20px;
+right:20px;
+color:white;
+font-size:18px;
+text-align:left;
+max-height:90vh;
+overflow:auto;
+">
+</div>
 </div>
 
 <canvas id="game"></canvas>
@@ -120,6 +134,8 @@ window.addEventListener("resize", resize);
 // ---------------- STATE ----------------
 let balls = [];
 let players = [];
+let ranking = [];
+let eliminated = [];
 let running = false;
 let startTime = 0;
 let spawnTimer = null;
@@ -129,14 +145,25 @@ let startBallCount = 3;
 let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
+let aiBotCount = 10;
 
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // ---------------- PLAYER FACTORY ----------------
-function createPlayer(x,y,color){
-return { x,y,radius:playerRadiusSetting,color };
+function createPlayer(x,y,color,name){
+
+return {
+x,
+y,
+radius:playerRadiusSetting,
+color,
+name,
+points:0,
+alive:true
+};
+
 }
 
 // ---------------- INPUT ----------------
@@ -155,23 +182,46 @@ startBallCount = Number(document.getElementById("startBalls").value);
 spawnDelay = Number(document.getElementById("spawnTime").value)*1000;
 ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
 playerRadiusSetting = Number(document.getElementById("playerSize").value);
-
+aiBotCount = Number(document.getElementById("botCount").value);
 document.getElementById("settings").style.display="none";
 document.getElementById("menu").style.display="flex";
 }
 
 // ---------------- BALLS ----------------
 function createBall(){
-const r = 15 + Math.random()*20;
-let x,y;
 
-do{
-x = Math.random()*(canvas.width-2*r)+r;
-y = Math.random()*(canvas.height-2*r)+r;
-}while(false);
+const r = 15 + Math.random()*20;
+
+let x,y;
+let valid = false;
+
+while(!valid){
+
+x = Math.random()*(canvas.width-r*2)+r;
+y = Math.random()*(canvas.height-r*2)+r;
+
+valid = true;
+
+for(const p of players){
+
+const dx = p.x-x;
+const dy = p.y-y;
+
+const dist = Math.sqrt(dx*dx+dy*dy);
+
+if(dist < 200){
+
+valid = false;
+break;
+
+}
+}
+
+}
 
 balls.push({
-x,y,radius:r,
+x,y,
+radius:r,
 vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
 vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
 });
@@ -303,10 +353,35 @@ players.push(createPlayer(400,200,"#4488ff"));
 }
 
 if(mode==="ai"){
-players.push(createPlayer(200,200,"#00ff88"));
-players.push(createPlayer(400,200,"#4488ff"));
-players.push(createPlayer(600,200,"#ffcc00"));
-players.push(createPlayer(800,200,"#ff44aa"));
+
+ranking = [];
+eliminated = [];
+
+const colors = [
+"#00ff88",
+"#4488ff",
+"#ffcc00",
+"#ff44aa",
+"#ff8844",
+"#44ffff",
+"#aa44ff",
+"#ffffff"
+];
+
+for(let i=0;i<aiBotCount;i++){
+
+const bot = createPlayer(
+Math.random()*canvas.width,
+Math.random()*canvas.height,
+colors[i%colors.length],
+"Bot " + (i+1)
+);
+
+players.push(bot);
+ranking.push(bot);
+
+}
+
 }
 
 for(let i=0;i<startBallCount;i++) createBall();
@@ -374,7 +449,7 @@ if(keys["arrowright"]) players[1].x+=5;
 }
 
 if(mode==="ai"){
-for(const p of players) updateAI(p);
+updateRanking();
 }
 
 // bounds
@@ -400,16 +475,91 @@ check(p);
 
 // ---------------- COLLISION ----------------
 function check(p){
+
+if(!p.alive) return;
+
 for(const b of balls){
+
 let dx=p.x-b.x;
 let dy=p.y-b.y;
+
 let d=Math.sqrt(dx*dx+dy*dy);
+
 if(d<p.radius+b.radius){
-gameOver();
-}
-}
+
+p.alive=false;
+
+if(mode==="ai"){
+
+eliminated.push(p);
+
+const alive =
+players.filter(x=>x.alive);
+
+if(alive.length<=1){
+
+if(alive.length===1){
+eliminated.push(alive[0]);
 }
 
+finishArena();
+}
+
+}else{
+
+gameOver();
+
+}
+
+break;
+
+}
+
+}
+
+}
+function finishArena(){
+
+eliminated.reverse();
+
+for(let i=0;i<eliminated.length;i++){
+
+eliminated[i].points +=
+eliminated.length-i-1;
+
+}
+
+updateRanking();
+
+setTimeout(()=>{
+restartGame();
+},3000);
+
+}
+
+function updateRanking(){
+
+const sorted =
+[...ranking]
+.sort((a,b)=>b.points-a.points);
+
+let html = "<b>Ranking</b><br>";
+
+for(let i=0;i<sorted.length;i++){
+
+html +=
+(i+1)+". "
++sorted[i].name
++" - "
++sorted[i].points
++" Punkte<br>";
+
+}
+
+document.getElementById("ranking").innerHTML =
+html;
+
+}
 // ---------------- DRAW ----------------
 function draw(){
 ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -422,10 +572,14 @@ ctx.fill();
 }
 
 for(const p of players){
+
+if(!p.alive) continue;
+
 ctx.beginPath();
 ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
 ctx.fillStyle=p.color;
 ctx.fill();
+
 }
 }
 
