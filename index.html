@@ -248,102 +248,112 @@ document.getElementById("balls").textContent = balls.length;
 // ---------------- AI ----------------
 function updateAI(p){
 
-    // ---------------- 1. Ziel speichern ----------------
-    if(!p.targetX || !p.targetY || Math.random() < 0.01){
+// Neues Ziel wählen
+if(
+!p.targetX ||
+!p.targetY ||
+Math.random() < 0.03
+){
 
-        // neues zufälliges Ziel im Feld
-        const margin = 80;
+p.targetX =
+Math.random() * canvas.width;
 
-        p.targetX = margin + Math.random() * (canvas.width - margin*2);
-        p.targetY = margin + Math.random() * (canvas.height - margin*2);
-    }
+p.targetY =
+Math.random() * canvas.height;
 
-    // ---------------- 2. Richtung zum Ziel ----------------
-    let moveX = p.targetX - p.x;
-    let moveY = p.targetY - p.y;
+}
 
-    const moveLen = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
-    moveX /= moveLen;
-    moveY /= moveLen;
+// Richtung zum Ziel
+let moveX = p.targetX - p.x;
+let moveY = p.targetY - p.y;
 
-    // ---------------- 3. Gefahr durch Bälle ----------------
-    let avoidX = 0;
-    let avoidY = 0;
+const moveDist =
+Math.sqrt(moveX*moveX + moveY*moveY) || 1;
 
-    for(const b of balls){
+moveX /= moveDist;
+moveY /= moveDist;
 
-        const dx = p.x - b.x;
-        const dy = p.y - b.y;
+// Ball-Gefahr
+let avoidX = 0;
+let avoidY = 0;
 
-        const dist = Math.sqrt(dx*dx + dy*dy);
+for(const b of balls){
 
-        const safeRadius = 120;
+const dx = p.x - b.x;
+const dy = p.y - b.y;
 
-        if(dist < safeRadius && dist > 0){
+const dist =
+Math.sqrt(dx*dx + dy*dy);
 
-            // stärker je näher der Ball ist
-            const strength = (safeRadius - dist) / safeRadius;
+const safeRadius = 150;
 
-            avoidX += (dx / dist) * strength;
-            avoidY += (dy / dist) * strength;
-        }
-    }
+if(dist < safeRadius && dist > 0){
 
-    const avoidLen = Math.sqrt(avoidX*avoidX + avoidY*avoidY) || 1;
-    avoidX /= avoidLen;
-    avoidY /= avoidLen;
+const strength =
+(safeRadius - dist) / safeRadius;
 
-    // ---------------- 4. leichte Separation ----------------
-    let sepX = 0, sepY = 0;
+avoidX +=
+(dx / dist) * strength;
 
-    for(const o of players){
-        if(o === p) continue;
+avoidY +=
+(dy / dist) * strength;
 
-        const dx = p.x - o.x;
-        const dy = p.y - o.y;
+}
 
-        const d = Math.sqrt(dx*dx + dy*dy);
+}
 
-        if(d < 70 && d > 0){
-            sepX += dx / d;
-            sepY += dy / d;
-        }
-    }
+// Bewegung kombinieren
+let vx =
+moveX * 7 +
+avoidX * 10;
 
-    const sepLen = Math.sqrt(sepX*sepX + sepY*sepY) || 1;
-    sepX /= sepLen;
-    sepY /= sepLen;
+let vy =
+moveY * 7 +
+avoidY * 10;
 
-    // ---------------- 5. Gewichtung ----------------
-    const moveStrength = 2.5;   // 🎯 randomness / wandering
-    const avoidStrength = 6.5;  // 💣 survival priority
-    const sepStrength = 4.5;    // 🤝 spacing
+// Niemals stehen bleiben
+if(
+Math.abs(vx) < 0.1 &&
+Math.abs(vy) < 0.1
+){
 
-    let vx =
-        moveX * moveStrength +
-        avoidX * avoidStrength +
-        sepX * sepStrength;
+vx =
+(Math.random()-0.5)*6;
 
-    let vy =
-        moveY * moveStrength +
-        avoidY * avoidStrength +
-        sepY * sepStrength;
+vy =
+(Math.random()-0.5)*6;
 
-    // ---------------- 6. Bewegung ----------------
-    const speed = 4.2;
+}
 
-    const len = Math.sqrt(vx*vx + vy*vy) || 1;
+const speed = 4.5;
 
-    p.x += (vx / len) * speed;
-    p.y += (vy / len) * speed;
+const len =
+Math.sqrt(vx*vx + vy*vy) || 1;
 
-    // ---------------- 7. leichte “Unruhe” ----------------
-    p.x += (Math.random() - 0.5) * 0.6;
-    p.y += (Math.random() - 0.5) * 0.6;
+p.x += (vx/len)*speed;
+p.y += (vy/len)*speed;
 
-    // ---------------- 8. im Feld halten ----------------
-    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
-    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+// Kleine Zufallsbewegung
+p.x += (Math.random()-0.5)*1.2;
+p.y += (Math.random()-0.5)*1.2;
+
+// Spielfeldgrenzen
+p.x = Math.max(
+p.radius,
+Math.min(
+canvas.width-p.radius,
+p.x
+)
+);
+
+p.y = Math.max(
+p.radius,
+Math.min(
+canvas.height-p.radius,
+p.y
+)
+);
+
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
