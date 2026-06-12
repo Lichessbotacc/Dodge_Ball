@@ -34,26 +34,8 @@ button{
     display:none;flex-direction:column;
     justify-content:center;align-items:center;color:white;
 }
-</style>
-</head>
 
-<body>
-
-<div id="ui">
-    Zeit: <span id="time">0</span>s<br>
-    Rekord: <span id="record">0</span>s<br>
-    Bälle: <span id="balls">0</span><br>
-    Modus: <span id="mode">-</span>
-</div>
-
-<div id="menu">
-    <h1>Finger Dodge</h1>
-    <button onclick="startGame('single')">Singleplayer</button>
-    <button onclick="startGame('multi')">Multiplayer (lokal)</button>
-    <button onclick="openSettings()">Settings</button>
-    <button onclick="resetRecord()">Rekord zurücksetzen</button>
-</div>
-<div id="settings" style="
+#settings{
 display:none;
 position:absolute;
 inset:0;
@@ -62,8 +44,29 @@ color:white;
 flex-direction:column;
 justify-content:center;
 align-items:center;
-">
+}
+</style>
+</head>
 
+<body>
+
+<div id="ui">
+Zeit: <span id="time">0</span>s<br>
+Rekord: <span id="record">0</span>s<br>
+Bälle: <span id="balls">0</span><br>
+Modus: <span id="mode">-</span>
+</div>
+
+<div id="menu">
+<h1>Finger Dodge</h1>
+<button onclick="startGame('single')">Singleplayer</button>
+<button onclick="startGame('multi')">Multiplayer (lokal)</button>
+<button onclick="startGame('ai')">AI Spectate</button>
+<button onclick="openSettings()">Settings</button>
+<button onclick="resetRecord()">Rekord zurücksetzen</button>
+</div>
+
+<div id="settings">
 <h2>Settings</h2>
 
 <label>Start-Bälle</label>
@@ -92,290 +95,363 @@ align-items:center;
 <br><br>
 
 <button onclick="saveSettings()">Speichern</button>
-
 </div>
+
 <div id="gameOver">
-    <h2>GAME OVER</h2>
-    <p>Überlebt: <span id="finalTime">0</span>s</p>
-    <button onclick="restartGame()">Nochmal</button>
+<h2>GAME OVER</h2>
+<p>Überlebt: <span id="finalTime">0</span>s</p>
+<button onclick="restartGame()">Nochmal</button>
 </div>
 
 <canvas id="game"></canvas>
 
 <script>
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 function resize(){
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 }
 resize();
 window.addEventListener("resize", resize);
 
-// ---------------- GAME STATE ----------------
+// ---------------- STATE ----------------
 let balls = [];
+let players = [];
 let running = false;
 let startTime = 0;
 let spawnTimer = null;
 let mode = "single";
+
 let startBallCount = 3;
 let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
+
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
-// ---------------- PLAYERS ----------------
-const player1 = {
-    x: 200, y: 200, radius: 18, color:"#00ff88"
-};
-
-const player2 = {
-    x: 400, y: 200, radius: 18, color:"#4488ff"
-};
+// ---------------- PLAYER FACTORY ----------------
+function createPlayer(x,y,color){
+return { x,y,radius:playerRadiusSetting,color };
+}
 
 // ---------------- INPUT ----------------
 const keys = {};
-
 document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
 document.addEventListener("keyup",(e)=>keys[e.key.toLowerCase()]=false);
 
+// ---------------- UI ----------------
 function openSettings(){
-    document.getElementById("menu").style.display="none";
-    document.getElementById("settings").style.display="flex";
+document.getElementById("menu").style.display="none";
+document.getElementById("settings").style.display="flex";
 }
 
 function saveSettings(){
+startBallCount = Number(document.getElementById("startBalls").value);
+spawnDelay = Number(document.getElementById("spawnTime").value)*1000;
+ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
+playerRadiusSetting = Number(document.getElementById("playerSize").value);
 
-    startBallCount =
-        Number(document.getElementById("startBalls").value);
-
-    spawnDelay =
-        Number(document.getElementById("spawnTime").value) * 1000;
-
-    ballSpeedMultiplier =
-        Number(document.getElementById("ballSpeed").value);
-
-    playerRadiusSetting =
-        Number(document.getElementById("playerSize").value);
-
-    document.getElementById("settings").style.display="none";
-    document.getElementById("menu").style.display="flex";
+document.getElementById("settings").style.display="none";
+document.getElementById("menu").style.display="flex";
 }
+
 // ---------------- BALLS ----------------
 function createBall(){
-    const radius = 15 + Math.random()*20;
-    let x,y;
+const r = 15 + Math.random()*20;
+let x,y;
 
-    const safeDistance = 120;
-    let valid=false;
+do{
+x = Math.random()*(canvas.width-2*r)+r;
+y = Math.random()*(canvas.height-2*r)+r;
+}while(false);
 
-    while(!valid){
-        x = radius + Math.random()*(canvas.width-2*radius);
-        y = radius + Math.random()*(canvas.height-2*radius);
+balls.push({
+x,y,radius:r,
+vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
+vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
+});
 
-        const dx = player1.x-x;
-        const dy = player1.y-y;
-
-        valid = Math.sqrt(dx*dx+dy*dy) > safeDistance;
-    }
-
-    balls.push({
-        x,y,radius,
-        vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
-        vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
-    });
-
-    document.getElementById("balls").textContent = balls.length;
+document.getElementById("balls").textContent = balls.length;
 }
 
+// ---------------- AI ----------------
+function updateAI(p){
+
+    // ---------------- 1. Ziel speichern ----------------
+    if(!p.targetX || !p.targetY || Math.random() < 0.01){
+
+        // neues zufälliges Ziel im Feld
+        const margin = 80;
+
+        p.targetX = margin + Math.random() * (canvas.width - margin*2);
+        p.targetY = margin + Math.random() * (canvas.height - margin*2);
+    }
+
+    // ---------------- 2. Richtung zum Ziel ----------------
+    let moveX = p.targetX - p.x;
+    let moveY = p.targetY - p.y;
+
+    const moveLen = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+    moveX /= moveLen;
+    moveY /= moveLen;
+
+    // ---------------- 3. Gefahr durch Bälle ----------------
+    let avoidX = 0;
+    let avoidY = 0;
+
+    for(const b of balls){
+
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
+
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        const safeRadius = 120;
+
+        if(dist < safeRadius && dist > 0){
+
+            // stärker je näher der Ball ist
+            const strength = (safeRadius - dist) / safeRadius;
+
+            avoidX += (dx / dist) * strength;
+            avoidY += (dy / dist) * strength;
+        }
+    }
+
+    const avoidLen = Math.sqrt(avoidX*avoidX + avoidY*avoidY) || 1;
+    avoidX /= avoidLen;
+    avoidY /= avoidLen;
+
+    // ---------------- 4. leichte Separation ----------------
+    let sepX = 0, sepY = 0;
+
+    for(const o of players){
+        if(o === p) continue;
+
+        const dx = p.x - o.x;
+        const dy = p.y - o.y;
+
+        const d = Math.sqrt(dx*dx + dy*dy);
+
+        if(d < 70 && d > 0){
+            sepX += dx / d;
+            sepY += dy / d;
+        }
+    }
+
+    const sepLen = Math.sqrt(sepX*sepX + sepY*sepY) || 1;
+    sepX /= sepLen;
+    sepY /= sepLen;
+
+    // ---------------- 5. Gewichtung ----------------
+    const moveStrength = 2.5;   // 🎯 randomness / wandering
+    const avoidStrength = 6.5;  // 💣 survival priority
+    const sepStrength = 4.5;    // 🤝 spacing
+
+    let vx =
+        moveX * moveStrength +
+        avoidX * avoidStrength +
+        sepX * sepStrength;
+
+    let vy =
+        moveY * moveStrength +
+        avoidY * avoidStrength +
+        sepY * sepStrength;
+
+    // ---------------- 6. Bewegung ----------------
+    const speed = 4.2;
+
+    const len = Math.sqrt(vx*vx + vy*vy) || 1;
+
+    p.x += (vx / len) * speed;
+    p.y += (vy / len) * speed;
+
+    // ---------------- 7. leichte “Unruhe” ----------------
+    p.x += (Math.random() - 0.5) * 0.6;
+    p.y += (Math.random() - 0.5) * 0.6;
+
+    // ---------------- 8. im Feld halten ----------------
+    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+}
 // ---------------- START ----------------
 function startGame(selectedMode){
-    mode = selectedMode;
-    document.getElementById("mode").textContent = mode;
+mode = selectedMode;
+document.getElementById("mode").textContent = mode;
 
-    document.getElementById("menu").style.display="none";
-    document.getElementById("gameOver").style.display="none";
+document.getElementById("menu").style.display="none";
+document.getElementById("gameOver").style.display="none";
 
-    balls = [];
+balls = [];
+players = [];
 
-   player1.x = 200;
-   player1.y = 200;
-   player1.radius = playerRadiusSetting;
+running = true;
+startTime = Date.now();
 
-   player2.x = 400;
-   player2.y = 200;
-   player2.radius = playerRadiusSetting;
+if(mode==="single"){
+players.push(createPlayer(300,300,"#00ff88"));
+}
 
-    running = true;
-    startTime = Date.now();
+if(mode==="multi"){
+players.push(createPlayer(200,200,"#00ff88"));
+players.push(createPlayer(400,200,"#4488ff"));
+}
 
-    for(let i=0;i<startBallCount;i++) createBall();
+if(mode==="ai"){
+players.push(createPlayer(200,200,"#00ff88"));
+players.push(createPlayer(400,200,"#4488ff"));
+players.push(createPlayer(600,200,"#ffcc00"));
+players.push(createPlayer(800,200,"#ff44aa"));
+}
 
-    spawnLoop();
+for(let i=0;i<startBallCount;i++) createBall();
+spawnLoop();
 }
 
 // ---------------- SPAWN ----------------
 function spawnLoop(){
-    if(!running) return;
-    spawnTimer=setTimeout(()=>{
-        if(running){
-            createBall();
-            spawnLoop();
-        }
-    },spawnDelay);
+if(!running) return;
+spawnTimer=setTimeout(()=>{
+createBall();
+spawnLoop();
+},spawnDelay);
 }
 
 // ---------------- RESTART ----------------
 function restartGame(){
-    if(spawnTimer) clearTimeout(spawnTimer);
-    startGame(mode);
+if(spawnTimer) clearTimeout(spawnTimer);
+startGame(mode);
 }
 
 // ---------------- RECORD ----------------
 function resetRecord(){
-    if(confirm("Rekord löschen?")){
-        record=0;
-        localStorage.setItem("fingerDodgeRecord",0);
-        document.getElementById("record").textContent=0;
-    }
+if(confirm("Rekord löschen?")){
+record=0;
+localStorage.setItem("fingerDodgeRecord",0);
+document.getElementById("record").textContent=0;
+}
 }
 
 // ---------------- GAME OVER ----------------
 function gameOver(){
-    running=false;
+running=false;
 
-    const survived=Math.floor((Date.now()-startTime)/1000);
+let survived=Math.floor((Date.now()-startTime)/1000);
 
-    if(survived>record){
-        record=survived;
-        localStorage.setItem("fingerDodgeRecord",record);
-        document.getElementById("record").textContent=record;
-    }
+if(survived>record){
+record=survived;
+localStorage.setItem("fingerDodgeRecord",record);
+document.getElementById("record").textContent=record;
+}
 
-    document.getElementById("finalTime").textContent=survived;
-    document.getElementById("gameOver").style.display="flex";
+document.getElementById("finalTime").textContent=survived;
+document.getElementById("gameOver").style.display="flex";
 }
 
 // ---------------- UPDATE ----------------
 function update(){
-    if(!running) return;
+if(!running) return;
 
-    document.getElementById("time").textContent =
-        Math.floor((Date.now()-startTime)/1000);
+document.getElementById("time").textContent =
+Math.floor((Date.now()-startTime)/1000);
 
-    // --- MOVEMENT ---
-    if(mode==="single"){
-        // Maus / Touch = player1
-    }
+// MOVEMENT
+if(mode==="multi"){
+if(keys["w"]) players[0].y-=5;
+if(keys["s"]) players[0].y+=5;
+if(keys["a"]) players[0].x-=5;
+if(keys["d"]) players[0].x+=5;
 
-    if(mode==="multi"){
-        // Player 1 WASD
-        if(keys["w"]) player1.y-=5;
-        if(keys["s"]) player1.y+=5;
-        if(keys["a"]) player1.x-=5;
-        if(keys["d"]) player1.x+=5;
+if(keys["arrowup"]) players[1].y-=5;
+if(keys["arrowdown"]) players[1].y+=5;
+if(keys["arrowleft"]) players[1].x-=5;
+if(keys["arrowright"]) players[1].x+=5;
+}
 
-        // Player 2 Arrows
-        if(keys["arrowup"]) player2.y-=5;
-        if(keys["arrowdown"]) player2.y+=5;
-        if(keys["arrowleft"]) player2.x-=5;
-        if(keys["arrowright"]) player2.x+=5;
-    }
-// Spieler im Bildschirm halten
-player1.x = Math.max(player1.radius,
-    Math.min(canvas.width - player1.radius, player1.x));
+if(mode==="ai"){
+for(const p of players) updateAI(p);
+}
 
-player1.y = Math.max(player1.radius,
-    Math.min(canvas.height - player1.radius, player1.y));
+// bounds
+for(const p of players){
+p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
+p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
+}
 
-player2.x = Math.max(player2.radius,
-    Math.min(canvas.width - player2.radius, player2.x));
+// balls
+for(const b of balls){
+b.x+=b.vx;
+b.y+=b.vy;
 
-player2.y = Math.max(player2.radius,
-    Math.min(canvas.height - player2.radius, player2.y));
-    // --- BOUNCE BALLS ---
-    for(const ball of balls){
-        ball.x+=ball.vx;
-        ball.y+=ball.vy;
+if(b.x-b.radius<0||b.x+b.radius>canvas.width)b.vx*=-1;
+if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
+}
 
-        if(ball.x-ball.radius<0||ball.x+ball.radius>canvas.width)
-            ball.vx*=-1;
-
-        if(ball.y-ball.radius<0||ball.y+ball.radius>canvas.height)
-            ball.vy*=-1;
-    }
-
-    // --- COLLISION ---
-    check(player1);
-
-    if(mode==="multi") check(player2);
+// collision
+for(const p of players){
+check(p);
+}
 }
 
 // ---------------- COLLISION ----------------
 function check(p){
-    for(const b of balls){
-        const dx=p.x-b.x;
-        const dy=p.y-b.y;
-        const dist=Math.sqrt(dx*dx+dy*dy);
-
-        if(dist<p.radius+b.radius){
-            gameOver();
-        }
-    }
+for(const b of balls){
+let dx=p.x-b.x;
+let dy=p.y-b.y;
+let d=Math.sqrt(dx*dx+dy*dy);
+if(d<p.radius+b.radius){
+gameOver();
+}
+}
 }
 
 // ---------------- DRAW ----------------
 function draw(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    for(const b of balls){
-        ctx.beginPath();
-        ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-        ctx.fillStyle="#ff4444";
-        ctx.fill();
-    }
-
-    drawPlayer(player1);
-
-    if(mode==="multi") drawPlayer(player2);
+for(const b of balls){
+ctx.beginPath();
+ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+ctx.fillStyle="#ff4444";
+ctx.fill();
 }
 
-function drawPlayer(p){
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
-    ctx.fillStyle=p.color;
-    ctx.fill();
+for(const p of players){
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
+ctx.fillStyle=p.color;
+ctx.fill();
+}
 }
 
 // ---------------- LOOP ----------------
 function loop(){
-    update();
-    draw();
-    requestAnimationFrame(loop);
+update();
+draw();
+requestAnimationFrame(loop);
 }
 loop();
 
-// ---------------- CONTROLS SINGLEPLAYER ----------------
-function movePlayerSingle(x,y){
-    player1.x=Math.max(player1.radius,Math.min(canvas.width-player1.radius,x));
-    player1.y=Math.max(player1.radius,Math.min(canvas.height-player1.radius,y));
+// ---------------- SINGLE CONTROL ----------------
+function moveSingle(x,y){
+players[0].x=x;
+players[0].y=y;
 }
 
 canvas.addEventListener("mousemove",(e)=>{
-    if(mode==="single" && running){
-        movePlayerSingle(e.clientX,e.clientY);
-    }
+if(mode==="single"&&running)moveSingle(e.clientX,e.clientY);
 });
 
 canvas.addEventListener("touchmove",(e)=>{
-    if(mode==="single" && running){
-        movePlayerSingle(e.touches[0].clientX,e.touches[0].clientY);
-    }
+if(mode==="single"&&running)
+moveSingle(e.touches[0].clientX,e.touches[0].clientY);
 });
-</script>
 
+</script>
 </body>
 </html>
