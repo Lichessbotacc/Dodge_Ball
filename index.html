@@ -357,23 +357,16 @@ if(mode==="ai"){
 ranking = [];
 eliminated = [];
 
-const colors = [
-"#00ff88",
-"#4488ff",
-"#ffcc00",
-"#ff44aa",
-"#ff8844",
-"#44ffff",
-"#aa44ff",
-"#ffffff"
-];
+
 
 for(let i=0;i<aiBotCount;i++){
+
+const hue = (i * 360 / aiBotCount);
 
 const bot = createPlayer(
 Math.random()*canvas.width,
 Math.random()*canvas.height,
-colors[i%colors.length],
+`hsl(${hue},100%,50%)`,
 "Bot " + (i+1)
 );
 
