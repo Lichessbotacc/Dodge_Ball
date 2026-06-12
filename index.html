@@ -90,7 +90,13 @@ Modus: <span id="mode">-</span>
 <br><br>
 <label>AI Bots</label>
 <input id="botCount" type="number" value="10" min="2">
+<br><br>
 
+<label>Ranking-System</label>
+<select id="rankingMode">
+<option value="points" selected>Punkte</option>
+<option value="elo">ELO</option>
+</select>
 <br><br>
 <label>Spielergröße</label>
 <input id="playerSize" type="number" value="18" min="5" max="50">
@@ -152,7 +158,7 @@ let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let aiBotCount = 10;
-
+let rankingMode = "points";
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -167,6 +173,7 @@ radius:playerRadiusSetting,
 color,
 name,
 points:0,
+elo:1500,
 alive:true
 };
 
@@ -189,6 +196,8 @@ spawnDelay = Number(document.getElementById("spawnTime").value)*1000;
 ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
 playerRadiusSetting = Number(document.getElementById("playerSize").value);
 aiBotCount = Number(document.getElementById("botCount").value);
+rankingMode =
+document.getElementById("rankingMode").value;
 document.getElementById("settings").style.display="none";
 document.getElementById("menu").style.display="flex";
 }
@@ -419,6 +428,7 @@ oldBot.name
 );
 
 bot.points = oldBot.points;
+bot.elo = oldBot.elo;
 
 players.push(bot);
 
@@ -596,10 +606,57 @@ function finishArena(){
 
 eliminated.reverse();
 
+if(rankingMode === "points"){
+
 for(let i=0;i<eliminated.length;i++){
 
-eliminated[i].points +=
+const bot =
+ranking.find(
+b=>b.name===eliminated[i].name
+);
+
+if(bot){
+
+bot.points +=
 eliminated.length-i-1;
+
+}
+
+}
+
+}else{
+
+const K = 16;
+
+for(let i=0;i<eliminated.length;i++){
+
+const botA =
+ranking.find(
+b=>b.name===eliminated[i].name
+);
+
+for(let j=i+1;j<eliminated.length;j++){
+
+const botB =
+ranking.find(
+b=>b.name===eliminated[j].name
+);
+
+const expectedA =
+1/(1+Math.pow(
+10,
+(botB.elo-botA.elo)/400
+));
+
+const expectedB =
+1-expectedA;
+
+botA.elo += K*(1-expectedA);
+botB.elo += K*(0-expectedB);
+
+}
+
+}
 
 }
 
@@ -638,16 +695,45 @@ document.getElementById("finalTime").innerHTML +=
 
 function updateRanking(){
 
-const sorted =
-[...ranking]
-.sort((a,b)=>b.points-a.points);
+const sorted = [...ranking];
+
+if(rankingMode === "points"){
+
+sorted.sort(
+(a,b)=>b.points-a.points
+);
+
+}else{
+
+sorted.sort(
+(a,b)=>b.elo-a.elo
+);
+
+}
 
 let html =
 "<b>Turnier Ranking</b><br>" +
-"Runde: " + currentRound + "/" + tournamentRounds +
+"Modus: " +
+(rankingMode==="elo"?"ELO":"Punkte") +
+"<br>" +
+"Runde: " +
+currentRound +
+"/" +
+tournamentRounds +
 "<br><br>";
 
 for(let i=0;i<sorted.length;i++){
+
+if(rankingMode==="elo"){
+
+html +=
+(i+1)+". "
++sorted[i].name
++" - "
++Math.round(sorted[i].elo)
++" ELO<br>";
+
+}else{
 
 html +=
 (i+1)+". "
@@ -658,10 +744,10 @@ html +=
 
 }
 
+}
+
 document.getElementById("ranking").innerHTML =
 html;
-
-}
 function updateMultiplayerRanking(){
 
 let html =
