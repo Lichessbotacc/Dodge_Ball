@@ -421,15 +421,17 @@ players.push(bot);
 }
 }
 }
-
+}
 // ---------------- SPAWN ----------------
 function spawnLoop(){
 if(!running) return;
 
 if(spawnTimer) clearTimeout(spawnTimer);
+
+spawnTimer = setTimeout(() => {
 createBall();
 spawnLoop();
-},spawnDelay);
+}, spawnDelay);
 }
 
 // ---------------- RESTART ----------------
