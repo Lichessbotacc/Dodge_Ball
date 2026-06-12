@@ -449,7 +449,17 @@ if(keys["arrowright"]) players[1].x+=5;
 }
 
 if(mode==="ai"){
+
+for(const p of players){
+
+if(p.alive){
+updateAI(p);
+}
+
+}
+
 updateRanking();
+
 }
 
 // bounds
