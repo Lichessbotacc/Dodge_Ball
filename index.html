@@ -135,6 +135,10 @@ window.addEventListener("resize", resize);
 let balls = [];
 let players = [];
 let ranking = [];
+let multiplayerScores = [
+{name:"Spieler 1",points:0},
+{name:"Spieler 2",points:0}
+];
 let eliminated = [];
 let running = false;
 let startTime = 0;
@@ -349,12 +353,34 @@ running = true;
 startTime = Date.now();
 
 if(mode==="single"){
-players.push(createPlayer(300,300,"#00ff88"));
+players.push(
+createPlayer(
+300,
+300,
+"#00ff88",
+"Spieler"
+)
+);
 }
 
 if(mode==="multi"){
-players.push(createPlayer(200,200,"#00ff88"));
-players.push(createPlayer(400,200,"#4488ff"));
+players.push(
+createPlayer(
+200,
+200,
+"#00ff88",
+"Spieler 1"
+)
+);
+
+players.push(
+createPlayer(
+400,
+200,
+"#4488ff",
+"Spieler 2"
+)
+);
 }
 
 if(mode==="ai"){
@@ -362,10 +388,8 @@ if(mode==="ai"){
 eliminated = [];
 
 if(currentRound === 1){
+
 ranking = [];
-}
-
-
 
 for(let i=0;i<aiBotCount;i++){
 
@@ -380,6 +404,25 @@ Math.random()*canvas.height,
 
 players.push(bot);
 ranking.push(bot);
+
+}
+
+}else{
+
+for(const oldBot of ranking){
+
+const bot = createPlayer(
+Math.random()*canvas.width,
+Math.random()*canvas.height,
+oldBot.color,
+oldBot.name
+);
+
+bot.points = oldBot.points;
+
+players.push(bot);
+
+}
 
 }
 
@@ -518,12 +561,30 @@ eliminated.push(alive[0]);
 finishArena();
 }
 
+}else if(mode==="multi"){
+
+const winner =
+players.find(x=>x!==p && x.alive);
+
+if(winner){
+
+if(winner===players[0]){
+multiplayerScores[0].points++;
+}else{
+multiplayerScores[1].points++;
+}
+
+}
+
+updateMultiplayerRanking();
+
+gameOver();
+
 }else{
 
 gameOver();
 
 }
-
 break;
 
 }
@@ -601,6 +662,25 @@ document.getElementById("ranking").innerHTML =
 html;
 
 }
+function updateMultiplayerRanking(){
+
+let html =
+"<b>Multiplayer Ranking</b><br><br>";
+
+html +=
+"1. Spieler 1 - "
++ multiplayerScores[0].points
++ " Punkte<br>";
+
+html +=
+"2. Spieler 2 - "
++ multiplayerScores[1].points
++ " Punkte<br>";
+
+document.getElementById("ranking").innerHTML =
+html;
+
+}
 // ---------------- DRAW ----------------
 function draw(){
 ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -620,7 +700,15 @@ ctx.beginPath();
 ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
 ctx.fillStyle=p.color;
 ctx.fill();
+ctx.fillStyle = "white";
+ctx.font = "14px Arial";
+ctx.textAlign = "center";
 
+ctx.fillText(
+p.name,
+p.x,
+p.y - p.radius - 10
+);
 }
 }
 
