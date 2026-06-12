@@ -425,7 +425,8 @@ players.push(bot);
 // ---------------- SPAWN ----------------
 function spawnLoop(){
 if(!running) return;
-spawnTimer=setTimeout(()=>{
+
+if(spawnTimer) clearTimeout(spawnTimer);
 createBall();
 spawnLoop();
 },spawnDelay);
@@ -434,8 +435,12 @@ spawnLoop();
 // ---------------- RESTART ----------------
 function restartGame(){
 if(spawnTimer) clearTimeout(spawnTimer);
+
 const keepRound = currentRound;
-startGame(mode);
+const keepMode = mode;
+
+startGame(keepMode);
+
 currentRound = keepRound;
 }
 
