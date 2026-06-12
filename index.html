@@ -140,7 +140,9 @@ let running = false;
 let startTime = 0;
 let spawnTimer = null;
 let mode = "single";
-
+let tournamentRounds = 100;
+let currentRound = 1;
+let roundFinished = false;
 let startBallCount = 3;
 let spawnDelay = 5000;
 let ballSpeedMultiplier = 1;
@@ -331,6 +333,9 @@ function updateAI(p){
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
+if(mode !== "ai"){
+currentRound = 1;
+}
 mode = selectedMode;
 document.getElementById("mode").textContent = mode;
 
@@ -354,8 +359,11 @@ players.push(createPlayer(400,200,"#4488ff"));
 
 if(mode==="ai"){
 
-ranking = [];
 eliminated = [];
+
+if(currentRound === 1){
+ranking = [];
+}
 
 
 
@@ -393,7 +401,9 @@ spawnLoop();
 // ---------------- RESTART ----------------
 function restartGame(){
 if(spawnTimer) clearTimeout(spawnTimer);
+const keepRound = currentRound;
 startGame(mode);
+currentRound = keepRound;
 }
 
 // ---------------- RECORD ----------------
@@ -534,10 +544,35 @@ eliminated.length-i-1;
 
 updateRanking();
 
-setTimeout(()=>{
-restartGame();
-},3000);
+running = false;
+roundFinished = true;
 
+const winner = eliminated[0];
+
+document.getElementById("gameOver").style.display = "flex";
+
+document.getElementById("finalTime").innerHTML =
+"Runde " + currentRound + "/" + tournamentRounds +
+"<br>Sieger: " + winner.name;
+
+if(currentRound < tournamentRounds){
+
+currentRound++;
+
+setTimeout(()=>{
+
+document.getElementById("gameOver").style.display="none";
+
+restartGame();
+
+},7000);
+
+}else{
+
+document.getElementById("finalTime").innerHTML +=
+"<br><br><b>TURNIER BEENDET</b>";
+
+}
 }
 
 function updateRanking(){
@@ -546,7 +581,10 @@ const sorted =
 [...ranking]
 .sort((a,b)=>b.points-a.points);
 
-let html = "<b>Ranking</b><br>";
+let html =
+"<b>Turnier Ranking</b><br>" +
+"Runde: " + currentRound + "/" + tournamentRounds +
+"<br><br>";
 
 for(let i=0;i<sorted.length;i++){
 
