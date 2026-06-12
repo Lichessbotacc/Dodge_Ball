@@ -394,7 +394,7 @@ ranking = [];
 
 for(let i = 0; i < aiBotCount; i++){
 
-const bot = createBot(i);
+const bot = createBot(Math.floor(Math.random() * aiBotCount));
 players.push(bot);
 ranking.push(bot);
 
@@ -419,7 +419,13 @@ bot.elo = oldBot.elo;
 
 players.push(bot);
 }
+
 }
+for(let i = 0; i < startBallCount; i++){
+createBall();
+}
+
+spawnLoop();
 }
 }
 // ---------------- SPAWN ----------------
