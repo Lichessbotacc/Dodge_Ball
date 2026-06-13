@@ -56,12 +56,24 @@ Rekord: <span id="record">0</span>s<br>
 Bälle: <span id="balls">0</span><br>
 Modus: <span id="mode">-</span>
 </div>
-
+<div id="eloTable" style="
+position:absolute;
+top:20px;
+right:20px;
+background:rgba(0,0,0,0.6);
+padding:10px;
+color:white;
+min-width:180px;
+">
+<b>ELO LIVE</b>
+<div id="eloList"></div>
+</div>
 <div id="menu">
 <h1>Finger Dodge</h1>
 <button onclick="startGame('single')">Singleplayer</button>
 <button onclick="startGame('multi')">Multiplayer (lokal)</button>
 <button onclick="startGame('ai')">AI Spectate</button>
+<button onclick="startGame('tournament')">1vs1 Tournament </button>
 <button onclick="openSettings()">Settings</button>
 <button onclick="resetRecord()">Rekord zurücksetzen</button>
 </div>
@@ -159,6 +171,10 @@ let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let aiBotCount = 10;
 let rankingMode = "points";
+let participants = [];
+let matches = [];
+let activeMatchIndex = 0;
+let tournamentRunning = false;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -422,6 +438,10 @@ Math.random()*canvas.height,
 }
 
 }
+if(mode === "tournament"){
+    startTournament();
+    return;
+}
 
 else if(mode==="ai"){
 
@@ -445,6 +465,70 @@ createBall();
 
 spawnLoop();
 updateRanking();
+}
+function startTournament(){
+
+balls = [];
+players = [];
+ranking = [];
+
+participants = [];
+running = true;
+// DU + Bots
+participants.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","DU"));
+
+for(let i=0;i<aiBotCount;i++){
+participants.push(createPlayer(
+Math.random()*canvas.width,
+Math.random()*canvas.height,
+`hsl(${i*360/aiBotCount},100%,50%)`,
+"Bot "+(i+1)
+));
+}
+
+// Shuffle
+participants.sort(()=>Math.random()-0.5);
+
+matches = [];
+
+for(let i=0;i<participants.length;i+=2){
+
+matches.push({
+p1: participants[i],
+p2: participants[i+1],
+balls: [],
+alive: [participants[i],participants[i+1]],
+finished:false
+});
+
+}
+
+activeMatchIndex = 0;
+
+startMatch(activeMatchIndex);
+}
+function startMatch(i){
+
+balls = [];
+
+const m = matches[i];
+
+// 🔥 wichtig: reset alive state
+m.alive = [m.p1, m.p2];
+m.p1.alive = true;
+m.p2.alive = true;
+
+// Positionen
+m.p1.x = canvas.width*0.3;
+m.p1.y = canvas.height/2;
+
+m.p2.x = canvas.width*0.7;
+m.p2.y = canvas.height/2;
+
+// Balls neu
+for(let j=0;j<startBallCount;j++){
+createBall();
+}
 }
 // ---------------- SPAWN ----------------
 function spawnLoop(){
@@ -491,7 +575,10 @@ document.getElementById("gameOver").style.display="flex";
 // ---------------- UPDATE ----------------
 function update(){
 if(!running) return;
-
+if(mode === "tournament"){
+    updateTournament();
+    return;
+}
 document.getElementById("time").textContent =
 Math.floor((Date.now()-startTime)/1000);
 
@@ -544,7 +631,35 @@ for(const p of players){
 check(p);
 }
 }
+function updateTournament(){
 
+const m = matches[activeMatchIndex];
+
+if(!m) return;
+
+// AI Movement nur Bot
+for(const p of m.alive){
+if(p.name.startsWith("Bot")){
+updateAI(p);
+}
+}
+
+// Bälle bewegen
+for(const b of balls){
+b.x += b.vx;
+b.y += b.vy;
+
+if(b.x-b.radius<0||b.x+b.radius>canvas.width)b.vx*=-1;
+if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
+}
+
+// Collision
+for(const p of m.alive){
+checkTournament(p,m);
+}
+
+updateEloTable();
+}
 // ---------------- COLLISION ----------------
 function check(p){
 
@@ -580,6 +695,60 @@ return;
 
 }
 
+}
+}
+function checkTournament(p,m){
+
+if(!p.alive) return;
+
+for(const b of balls){
+
+const dx = p.x - b.x;
+const dy = p.y - b.y;
+const dist = Math.sqrt(dx*dx+dy*dy);
+
+if(dist < p.radius + b.radius){
+
+p.alive = false;
+p.deathTime = Date.now();
+
+m.alive = m.alive.filter(x=>x!==p);
+
+if(m.alive.length === 1){
+finishMatch(m);
+}
+
+return;
+}
+}
+}
+function finishMatch(m){
+
+m.finished = true;
+
+const winner = m.alive[0];
+const loser = (winner === m.p1) ? m.p2 : m.p1;
+
+const K = 24;
+
+const expected =
+1/(1+Math.pow(10,(loser.elo - winner.elo)/400));
+
+const change = K * (1 - expected);
+
+winner.elo += change;
+loser.elo -= change;
+
+winner.lastChange = change;
+loser.lastChange = -change;
+
+// nächstes Match
+activeMatchIndex++;
+
+if(activeMatchIndex < matches.length){
+setTimeout(()=>{
+startMatch(activeMatchIndex);
+},2000);
 }
 }
 function finishArena(){
@@ -808,6 +977,27 @@ document.getElementById("ranking").innerHTML =
 html;
 
 }
+function updateEloTable(){
+
+let sorted = [...participants].sort((a,b)=>b.elo-a.elo);
+
+let html = "";
+
+for(let i=0;i<sorted.length;i++){
+
+html += `
+<div>
+${i+1}. ${sorted[i].name}<br>
+${Math.round(sorted[i].elo)}
+<span style="color:${sorted[i].lastChange>=0?'lime':'red'}">
+(${sorted[i].lastChange>=0?'+':''}${Math.round(sorted[i].lastChange)})
+</span>
+</div>
+`;
+}
+
+document.getElementById("eloList").innerHTML = html;
+}
 // ---------------- DRAW ----------------
 function draw(){
 ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -841,11 +1031,17 @@ p.y - p.radius - 10
 
 // ---------------- LOOP ----------------
 function loop(){
+
 update();
 draw();
+
+// 🔥 LIVE ELO UPDATE IMMER
+if(mode === "tournament"){
+updateEloTable();
+}
+
 requestAnimationFrame(loop);
 }
-loop();
 
 // ---------------- SINGLE CONTROL ----------------
 function moveSingle(x,y){
