@@ -701,31 +701,62 @@ function tryMatchmaking(){
 
     if(waitingQueue.length < 2) return;
 
-    // immer sauber sortiert nach ELO
-    waitingQueue.sort((a,b)=>b.elo-a.elo);
+    // Arena: sort by points first (NOT elo)
+    waitingQueue.sort((a,b)=> (b.points || 0) - (a.points || 0));
 
+    const used = new Set();
     const newQueue = [];
 
-    for(let i = 0; i < waitingQueue.length; i += 2){
+    for(let i = 0; i < waitingQueue.length; i++){
 
         const p1 = waitingQueue[i];
-        const p2 = waitingQueue[i + 1];
+        if(used.has(p1.name)) continue;
 
-        // falls kein Gegner da ist → zurück in Queue
-        if(!p2){
-            newQueue.push(p1);
-            continue;
+        let opponent = null;
+
+        // Arena: search nearby in queue only (fast matching)
+        for(let j = i + 1; j < waitingQueue.length; j++){
+
+            const p2 = waitingQueue[j];
+            if(used.has(p2.name)) continue;
+
+            // soft ELO similarity (NOT strict)
+            const eloDiff = Math.abs(p1.elo - p2.elo);
+
+            if(eloDiff < 400){ // Arena tolerance window
+                opponent = p2;
+                break;
+            }
         }
 
-        const match = createMatch(p1, p2);
-        setupMatch(match);
+        // fallback: if no similar found, just take next free
+        if(!opponent){
+            for(let j = i + 1; j < waitingQueue.length; j++){
+                if(!used.has(waitingQueue[j].name)){
+                    opponent = waitingQueue[j];
+                    break;
+                }
+            }
+        }
 
-        matches.push(match);
+        if(opponent){
 
-        playerMatchMap.set(p1.name, match);
-        playerMatchMap.set(p2.name, match);
+            const match = createMatch(p1, opponent);
+            setupMatch(match);
 
-        rememberMatch(p1, p2);
+            matches.push(match);
+
+            playerMatchMap.set(p1.name, match);
+            playerMatchMap.set(opponent.name, match);
+
+            used.add(p1.name);
+            used.add(opponent.name);
+
+            rememberMatch(p1, opponent);
+
+        } else {
+            newQueue.push(p1);
+        }
     }
 
     waitingQueue = newQueue;
