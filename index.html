@@ -338,19 +338,19 @@ let avoidY = 0;
 const wallMargin = 140;
 
 if(p.x < wallMargin){
-avoidX += (wallMargin - p.x) * 0.15;
+avoidX += (wallMargin - p.x) * 0.03;
 }
 
 if(p.x > canvas.width - wallMargin){
-avoidX -= (p.x - (canvas.width - wallMargin)) * 0.15;
+avoidX -= (p.x - (canvas.width - wallMargin)) * 0.03;
 }
 
 if(p.y < wallMargin){
-avoidY += (wallMargin - p.y) * 0.15;
+avoidY += (wallMargin - p.y) * 0.03;
 }
 
 if(p.y > canvas.height - wallMargin){
-avoidY -= (p.y - (canvas.height - wallMargin)) * 0.15;
+avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
 }
 for(const b of balls){
 
