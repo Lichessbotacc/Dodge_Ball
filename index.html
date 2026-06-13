@@ -828,9 +828,16 @@ const loser = (winner === m.p1) ? m.p2 : m.p1;
 function getKFactor(){
     let round = currentRound;
 
-    return Math.max(4, 40 / (round * 0.6));
+    if(round <= 3){
+        return 80;   // 🔥 extrem hohe Sprünge
+    }
+    else if(round <= 8){
+        return 30;   // mittel
+    }
+    else{
+        return 10;   // stabil
+    }
 }
-
 const K =
 (
 getKFactor(winner)
