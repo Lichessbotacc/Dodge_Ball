@@ -183,6 +183,8 @@ document.getElementById("record").textContent = record;
 // ---------------- PLAYER FACTORY ----------------
 function createPlayer(x,y,color,name,skill=null){
 
+skill = skill ?? Math.random();
+
 return {
 x,
 y,
@@ -195,16 +197,21 @@ lastChange:0,
 alive:true,
 games:0,
 
-// 🔥 individueller Skill
-skill: skill ?? Math.random()
+// BASIS SKILL
+skill,
+
+// 🔥 individuelle Eigenschaften
+speed: 1 + Math.random()*7,
+reaction: 0.3 + Math.random()*1.7,
+awareness: 80 + Math.random()*260,
+randomness: Math.random()*4,
+dodgePower: 0.5 + Math.random()*2.5,
+
+targetX:null,
+targetY:null
 };
 
 }
-// ---------------- INPUT ----------------
-const keys = {};
-document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
-document.addEventListener("keyup",(e)=>keys[e.key.toLowerCase()]=false);
-
 // ---------------- UI ----------------
 function openSettings(){
 document.getElementById("menu").style.display="none";
@@ -303,9 +310,13 @@ function spawnLoop(){
 }
 // ---------------- AI ----------------
 function updateAI(p){
-const skill = p.skill ?? 0.5;
-// Neues Ziel wählen
-if(!p.targetX || !p.targetY || Math.random() < 0.03){
+
+// Ziel wechseln
+if(
+!p.targetX ||
+!p.targetY ||
+Math.random() < 0.01 * p.reaction
+){
 p.targetX = Math.random() * canvas.width;
 p.targetY = Math.random() * canvas.height;
 }
@@ -314,11 +325,13 @@ p.targetY = Math.random() * canvas.height;
 let moveX = p.targetX - p.x;
 let moveY = p.targetY - p.y;
 
-let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+let moveDist =
+Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+
 moveX /= moveDist;
 moveY /= moveDist;
 
-// 🚨 stärkere Avoidance
+// Avoidance
 let avoidX = 0;
 let avoidY = 0;
 
@@ -327,17 +340,21 @@ for(const b of balls){
 const dx = p.x - b.x;
 const dy = p.y - b.y;
 
-const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+const dist =
+Math.sqrt(dx*dx + dy*dy) || 1;
 
-const safeRadius = 180;
+const safeRadius = p.awareness;
 
 if(dist < safeRadius){
 
-// NICHT linear → stärker bei Nähe
-const strength = (safeRadius / dist);
+const strength =
+(safeRadius / dist);
 
-// zusätzlich begrenzen damit es stabil bleibt
-const force = Math.min(strength * 0.6, 6);
+const force =
+Math.min(
+strength * p.dodgePower,
+10
+);
 
 avoidX += (dx / dist) * force;
 avoidY += (dy / dist) * force;
@@ -346,34 +363,36 @@ avoidY += (dy / dist) * force;
 
 }
 
-// Bewegung kombinieren (Avoidance stärker gewichten)
+// Mischung
 let vx =
-moveX * 5 +
-avoidX * 18;
+moveX * 3 +
+avoidX * 20;
 
 let vy =
-moveY * 5 +
-avoidY * 18;
+moveY * 3 +
+avoidY * 20;
 
-// garantierte Bewegung
-if(Math.abs(vx) < 0.1 && Math.abs(vy) < 0.1){
-vx = (Math.random()-0.5)*6;
-vy = (Math.random()-0.5)*6;
-}
+// Random Verhalten
+vx += (Math.random()-0.5) * p.randomness;
+vy += (Math.random()-0.5) * p.randomness;
 
-const baseSpeed = 2.5 + skill * 4.5;
+// Geschwindigkeit
+let len =
+Math.sqrt(vx*vx + vy*vy) || 1;
 
-let len = Math.sqrt(vx*vx + vy*vy) || 1;
-
-p.x += (vx/len) * baseSpeed;
-p.y += (vy/len) * baseSpeed;
-// kleine Randomness nur minimal halten
-p.x += (Math.random()-0.5)*0.4;
-p.y += (Math.random()-0.5)*0.4;
+p.x += (vx/len) * p.speed;
+p.y += (vy/len) * p.speed;
 
 // Grenzen
-p.x = Math.max(p.radius, Math.min(canvas.width-p.radius, p.x));
-p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
+p.x = Math.max(
+p.radius,
+Math.min(canvas.width-p.radius,p.x)
+);
+
+p.y = Math.max(
+p.radius,
+Math.min(canvas.height-p.radius,p.y)
+);
 
 }
 // ---------------- START ----------------
