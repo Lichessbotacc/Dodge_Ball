@@ -193,6 +193,7 @@ points:0,
 elo:1500,
 lastChange:0,
 alive:true,
+games:0,
 
 // 🔥 individueller Skill
 skill: skill ?? Math.random()
@@ -787,7 +788,33 @@ m.finished = true;
 const winner = m.alive[0];
 const loser = (winner === m.p1) ? m.p2 : m.p1;
 
-const K = 24;
+function getKFactor(player){
+
+// Placement Phase
+if(player.games < 10){
+    return 80;
+}
+
+// noch unsicher
+if(player.games < 30){
+    return 50;
+}
+
+// normal
+if(player.games < 100){
+    return 32;
+}
+
+// stabile Ratings
+return 20;
+}
+
+const K =
+(
+getKFactor(winner)
++
+getKFactor(loser)
+) / 2;
 
 const expected =
 1/(1+Math.pow(10,(loser.elo - winner.elo)/400));
@@ -799,7 +826,8 @@ loser.elo -= change;
 
 winner.lastChange = change;
 loser.lastChange = -change;
-
+winner.games++;
+loser.games++;
 // nächstes Match
 activeMatchIndex++;
 
