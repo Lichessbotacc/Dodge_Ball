@@ -699,10 +699,11 @@ function tryMatchmaking(){
 
     if(waitingQueue.length < 2) return;
 
-    // nach ELO sortieren = Ranking / Platzierung
+    // nach ELO sortieren = Platzierung
     waitingQueue.sort((a,b)=>b.elo-a.elo);
 
     const used = new Set();
+
     const newQueue = [];
 
     for(let i = 0; i < waitingQueue.length; i++){
@@ -711,72 +712,81 @@ function tryMatchmaking(){
 
         if(used.has(p1.name)) continue;
 
-        let bestIndex = -1;
+        let found = false;
 
-        // suche nächsten freien Nachbarn (nach unten und oben)
+        // suche nächsten freien Gegner (nach Platzierung)
         for(let offset = 1; offset < waitingQueue.length; offset++){
 
-            // nach unten
+            // erst nach unten, dann nach oben
             const down = i + offset;
-            if(down < waitingQueue.length){
-
-                const p2 = waitingQueue[down];
-
-                if(!used.has(p2.name)){
-
-                    bestIndex = down;
-                    break;
-
-                }
-
-            }
-
-            // nach oben
             const up = i - offset;
-            if(up >= 0){
 
-                const p2 = waitingQueue[up];
+            let p2 = null;
 
-                if(!used.has(p2.name)){
-
-                    bestIndex = up;
-                    break;
-
-                }
-
+            if(down < waitingQueue.length){
+                p2 = waitingQueue[down];
             }
 
+            if(p2 && !used.has(p2.name)){
+                if(lastOpponent.get(p1.name) === p2.name) {
+                    // direkte Wiederholung blocken
+                } else {
+
+                    const match = createMatch(p1, p2);
+                    setupMatch(match);
+
+                    matches.push(match);
+
+                    playerMatchMap.set(p1.name, match);
+                    playerMatchMap.set(p2.name, match);
+
+                    used.add(p1.name);
+                    used.add(p2.name);
+
+                    lastOpponent.set(p1.name, p2.name);
+                    lastOpponent.set(p2.name, p1.name);
+
+                    found = true;
+                    break;
+                }
+            }
+
+            if(up >= 0){
+                p2 = waitingQueue[up];
+
+                if(p2 && !used.has(p2.name)){
+                    if(lastOpponent.get(p1.name) === p2.name) {
+                        // skip
+                    } else {
+
+                        const match = createMatch(p1, p2);
+                        setupMatch(match);
+
+                        matches.push(match);
+
+                        playerMatchMap.set(p1.name, match);
+                        playerMatchMap.set(p2.name, match);
+
+                        used.add(p1.name);
+                        used.add(p2.name);
+
+                        lastOpponent.set(p1.name, p2.name);
+                        lastOpponent.set(p2.name, p1.name);
+
+                        found = true;
+                        break;
+                    }
+                }
+            }
         }
 
         // wenn kein Gegner gefunden → bleibt in Queue
-        if(bestIndex === -1){
+        if(!found){
             newQueue.push(p1);
-            continue;
         }
-
-        const p2 = waitingQueue[bestIndex];
-       const recent = recentOpponents.get(p1.name) || [];
-       const count = recent.filter(x => x === p2.name).length;
-
-       if(count >= 1){
-          continue; // blockt dieses Match
-      }
-        used.add(p1.name);
-        used.add(p2.name);
-
-        const match = createMatch(p1, p2);
-
-        setupMatch(match);
-
-        matches.push(match);
-
-        playerMatchMap.set(p1.name, match);
-        playerMatchMap.set(p2.name, match);
     }
 
-    // nur ungematchte bleiben drin
     waitingQueue = newQueue;
-
 }
 
 function setupMatch(match){
