@@ -141,10 +141,6 @@ window.addEventListener("resize", resize);
 let balls = [];
 let players = [];
 let ranking = [];
-let multiplayerScores = [
-{name:"Spieler 1",points:0},
-{name:"Spieler 2",points:0}
-];
 let eliminated = [];
 let running = false;
 let startTime = 0;
@@ -390,22 +386,35 @@ function startGame(selectedMode){
     // ================================
     // MULTIPLAYER
     // ================================
+    
     if(mode === "multi"){
 
-        const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
-        const p2 = createPlayer(400,200,"#4488ff","Spieler 2");
+    const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
+    const p2 = createPlayer(400,200,"#4488ff","Spieler 2");
 
-        p1.points = 0;
-        p2.points = 0;
+    players.push(p1, p2);
+    ranking.push(p1, p2);
 
-        players.push(p1, p2);
+    // 🤖 BOTS AUCH DABEI
+    for(let i = 0; i < aiBotCount; i++){
 
-        for(let i = 0; i < startBallCount; i++){
-            createBall();
-        }
+        const bot = createPlayer(
+            Math.random() * canvas.width,
+            Math.random() * canvas.height,
+            `hsl(${i * 360 / aiBotCount},100%,50%)`,
+            "Bot " + (i + 1)
+        );
 
-        spawnLoop();
+        players.push(bot);
+        ranking.push(bot);
     }
+
+    for(let i = 0; i < startBallCount; i++){
+        createBall();
+    }
+
+    spawnLoop();
+}
 
     // ================================
     // AI SPECTATE (TURNIER MODE)
@@ -575,7 +584,7 @@ if(winner === players[0]) multiplayerScores[0].points++;
 else multiplayerScores[1].points++;
 }
 
-updateMultiplayerRanking();
+
 gameOver();
 return;
 
@@ -778,25 +787,7 @@ html +=
 document.getElementById("ranking").innerHTML =
 html;
 }
-function updateMultiplayerRanking(){
 
-let html =
-"<b>Multiplayer Ranking</b><br><br>";
-
-html +=
-"1. Spieler 1 - "
-+ multiplayerScores[0].points
-+ " Punkte<br>";
-
-html +=
-"2. Spieler 2 - "
-+ multiplayerScores[1].points
-+ " Punkte<br>";
-
-document.getElementById("ranking").innerHTML =
-html;
-
-}
 // ---------------- DRAW ----------------
 function draw(){
 ctx.clearRect(0,0,canvas.width,canvas.height);
