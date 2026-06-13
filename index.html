@@ -387,6 +387,8 @@ canvas.height/2,
 
 for(const bot of ranking){
 
+if(bot.name === "Spieler") continue;
+
 players.push({
 ...bot,
 x:Math.random()*canvas.width,
