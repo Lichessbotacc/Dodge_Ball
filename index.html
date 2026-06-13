@@ -1108,8 +1108,30 @@ function draw(){
 }
 // ---------------- SINGLE CONTROL ----------------
 function moveSingle(x,y){
-players[0].x=x;
-players[0].y=y;
+
+    if(mode === "tournament"){
+
+        const m = matches[activeMatchIndex];
+        if(!m) return;
+
+        for(const p of m.alive){
+
+            if(p.name === "DU"){
+
+                p.x = x;
+                p.y = y;
+                return;
+
+            }
+        }
+
+        return;
+    }
+
+    if(players[0]){
+        players[0].x = x;
+        players[0].y = y;
+    }
 }
 canvas.addEventListener("mousemove",(e)=>{
     if((mode==="single" || mode==="tournament") && running)
