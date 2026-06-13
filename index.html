@@ -324,10 +324,6 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 // ---------------- START ----------------
 function startGame(selectedMode){
 
-    if(mode !== "ai"){
-        currentRound = 1;
-    }
-
     mode = selectedMode;
     document.getElementById("mode").textContent = mode;
 
@@ -336,17 +332,17 @@ function startGame(selectedMode){
 
     balls = [];
     players = [];
-    ranking = [];
     eliminated = [];
 
     running = true;
     startTime = Date.now();
 
-    // ================================
-    // SINGLEPLAYER = TURNIER SYSTEM
-    // ================================
+    // =========================
+    // SINGLEPLAYER (TURNIER)
+    // =========================
     if(mode === "single"){
 
+        // Spieler
         const player = createPlayer(
             canvas.width / 2,
             canvas.height / 2,
@@ -359,9 +355,8 @@ function startGame(selectedMode){
         player.lastChange = 0;
 
         players.push(player);
-        ranking.push(player);
 
-        // Bots als Gegner
+        // Bots
         for(let i = 0; i < aiBotCount; i++){
 
             const bot = createPlayer(
@@ -371,15 +366,15 @@ function startGame(selectedMode){
                 "Bot " + (i + 1)
             );
 
-            bot.points = 0;
-            bot.elo = 1500;
-            bot.lastChange = 0;
+            // WICHTIG: Ranking bleibt global bestehen
+            const existing = ranking.find(b => b.name === bot.name);
+            if(!existing){
+                ranking.push(bot);
+            }
 
             players.push(bot);
-            ranking.push(bot);
         }
 
-        // Start-Bälle
         for(let i = 0; i < startBallCount; i++){
             createBall();
         }
@@ -387,9 +382,9 @@ function startGame(selectedMode){
         spawnLoop();
     }
 
-    // ================================
+    // =========================
     // MULTIPLAYER
-    // ================================
+    // =========================
     if(mode === "multi"){
 
         const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
@@ -407,37 +402,36 @@ function startGame(selectedMode){
         spawnLoop();
     }
 
-    // ================================
-    // AI SPECTATE (TURNIER MODE)
-    // ================================
+    // =========================
+    // AI SPECTATE (TURNIER)
+    // =========================
     if(mode === "ai"){
 
-        if(currentRound === 1){
-            ranking = [];
+        // Ranking NUR beim ersten Start erstellen
+        if(ranking.length === 0){
+
+            for(let i = 0; i < aiBotCount; i++){
+
+                const bot = createPlayer(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    `hsl(${i * 360 / aiBotCount},100%,50%)`,
+                    "Bot " + (i + 1)
+                );
+
+                bot.points = 0;
+                bot.elo = 1500;
+                bot.lastChange = 0;
+
+                ranking.push(bot);
+            }
         }
 
-        for(let i = 0; i < aiBotCount; i++){
-
-            const bot = createPlayer(
-                Math.random() * canvas.width,
-                Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`,
-                "Bot " + (i + 1)
-            );
-
-            bot.points = 0;
-            bot.elo = 1500;
-            bot.lastChange = 0;
-
-            bot.aggressiveness = Math.random();
-            bot.fear = Math.random();
-            bot.wander = Math.random();
-            bot.speed = 2.5 + Math.random() * 0.5;
-            bot.safeRadius = 120 + Math.random() * 120;
-
-            players.push(bot);
-            ranking.push(bot);
-        }
+        // Spieler für diese Runde aus Ranking klonen
+        players = ranking.map(p => ({
+            ...p,
+            alive: true
+        }));
 
         for(let i = 0; i < startBallCount; i++){
             createBall();
@@ -557,9 +551,7 @@ let d = Math.sqrt(dx*dx + dy*dy);
 if(d < p.radius + b.radius){
 
 p.alive = false;
-
-if(mode === "ai"){
-
+p.deathTime = Date.now();
 eliminated.push(p);
 
 const alive = players.filter(x => x.alive);
@@ -625,7 +617,7 @@ if (mode === "single") {
     gameOver();
     return;
 }
-eliminated.reverse();
+eliminated.sort((a, b) => a.deathTime - b.deathTime);
 
 if(rankingMode === "points"){
 
