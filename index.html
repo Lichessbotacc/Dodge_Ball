@@ -827,23 +827,23 @@ const loser = (winner === m.p1) ? m.p2 : m.p1;
 
 function getKFactor(player){
 
-// Placement Phase
-if(player.games < 10){
-    return 80;
+// nur erste Matches extrem
+if(player.games < 5){
+    return 60;
 }
 
-// noch unsicher
-if(player.games < 30){
-    return 50;
+// kurze Placement Phase
+if(player.games < 15){
+    return 40;
 }
 
-// normal
-if(player.games < 100){
-    return 32;
+// fast schon stabil
+if(player.games < 40){
+    return 24;
 }
 
-// stabile Ratings
-return 20;
+// stabiles Rating
+return 14;
 }
 
 const K =
