@@ -324,74 +324,128 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 // ---------------- START ----------------
 function startGame(selectedMode){
 
-if(mode !== "ai"){
-    currentRound = 1;
-}
+    if(mode !== "ai"){
+        currentRound = 1;
+    }
 
-mode = selectedMode;
-document.getElementById("mode").textContent = mode;
+    mode = selectedMode;
+    document.getElementById("mode").textContent = mode;
 
-document.getElementById("menu").style.display = "none";
-document.getElementById("gameOver").style.display = "none";
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("gameOver").style.display = "none";
 
-balls = [];
-players = [];
-ranking = [];
-eliminated = [];
+    balls = [];
+    players = [];
+    ranking = [];
+    eliminated = [];
 
-running = true;
-startTime = Date.now();
+    running = true;
+    startTime = Date.now();
 
-// ---------------- SINGLE + AI = GLEICHES SYSTEM ----------------
-if(mode === "single" || mode === "ai"){
+    // ================================
+    // SINGLEPLAYER = TURNIER SYSTEM
+    // ================================
+    if(mode === "single"){
 
-    const p = createPlayer(
-        canvas.width / 2,
-        canvas.height / 2,
-        "#00ff88",
-        mode === "single" ? "Spieler" : "Bot 1"
-    );
+        const player = createPlayer(
+            canvas.width / 2,
+            canvas.height / 2,
+            "#00ff88",
+            "Spieler"
+        );
 
-    p.points = 0;
-    p.elo = 1500;
-    p.lastChange = 0;
+        player.points = 0;
+        player.elo = 1500;
+        player.lastChange = 0;
 
-    players.push(p);
-    ranking.push(p);
+        players.push(player);
+        ranking.push(player);
 
-    for(let i = 0; i < aiBotCount; i++){
+        // Bots als Gegner
+        for(let i = 0; i < aiBotCount; i++){
 
-        const bot = createBot(i);
+            const bot = createPlayer(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                `hsl(${i * 360 / aiBotCount},100%,50%)`,
+                "Bot " + (i + 1)
+            );
 
-        if(mode === "single"){
-            bot.name = "Bot " + (i+1);
+            bot.points = 0;
+            bot.elo = 1500;
+            bot.lastChange = 0;
+
+            players.push(bot);
+            ranking.push(bot);
         }
 
-        players.push(bot);
-        ranking.push(bot);
+        // Start-Bälle
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
     }
 
-    for(let i = 0; i < startBallCount; i++){
-        createBall();
+    // ================================
+    // MULTIPLAYER
+    // ================================
+    if(mode === "multi"){
+
+        const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
+        const p2 = createPlayer(400,200,"#4488ff","Spieler 2");
+
+        p1.points = 0;
+        p2.points = 0;
+
+        players.push(p1, p2);
+
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
     }
 
-    spawnLoop();
-}
+    // ================================
+    // AI SPECTATE (TURNIER MODE)
+    // ================================
+    if(mode === "ai"){
 
-// ---------------- MULTI ----------------
-if(mode === "multi"){
+        if(currentRound === 1){
+            ranking = [];
+        }
 
-    players.push(createPlayer(200,200,"#00ff88","Spieler 1"));
-    players.push(createPlayer(400,200,"#4488ff","Spieler 2"));
+        for(let i = 0; i < aiBotCount; i++){
 
-    for(let i = 0; i < startBallCount; i++){
-        createBall();
+            const bot = createPlayer(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                `hsl(${i * 360 / aiBotCount},100%,50%)`,
+                "Bot " + (i + 1)
+            );
+
+            bot.points = 0;
+            bot.elo = 1500;
+            bot.lastChange = 0;
+
+            bot.aggressiveness = Math.random();
+            bot.fear = Math.random();
+            bot.wander = Math.random();
+            bot.speed = 2.5 + Math.random() * 0.5;
+            bot.safeRadius = 120 + Math.random() * 120;
+
+            players.push(bot);
+            ranking.push(bot);
+        }
+
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
     }
-
-    spawnLoop();
 }
-}
-
 // ---------------- SPAWN ----------------
 function spawnLoop(){
 if(!running) return;
