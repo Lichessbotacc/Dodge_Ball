@@ -368,14 +368,31 @@ function spawnLoop(){
 function updateAI(p, activeBalls = balls){
 
     // ---------------- TARGET LOGIK ----------------
+  let danger = false;
+
+for(const b of activeBalls){
+    const dx = p.x - b.x;
+    const dy = p.y - b.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if(dist < p.awareness * 0.5){
+        danger = true;
+        break;
+    }
+}
+
+// 👉 nur neue Ziele wenn KEINE Gefahr
+if(!danger){
+
     if(
-        !p.targetX ||
-        !p.targetY ||
-        Math.random() < 0.003 * p.reaction
+        p.targetX === null ||
+        p.targetY === null ||
+        Math.random() < 0.02
     ){
         p.targetX = Math.random() * canvas.width;
         p.targetY = Math.random() * canvas.height;
     }
+}
 
     let moveX = p.targetX - p.x;
     let moveY = p.targetY - p.y;
