@@ -263,13 +263,18 @@ document.getElementById("balls").textContent = balls.length;
 }
 
 function tournamentSpawnLoop(){
+
     if(mode !== "tournament") return;
 
-    if(running){
-        createBall();
-    }
+    spawnTimer = setTimeout(() => {
 
-    setTimeout(tournamentSpawnLoop, spawnDelay);
+        if(mode === "tournament" && running){
+            createBall();
+            tournamentSpawnLoop();
+        }
+
+    }, spawnDelay);
+
 }
 function spawnLoop(){
 
