@@ -569,13 +569,13 @@ players.filter(x=>x.alive);
 
 if(alive.length <= 1){
 
-if(alive.length === 1){
-eliminated.push(alive[0]);
-}
+    if(alive.length === 1){
+        alive[0].deathTime = Infinity;
+        eliminated.push(alive[0]);
+    }
 
-finishArena();
+    finishArena();
 }
-
 return;
 
 }
