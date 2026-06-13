@@ -545,80 +545,60 @@ check(p);
 
 // ---------------- COLLISION ----------------
 function check(p){
-
 if(!p.alive) return;
 
 for(const b of balls){
 
-let dx=p.x-b.x;
-let dy=p.y-b.y;
+let dx = p.x - b.x;
+let dy = p.y - b.y;
 
-let d=Math.sqrt(dx*dx+dy*dy);
+let d = Math.sqrt(dx*dx + dy*dy);
 
-if(d<p.radius+b.radius){
+if(d < p.radius + b.radius){
 
-p.alive=false;
+p.alive = false;
 
-if(mode==="ai"){
+if(mode === "ai"){
 
 eliminated.push(p);
 
-const alive =
-players.filter(x=>x.alive);
+const alive = players.filter(x => x.alive);
 
-if(alive.length<=1){
-
-if(alive.length===1){
-eliminated.push(alive[0]);
-}
-
+if(alive.length <= 1){
 finishArena();
 }
+return;
 
-}else if(mode==="multi"){
+}else if(mode === "multi"){
 
-const winner =
-players.find(x=>x!==p && x.alive);
+const winner = players.find(x => x !== p && x.alive);
 
 if(winner){
-
-if(winner===players[0]){
-multiplayerScores[0].points++;
-}else{
-multiplayerScores[1].points++;
-}
-
+if(winner === players[0]) multiplayerScores[0].points++;
+else multiplayerScores[1].points++;
 }
 
 updateMultiplayerRanking();
-
 gameOver();
+return;
 
 }else{
 
-if (mode === "single") {
+eliminated.push(p);
 
-    eliminated.push(p);
+const alive = players.filter(x => x.alive);
 
-    const alive = players.filter(x => x.alive);
+if(alive.length === 0){
+finishArena();
+}
 
-    if (alive.length === 0) {
-        finishArena();
-    }
-
-} else {
-    gameOver();
+gameOver();
+return;
 }
 
 }
 
 }
-break;
-
-}
-
-}
-
 }
 function finishArena(){
 if (mode === "single") {
