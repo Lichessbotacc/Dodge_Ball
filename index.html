@@ -901,32 +901,7 @@ setTimeout(() => {
 }, 10000); // 🔥 10 SEKUNDEN NACH JEDEM MATCH
     // Turnierrunde fertig → neue Paarungen bauen
 
-    setTimeout(()=>{
-
-        participants.sort((a,b)=>b.elo-a.elo);
-
-matches = [];
-activeMatchIndex = 0;
-
-for(let i=0;i<participants.length;i+=2){
-
-    if(!participants[i+1]) continue;
-
-    matches.push({
-        p1: participants[i],
-        p2: participants[i+1],
-        alive: [],
-        finished:false
-    });
-
-}
-
-if(matches.length > 0){
-    startMatch(0);
-}
-
-    }, 2000);
-}
+    
 }
 function finishArena(){
 
