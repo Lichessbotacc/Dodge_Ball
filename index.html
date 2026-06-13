@@ -231,9 +231,6 @@ document.getElementById("rankingMode").value;
 document.getElementById("settings").style.display="none";
 document.getElementById("menu").style.display="flex";
 }
-
-// ---------------- BALLS ----------------
-function createBall(){
 function createBallForMatch(match){
 
     const r = 15 + Math.random()*20;
@@ -256,6 +253,10 @@ function createBallForMatch(match){
     });
 
 }
+
+// ---------------- BALLS ----------------
+function createBall(){
+
 const r = 15 + Math.random()*20;
 
 let x,y;
