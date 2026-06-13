@@ -639,6 +639,8 @@ function startTournament(){
             "DU"
         )
     );
+balls = [];
+players = [];
 players = participants;
     // Bots
     for(let i=0;i<aiBotCount;i++){
@@ -817,7 +819,7 @@ if(keys["arrowleft"]) players[1].x-=5;
 if(keys["arrowright"]) players[1].x+=5;
 }
 
-if(mode==="ai" || mode==="single" || mode==="multi"){
+if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
 
 for(const p of players){
 
