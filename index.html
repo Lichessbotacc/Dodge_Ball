@@ -866,14 +866,39 @@ activeMatchIndex++;
 
 
 
-if(activeMatchIndex < matches.length){
+setTimeout(() => {
 
-    setTimeout(()=>{
+    activeMatchIndex++;
+
+    if (activeMatchIndex < matches.length) {
         startMatch(activeMatchIndex);
-    }, 2000);
+    } else {
 
-}else{
+        // Runde fertig → neue Runde bauen
+        participants.sort((a,b)=>b.elo-a.elo);
 
+        matches = [];
+        activeMatchIndex = 0;
+
+        for (let i = 0; i < participants.length; i += 2) {
+            if (!participants[i+1]) break;
+
+            matches.push({
+                p1: participants[i],
+                p2: participants[i+1],
+                alive: [],
+                finished: false
+            });
+        }
+
+        if (matches.length > 0) {
+            setTimeout(() => {
+                startMatch(0);
+            }, 10000); // 🔥 10 SEKUNDEN NACH RUNDE
+        }
+    }
+
+}, 10000); // 🔥 10 SEKUNDEN NACH JEDEM MATCH
     // Turnierrunde fertig → neue Paarungen bauen
 
     setTimeout(()=>{
@@ -1029,12 +1054,8 @@ else{
                     1 - expectedWinner;
 
                 // Änderungen
-                const winnerChange =
-                    K * (1 - expectedWinner);
-
-                const loserChange =
-                    K * (0 - expectedLoser);
-
+                const winnerChange = K * (1 - expectedWinner) * 2;
+                const loserChange = K * (0 - expectedLoser) * 2;
                 // Anwenden
                 winnerPlayer.elo += winnerChange;
                 loserPlayer.elo += loserChange;
