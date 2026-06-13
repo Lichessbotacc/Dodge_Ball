@@ -527,8 +527,8 @@ function startTournament(){
         });
     }
 
-    startMatch(0);
-    tournamentSpawn();
+    activeMatchIndex = 0;
+startMatch(activeMatchIndex);
 }
 function startMatch(i){
     const m = matches[i];
@@ -549,7 +549,13 @@ function startMatch(i){
 
     // WICHTIG: Timer reset
     startTime = Date.now();
-        
+    // Start Bälle
+for(let i=0;i<startBallCount;i++){
+    createBall();
+}
+
+// Spawn starten (nur 1x!)
+spawnLoop();
 }
 // ---------------- SPAWN ----------------
 function loop(){
@@ -765,10 +771,45 @@ loser.lastChange = -change;
 // nächstes Match
 activeMatchIndex++;
 
+activeMatchIndex++;
+
 if(activeMatchIndex < matches.length){
-setTimeout(()=>{
-startMatch(activeMatchIndex);
-},2000);
+
+    setTimeout(()=>{
+        startMatch(activeMatchIndex);
+    }, 2000);
+
+}else{
+
+    // Turnierrunde fertig → neue Paarungen bauen
+
+    setTimeout(()=>{
+
+        participants = [];
+
+        for(const p of players){
+            participants.push(p);
+        }
+
+        participants.sort(()=>Math.random()-0.5);
+
+        matches = [];
+        activeMatchIndex = 0;
+
+        for(let i=0;i<participants.length;i+=2){
+            if(!participants[i+1]) break;
+
+            matches.push({
+                p1: participants[i],
+                p2: participants[i+1],
+                alive: [],
+                finished:false
+            });
+        }
+
+        startMatch(0);
+
+    }, 2000);
 }
 }
 function finishArena(){
