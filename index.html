@@ -661,12 +661,41 @@ function startTournament(){
 }
 function tryMatchmaking(){
 
+    if(waitingQueue.length < 2) return;
+
+    // Nach ELO sortieren
+    waitingQueue.sort((a,b)=>b.elo-a.elo);
+
     while(waitingQueue.length >= 2){
 
         const p1 = waitingQueue.shift();
-        const p2 = waitingQueue.shift();
 
-        const match = createMatch(p1,p2);
+        // besten Gegner suchen
+        let bestIndex = 0;
+        let bestDiff = Infinity;
+
+        for(let i=0;i<waitingQueue.length;i++){
+
+            const diff =
+                Math.abs(
+                    p1.elo -
+                    waitingQueue[i].elo
+                );
+
+            if(diff < bestDiff){
+
+                bestDiff = diff;
+                bestIndex = i;
+
+            }
+
+        }
+
+        const p2 =
+            waitingQueue.splice(bestIndex,1)[0];
+
+        const match =
+            createMatch(p1,p2);
 
         setupMatch(match);
 
@@ -1229,24 +1258,72 @@ html;
 }
 function updateEloTable(){
 
-let sorted = [...participants].sort((a,b)=>b.elo-a.elo);
+    let sorted =
+        [...participants]
+        .sort((a,b)=>b.elo-a.elo);
 
-let html = "";
+    let html = "";
 
-for(let i=0;i<sorted.length;i++){
+    for(let i=0;i<sorted.length;i++){
 
-html += `
-<div>
-${i+1}. ${sorted[i].name}<br>
-${Math.round(sorted[i].elo)}
-<span style="color:${sorted[i].lastChange>=0?'lime':'red'}">
-(${sorted[i].lastChange>=0?'+':''}${Math.round(sorted[i].lastChange)})
-</span>
-</div>
-`;
+        const p = sorted[i];
+
+        const active =
+            isPlayerInMatch(p);
+
+        const statusColor =
+            active ? "lime" : "red";
+
+        html += `
+        <div style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+            margin-bottom:8px;
+        ">
+
+            <div style="
+                width:12px;
+                height:12px;
+                border-radius:50%;
+                background:${statusColor};
+                flex-shrink:0;
+            "></div>
+
+            <div>
+                ${i+1}. ${p.name}<br>
+
+                ${Math.round(p.elo)}
+
+                <span style="
+                    color:${
+                        p.lastChange >= 0
+                        ? 'lime'
+                        : 'red'
+                    }
+                ">
+                (
+                    ${p.lastChange >= 0 ? '+' : ''}
+                    ${Math.round(p.lastChange)}
+                )
+                </span>
+
+            </div>
+
+        </div>
+        `;
+    }
+
+    document.getElementById("eloList").innerHTML =
+        html;
 }
+function isPlayerInMatch(player){
 
-document.getElementById("eloList").innerHTML = html;
+    return matches.some(match =>
+        match.running &&
+        match.players.includes(player)
+    );
+
 }
 // ---------------- DRAW ----------------
 function draw(){
