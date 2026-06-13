@@ -230,26 +230,36 @@ let valid = false;
 
 while(!valid){
 
-x = Math.random()*(canvas.width-r*2)+r;
-y = Math.random()*(canvas.height-r*2)+r;
+    x = Math.random()*(canvas.width - r*2) + r;
+    y = Math.random()*(canvas.height - r*2) + r;
 
-valid = true;
+    valid = true;
 
-for(const p of players){
+    let safe = true;
 
-const dx = p.x-x;
-const dy = p.y-y;
+    const allPlayers =
+        mode === "tournament"
+        ? matches[activeMatchIndex]?.alive || []
+        : players;
 
-const dist = Math.sqrt(dx*dx+dy*dy);
+    for(const p of allPlayers){
 
-if(dist < 200){
+        const dx = p.x - x;
+        const dy = p.y - y;
 
-valid = false;
-break;
+        const dist = Math.sqrt(dx*dx + dy*dy);
 
-}
-}
+        const minDistance = p.radius + r + 80;
 
+        if(dist < minDistance){
+            safe = false;
+            break;
+        }
+    }
+
+    if(!safe){
+        valid = false;
+    }
 }
 
 balls.push({
