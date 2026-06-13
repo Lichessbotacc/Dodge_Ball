@@ -175,6 +175,7 @@ let participants = [];
 let matches = [];
 let activeMatchIndex = 0;
 let tournamentRunning = false;
+let spawnActive = false;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -263,9 +264,19 @@ document.getElementById("balls").textContent = balls.length;
 function spawnLoop(){
     if(!running) return;
 
+    if(mode !== "tournament"){
+        spawnTimer = setTimeout(()=>{
+            createBall();
+            spawnLoop();
+        }, spawnDelay);
+    }
+}
+function tournamentSpawn(){
+    if(!running || mode !== "tournament") return;
+
     spawnTimer = setTimeout(()=>{
         createBall();
-        spawnLoop();
+        tournamentSpawn();
     }, spawnDelay);
 }
 // ---------------- AI ----------------
@@ -517,6 +528,7 @@ function startTournament(){
     }
 
     startMatch(0);
+    tournamentSpawn();
 }
 function startMatch(i){
     const m = matches[i];
@@ -537,14 +549,7 @@ function startMatch(i){
 
     // WICHTIG: Timer reset
     startTime = Date.now();
-
-    // Start Bälle
-    for(let j=0;j<startBallCount;j++){
-        createBall();
-    }
-
-    // 🔥 garantiert neue Spawns
-    spawnLoop();
+        
 }
 // ---------------- SPAWN ----------------
 function loop(){
