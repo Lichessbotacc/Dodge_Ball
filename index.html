@@ -338,15 +338,32 @@ players = [];
 running = true;
 startTime = Date.now();
 
-if(mode==="single"){
-players.push(
-createPlayer(
-300,
-300,
-"#00ff88",
-"Spieler"
-)
-);
+if (mode === "single") {
+
+    eliminated = [];
+    ranking = [];
+
+    const p = createPlayer(
+        canvas.width / 2,
+        canvas.height / 2,
+        "#00ff88",
+        "Spieler"
+    );
+
+    // Spieler bekommt auch Turnier-Stats
+    p.points = 0;
+    p.elo = 1500;
+    p.lastChange = 0;
+
+    players.push(p);
+    ranking.push(p);
+
+    // Start Bälle wie AI Modus
+    for (let i = 0; i < startBallCount; i++) {
+        createBall();
+    }
+
+    spawnLoop();
 }
 
 if(mode==="multi"){
@@ -569,7 +586,21 @@ gameOver();
 
 }else{
 
-gameOver();
+if (mode === "single") {
+
+    eliminated.push(p);
+
+    const alive = players.filter(x => x.alive);
+
+    if (alive.length === 0) {
+        finishArena();
+    }
+
+} else {
+    gameOver();
+}
+
+}
 
 }
 break;
@@ -580,7 +611,30 @@ break;
 
 }
 function finishArena(){
+if (mode === "single") {
 
+    const player = players[0];
+
+    if (rankingMode === "points") {
+        player.points += eliminated.length;
+    }
+
+    if (rankingMode === "elo") {
+
+        const K = 16;
+
+        const expected = 0.5; // solo match
+        const gain = K * (1 - expected);
+
+        player.elo += gain;
+        player.lastChange = gain;
+    }
+
+    updateRanking();
+
+    gameOver();
+    return;
+}
 eliminated.reverse();
 
 if(rankingMode === "points"){
