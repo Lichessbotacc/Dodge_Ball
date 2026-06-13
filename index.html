@@ -365,14 +365,14 @@ function spawnLoop(){
 
 }
 // ---------------- AI ----------------
-function updateAI(p, activeBalls = balls){
+function updateAI(p, balls);
 
 // Ziel wechseln
 if(
 !p.targetX ||
 !p.targetY ||
-Math.random() < 0.01 * p.reaction
-){
+Math.random() < 0.003 * p.reaction
+)
 p.targetX = Math.random() * canvas.width;
 p.targetY = Math.random() * canvas.height;
 }
