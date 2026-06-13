@@ -176,6 +176,7 @@ let matches = [];
 let activeMatchIndex = 0;
 let tournamentRunning = false;
 let spawnActive = false;
+let endDelay = 10000;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -416,7 +417,11 @@ Math.min(canvas.height-p.radius,p.y)
 function startGame(selectedMode){
 
 mode = selectedMode;
-
+if (selectedMode === "tournament") {
+    endDelay = 2000;
+} else {
+    endDelay = 10000;
+}
 document.getElementById("eloTable").style.display =
 (mode === "tournament") ? "block" : "none";
 document.getElementById("mode").textContent = mode;
@@ -874,7 +879,6 @@ setTimeout(() => {
         startMatch(activeMatchIndex);
     } else {
 
-        // Runde fertig → neue Runde bauen
         participants.sort((a,b)=>b.elo-a.elo);
 
         matches = [];
@@ -894,12 +898,12 @@ setTimeout(() => {
         if (matches.length > 0) {
             setTimeout(() => {
                 startMatch(0);
-            }, 10000); // 🔥 10 SEKUNDEN NACH RUNDE
+            }, endDelay);
         }
+
     }
 
-}, 10000); // 🔥 10 SEKUNDEN NACH JEDEM MATCH
-    // Turnierrunde fertig → neue Paarungen bauen
+}, endDelay);
 
     
 }
