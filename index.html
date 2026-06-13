@@ -261,29 +261,15 @@ vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
 
 document.getElementById("balls").textContent = balls.length;
 }
-function spawnLoop(){
-    if(!running) return;
 
-    if(mode === "tournament"){
-        setTimeout(()=>{
-            createBall();
-            spawnLoop();
-        }, spawnDelay);
-        return;
+function tournamentSpawnLoop(){
+    if(mode !== "tournament") return;
+
+    if(running){
+        createBall();
     }
 
-    setTimeout(()=>{
-        createBall();
-        spawnLoop();
-    }, spawnDelay);
-}
-function tournamentSpawn(){
-    if(!running || mode !== "tournament") return;
-
-    spawnTimer = setTimeout(()=>{
-        createBall();
-        tournamentSpawn();
-    }, spawnDelay);
+    setTimeout(tournamentSpawnLoop, spawnDelay);
 }
 // ---------------- AI ----------------
 function updateAI(p){
@@ -560,6 +546,10 @@ for(let i=0;i<startBallCount;i++){
     createBall();
 }
 
+// 👉 DAS HINZUFÜGEN:
+if (spawnTimer) clearTimeout(spawnTimer);
+tournamentSpawnLoop();
+
 }
 // ---------------- SPAWN ----------------
 function loop(){
@@ -775,7 +765,7 @@ loser.lastChange = -change;
 // nächstes Match
 activeMatchIndex++;
 
-activeMatchIndex++;
+
 
 if(activeMatchIndex < matches.length){
 
@@ -818,7 +808,10 @@ if(activeMatchIndex < matches.length){
 }
 function finishArena(){
 
-running = false;
+// NICHT stoppen im Turnier
+if(mode !== "tournament"){
+    running = false;
+}
 
 if(spawnTimer){
 clearTimeout(spawnTimer);
