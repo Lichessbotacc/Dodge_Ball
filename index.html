@@ -522,7 +522,7 @@ function startTournament(){
     }
 
     // Shuffle
-    participants.sort(()=>Math.random()-0.5);
+    participants.sort((a,b)=>b.elo-a.elo);
 
     // Matches bauen (1vs1)
     for(let i=0;i<participants.length;i+=2){
@@ -796,29 +796,27 @@ if(activeMatchIndex < matches.length){
 
     setTimeout(()=>{
 
-        participants = [];
+        participants.sort((a,b)=>b.elo-a.elo);
 
-        for(const p of players){
-            participants.push(p);
-        }
+matches = [];
+activeMatchIndex = 0;
 
-        participants.sort(()=>Math.random()-0.5);
+for(let i=0;i<participants.length;i+=2){
 
-        matches = [];
-        activeMatchIndex = 0;
+    if(!participants[i+1]) continue;
 
-        for(let i=0;i<participants.length;i+=2){
-            if(!participants[i+1]) break;
+    matches.push({
+        p1: participants[i],
+        p2: participants[i+1],
+        alive: [],
+        finished:false
+    });
 
-            matches.push({
-                p1: participants[i],
-                p2: participants[i+1],
-                alive: [],
-                finished:false
-            });
-        }
+}
 
-        startMatch(0);
+if(matches.length > 0){
+    startMatch(0);
+}
 
     }, 2000);
 }
