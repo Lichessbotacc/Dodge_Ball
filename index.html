@@ -950,7 +950,7 @@ return;
 }
 }
 }
-function finishMatch(match,winner,loser){
+function finishMatch(match, winner, loser){
 
     clearInterval(match.spawnTimer);
 
@@ -959,13 +959,14 @@ function finishMatch(match,winner,loser){
     const K = 24;
 
     const expected =
-        1/(1+Math.pow(
-            10,
-            (loser.elo-winner.elo)/400
-        ));
+        1 / (
+            1 + Math.pow(
+                10,
+                (loser.elo - winner.elo) / 400
+            )
+        );
 
-    const change =
-        K * (1-expected);
+    const change = K * (1 - expected);
 
     winner.elo += change;
     loser.elo -= change;
@@ -973,32 +974,27 @@ function finishMatch(match,winner,loser){
     winner.lastChange = change;
     loser.lastChange = -change;
 
-    // RESET
     winner.alive = true;
     loser.alive = true;
 
-    // Match entfernen
-    matches = matches.filter(m => m.id !== match.id);
+    matches = matches.filter(
+        m => m.id !== match.id
+    );
 
-    // Queue mit Delay
-    setTimeout(()=>{
+    playerMatchMap.delete(winner.name);
+    playerMatchMap.delete(loser.name);
+
+    const nextMatchDelay =
+        3000 + Math.random() * 2000;
+
+    setTimeout(() => {
 
         waitingQueue.push(winner);
         waitingQueue.push(loser);
 
         tryMatchmaking();
 
-  const nextMatchDelay =
-    3000 + Math.random()*2000;
-
-setTimeout(()=>{
-
-    waitingQueue.push(winner);
-    waitingQueue.push(loser);
-
-    tryMatchmaking();
-
-}, nextMatchDelay);
+    }, nextMatchDelay);
 
 }
 function finishArena(){
