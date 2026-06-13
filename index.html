@@ -264,12 +264,18 @@ document.getElementById("balls").textContent = balls.length;
 function spawnLoop(){
     if(!running) return;
 
-    if(mode !== "tournament"){
-        spawnTimer = setTimeout(()=>{
+    if(mode === "tournament"){
+        setTimeout(()=>{
             createBall();
             spawnLoop();
         }, spawnDelay);
+        return;
     }
+
+    setTimeout(()=>{
+        createBall();
+        spawnLoop();
+    }, spawnDelay);
 }
 function tournamentSpawn(){
     if(!running || mode !== "tournament") return;
@@ -554,8 +560,6 @@ for(let i=0;i<startBallCount;i++){
     createBall();
 }
 
-// Spawn starten (nur 1x!)
-spawnLoop();
 }
 // ---------------- SPAWN ----------------
 function loop(){
