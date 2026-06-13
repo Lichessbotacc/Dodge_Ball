@@ -827,18 +827,18 @@ const loser = (winner === m.p1) ? m.p2 : m.p1;
 
 function getKFactor(player){
 
-// nur ganz am Anfang große Sprünge
-if(player.games < 3){
-    return 50;
+// ganz neue Bots
+if(player.games < 2){
+    return 16;
 }
 
-// kurz danach fast normal
-if(player.games < 8){
-    return 28;
+// kurz Placement
+if(player.games < 5){
+    return 10;
 }
 
-// stabiles Rating
-return 12;
+// normales Rating
+return 4;
 }
 
 const K =
@@ -851,7 +851,11 @@ getKFactor(loser)
 const expected =
 1/(1+Math.pow(10,(loser.elo - winner.elo)/400));
 
-const change = K * (1 - expected);
+const change =
+Math.max(
+0.5,
+K * (1 - expected)
+);
 
 winner.elo += change;
 loser.elo -= change;
