@@ -467,76 +467,84 @@ spawnLoop();
 updateRanking();
 }
 function startTournament(){
-running = true;
-balls = [];
-players = [];
-ranking = [];
+    running = true;
 
-participants = [];
+    balls = [];
+    players = [];
+    matches = [];
+    participants = [];
+    activeMatchIndex = 0;
 
-// DU + Bots
-participants.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","DU"));
+    // Spieler + Bots erstellen
+    participants.push(createPlayer(
+        canvas.width/2,
+        canvas.height/2,
+        "#00ff88",
+        "DU"
+    ));
 
-for(let i=0;i<aiBotCount;i++){
-participants.push(createPlayer(
-Math.random()*canvas.width,
-Math.random()*canvas.height,
-`hsl(${i*360/aiBotCount},100%,50%)`,
-"Bot "+(i+1)
-));
-}
+    for(let i=0;i<aiBotCount;i++){
+        participants.push(createPlayer(
+            Math.random()*canvas.width,
+            Math.random()*canvas.height,
+            `hsl(${i*360/aiBotCount},100%,50%)`,
+            "Bot "+(i+1)
+        ));
+    }
 
-// Shuffle
-participants.sort(()=>Math.random()-0.5);
+    // Shuffle
+    participants.sort(()=>Math.random()-0.5);
 
-matches = [];
+    // Matches bauen (1vs1)
+    for(let i=0;i<participants.length;i+=2){
+        if(!participants[i+1]) break;
 
-for(let i=0;i<participants.length;i+=2){
+        matches.push({
+            p1: participants[i],
+            p2: participants[i+1],
+            alive: [],
+            finished:false
+        });
+    }
 
-matches.push({
-p1: participants[i],
-p2: participants[i+1],
-balls: [],
-alive: [participants[i],participants[i+1]],
-finished:false
-});
-
-}
-
-activeMatchIndex = 0;
-
-startMatch(activeMatchIndex);
+    startMatch(0);
 }
 function startMatch(i){
+    const m = matches[i];
+    if(!m) return;
 
-balls = [];
+    balls = [];
 
-const m = matches[i];
+    // Spieler reset
+    m.alive = [m.p1, m.p2];
+    m.p1.alive = true;
+    m.p2.alive = true;
 
-// 🔥 wichtig: reset alive state
-m.alive = [m.p1, m.p2];
-m.p1.alive = true;
-m.p2.alive = true;
+    m.p1.x = canvas.width * 0.3;
+    m.p1.y = canvas.height / 2;
 
-// Positionen
-m.p1.x = canvas.width*0.3;
-m.p1.y = canvas.height/2;
+    m.p2.x = canvas.width * 0.7;
+    m.p2.y = canvas.height / 2;
 
-m.p2.x = canvas.width*0.7;
-m.p2.y = canvas.height/2;
+    // WICHTIG: Timer reset
+    startTime = Date.now();
 
-// Balls neu
-for(let j=0;j<startBallCount;j++){
-createBall();
-}
+    // Start Bälle
+    for(let j=0;j<startBallCount;j++){
+        createBall();
+    }
+
+    // 🔥 garantiert neue Spawns
+    spawnLoop();
 }
 // ---------------- SPAWN ----------------
 function spawnLoop(){
-if(!running) return;
-spawnTimer=setTimeout(()=>{
-createBall();
-spawnLoop();
-},spawnDelay);
+    if(!running) return;
+
+    setTimeout(()=>{
+        createBall();
+        spawnLoop();
+    }, spawnDelay);
 }
 
 // ---------------- RESTART ----------------
@@ -632,33 +640,33 @@ check(p);
 }
 }
 function updateTournament(){
+    const m = matches[activeMatchIndex];
+    if(!m) return;
 
-const m = matches[activeMatchIndex];
+    // AI bewegen
+    for(const p of m.alive){
+        if(p.name.startsWith("Bot")){
+            updateAI(p);
+        }
+    }
 
-if(!m) return;
+    // Bälle bewegen
+    for(const b of balls){
+        b.x += b.vx;
+        b.y += b.vy;
 
-// AI Movement nur Bot
-for(const p of m.alive){
-if(p.name.startsWith("Bot")){
-updateAI(p);
-}
-}
+        if(b.x-b.radius<0||b.x+b.radius>canvas.width) b.vx *= -1;
+        if(b.y-b.radius<0||b.y+b.radius>canvas.height) b.vy *= -1;
+    }
 
-// Bälle bewegen
-for(const b of balls){
-b.x += b.vx;
-b.y += b.vy;
+    // Collision
+    for(const p of m.alive){
+        checkTournament(p,m);
+    }
 
-if(b.x-b.radius<0||b.x+b.radius>canvas.width)b.vx*=-1;
-if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
-}
-
-// Collision
-for(const p of m.alive){
-checkTournament(p,m);
-}
-
-updateEloTable();
+    // Timer UI
+    document.getElementById("time").textContent =
+        Math.floor((Date.now()-startTime)/1000);
 }
 // ---------------- COLLISION ----------------
 function check(p){
@@ -1000,49 +1008,37 @@ document.getElementById("eloList").innerHTML = html;
 }
 // ---------------- DRAW ----------------
 function draw(){
-ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
 
-for(const b of balls){
-ctx.beginPath();
-ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-ctx.fillStyle="#ff4444";
-ctx.fill();
+    for(const b of balls){
+        ctx.beginPath();
+        ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+        ctx.fillStyle="#ff4444";
+        ctx.fill();
+    }
+
+    // 🔥 FIX: Tournament benutzt alive statt players
+    const render =
+        mode === "tournament"
+        ? (matches[activeMatchIndex]?.alive || [])
+        : players;
+
+    for(const p of render){
+
+        if(!p.alive) continue;
+
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
+        ctx.fillStyle=p.color;
+        ctx.fill();
+
+        ctx.fillStyle="white";
+        ctx.font="14px Arial";
+        ctx.textAlign="center";
+
+        ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+    }
 }
-
-for(const p of players){
-
-if(!p.alive) continue;
-
-ctx.beginPath();
-ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
-ctx.fillStyle=p.color;
-ctx.fill();
-ctx.fillStyle = "white";
-ctx.font = "14px Arial";
-ctx.textAlign = "center";
-
-ctx.fillText(
-p.name,
-p.x,
-p.y - p.radius - 10
-);
-}
-}
-
-// ---------------- LOOP ----------------
-function loop(){
-
-update();
-draw();
-
-// 🔥 LIVE ELO UPDATE IMMER
-if(mode === "tournament"){
-updateEloTable();
-}
-
-requestAnimationFrame(loop);
-}
-
 // ---------------- SINGLE CONTROL ----------------
 function moveSingle(x,y){
 players[0].x=x;
