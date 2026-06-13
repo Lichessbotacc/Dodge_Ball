@@ -563,47 +563,17 @@ let d = Math.sqrt(dx*dx + dy*dy);
 if(d < p.radius + b.radius){
 
 p.alive = false;
-
-if(mode === "ai"){
-
 eliminated.push(p);
 
+// 👉 WICHTIG: nur 1 Spieler übrig?
 const alive = players.filter(x => x.alive);
 
-if(alive.length <= 1){
-finishArena();
-}
-return;
-
-}else if(mode === "multi"){
-
-const winner = players.find(x => x !== p && x.alive);
-
-if(winner){
-if(winner === players[0]) multiplayerScores[0].points++;
-else multiplayerScores[1].points++;
+if(alive.length === 1){
+finishArena(); // TURNIER ENDE
 }
 
-
-gameOver();
-return;
-
-}else{
-
-eliminated.push(p);
-
-const alive = players.filter(x => x.alive);
-
-if(alive.length === 0){
-finishArena();
-}
-
-gameOver();
 return;
 }
-
-}
-
 }
 }
 function finishArena(){
