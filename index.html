@@ -194,9 +194,9 @@ return {
     radius: playerRadiusSetting,
     color,
     name,
-    points: data.points || 0,
-    elo: data.elo ?? 1500,
-    lastChange: data.lastChange || 0,
+    points: data.points,
+    elo: data.elo,
+    lastChange: data.lastChange,
     alive: true
 };
 }
@@ -342,7 +342,6 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 
 }
 // ---------------- START ----------------
-
     }function startGame(selectedMode){
 
     if(mode !== "ai"){
@@ -644,7 +643,13 @@ updateRanking();
 
 running = false;
 roundFinished = true;
-
+for (const p of players) {
+    globalStats[p.name] = {
+        elo: p.elo,
+        points: p.points,
+        lastChange: p.lastChange
+    };
+}
 const winner = eliminated[0];
 
 document.getElementById("gameOver").style.display = "flex";
@@ -652,13 +657,7 @@ document.getElementById("finalTime").innerHTML =
 "Sieger: " + winner.name;
 }
 // AFTER Ranking + Winner calculation
-for(const p of ranking){
-    globalStats[p.name] = {
-        elo: p.elo,
-        points: p.points,
-        lastChange: p.lastChange
-    };
-}
+
 function updateRanking(){
 
 const sorted = [...ranking];
