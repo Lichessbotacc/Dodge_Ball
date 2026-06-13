@@ -495,7 +495,7 @@ if(!running) return;
 document.getElementById("time").textContent =
 Math.floor((Date.now()-startTime)/1000);
 
-// MOVEMENT
+// MOVEMENT (MULTI)
 if(mode==="multi"){
 if(keys["w"]) players[0].y-=5;
 if(keys["s"]) players[0].y+=5;
@@ -508,18 +508,14 @@ if(keys["arrowleft"]) players[1].x-=5;
 if(keys["arrowright"]) players[1].x+=5;
 }
 
-if(mode==="ai"){
-
+// 🧠 BOTS IMMER BEWEGEN (HIER REIN!)
 for(const p of players){
 
-if(p.alive){
-updateAI(p);
-}
+    if(!p.alive) continue;
 
-}
+    if(p.name.includes("Spieler")) continue;
 
-updateRanking();
-
+    updateAI(p);
 }
 
 // bounds
@@ -541,8 +537,9 @@ if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
 for(const p of players){
 check(p);
 }
-}
 
+updateRanking();
+}
 // ---------------- COLLISION ----------------
 function check(p){
 if(!p.alive) return;
