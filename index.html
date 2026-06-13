@@ -181,7 +181,7 @@ let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // ---------------- PLAYER FACTORY ----------------
-function createPlayer(x,y,color,name){
+function createPlayer(x,y,color,name,skill=null){
 
 return {
 x,
@@ -192,11 +192,13 @@ name,
 points:0,
 elo:1500,
 lastChange:0,
-alive:true
+alive:true,
+
+// 🔥 individueller Skill
+skill: skill ?? Math.random()
 };
 
 }
-
 // ---------------- INPUT ----------------
 const keys = {};
 document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
@@ -448,9 +450,11 @@ players.push({
 x:Math.random()*canvas.width,
 y:Math.random()*canvas.height,
 radius:playerRadiusSetting,
-alive:true
-});
+alive:true,
 
+// 🔥 eigener Skill
+skill: bot.skill ?? Math.random()
+});
 }
 
 }
@@ -469,7 +473,8 @@ createPlayer(
 Math.random()*canvas.width,
 Math.random()*canvas.height,
 `hsl(${i*360/aiBotCount},100%,50%)`,
-"Bot "+(i+1)
+"Bot "+(i+1),
+Math.random()
 )
 );
 
@@ -490,7 +495,8 @@ players.push({
 x:Math.random()*canvas.width,
 y:Math.random()*canvas.height,
 radius:playerRadiusSetting,
-alive:true
+alive:true,
+skill: bot.skill ?? Math.random()
 });
 
 }
