@@ -290,7 +290,7 @@ function spawnLoop(){
 }
 // ---------------- AI ----------------
 function updateAI(p){
-
+const skill = p.skill ?? 0.5;
 // Neues Ziel wählen
 if(!p.targetX || !p.targetY || Math.random() < 0.03){
 p.targetX = Math.random() * canvas.width;
@@ -348,13 +348,12 @@ vx = (Math.random()-0.5)*6;
 vy = (Math.random()-0.5)*6;
 }
 
-const speed = 4.5;
+const baseSpeed = 2.5 + skill * 4.5;
 
 let len = Math.sqrt(vx*vx + vy*vy) || 1;
 
-p.x += (vx/len)*speed;
-p.y += (vy/len)*speed;
-
+p.x += (vx/len) * baseSpeed;
+p.y += (vy/len) * baseSpeed;
 // kleine Randomness nur minimal halten
 p.x += (Math.random()-0.5)*0.4;
 p.y += (Math.random()-0.5)*0.4;
@@ -513,14 +512,20 @@ function startTournament(){
     ));
 
     for(let i=0;i<aiBotCount;i++){
-        participants.push(createPlayer(
+
+    const skill = Math.random(); // nur Tournament
+
+    participants.push({
+        ...createPlayer(
             Math.random()*canvas.width,
             Math.random()*canvas.height,
             `hsl(${i*360/aiBotCount},100%,50%)`,
             "Bot "+(i+1)
-        ));
-    }
-
+        ),
+        skill,
+        isTournamentBot: true
+    });
+}
     // Shuffle
     participants.sort((a,b)=>b.elo-a.elo);
 
