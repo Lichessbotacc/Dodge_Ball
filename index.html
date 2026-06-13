@@ -356,7 +356,24 @@ lastChange:0
 }
 
 }
+if(mode === "single"){
 
+const existingPlayer =
+ranking.find(x => x.name === "Spieler");
+
+if(!existingPlayer){
+
+ranking.push({
+name:"Spieler",
+color:"#00ff88",
+points:0,
+elo:1500,
+lastChange:0
+});
+
+}
+
+}
 if(mode==="single"){
 
 players.push(
@@ -589,6 +606,16 @@ if(rankPlayer){
 rankPlayer.points +=
 (eliminated.length-i);
 
+}else{
+
+ranking.push({
+name:p.name,
+color:p.color,
+points:(eliminated.length-i),
+elo:1500,
+lastChange:0
+});
+
 }
 
 }
@@ -605,17 +632,41 @@ for(let i=0;i<eliminated.length;i++){
 
 for(let j=i+1;j<eliminated.length;j++){
 
-const a =
+let a =
 ranking.find(
 x=>x.name===eliminated[i].name
 );
 
-const b =
+if(!a){
+
+a = {
+name:eliminated[i].name,
+color:eliminated[i].color,
+points:0,
+elo:1500,
+lastChange:0
+};
+
+ranking.push(a);
+}
+
+let b =
 ranking.find(
 x=>x.name===eliminated[j].name
 );
 
-if(!a || !b) continue;
+if(!b){
+
+b = {
+name:eliminated[j].name,
+color:eliminated[j].color,
+points:0,
+elo:1500,
+lastChange:0
+};
+
+ranking.push(b);
+}
 
 const expectedA =
 1/(1+Math.pow(10,(b.elo-a.elo)/400));
