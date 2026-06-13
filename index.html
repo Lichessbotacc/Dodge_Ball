@@ -334,7 +334,24 @@ moveY /= moveDist;
 // Avoidance
 let avoidX = 0;
 let avoidY = 0;
+// 🔥 Wände vermeiden
+const wallMargin = 140;
 
+if(p.x < wallMargin){
+avoidX += (wallMargin - p.x) * 0.15;
+}
+
+if(p.x > canvas.width - wallMargin){
+avoidX -= (p.x - (canvas.width - wallMargin)) * 0.15;
+}
+
+if(p.y < wallMargin){
+avoidY += (wallMargin - p.y) * 0.15;
+}
+
+if(p.y > canvas.height - wallMargin){
+avoidY -= (p.y - (canvas.height - wallMargin)) * 0.15;
+}
 for(const b of balls){
 
 const dx = p.x - b.x;
