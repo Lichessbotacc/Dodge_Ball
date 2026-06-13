@@ -141,6 +141,10 @@ window.addEventListener("resize", resize);
 let balls = [];
 let players = [];
 let ranking = [];
+let multiplayerScores = [
+{name:"Spieler 1",points:0},
+{name:"Spieler 2",points:0}
+];
 let eliminated = [];
 let running = false;
 let startTime = 0;
@@ -155,7 +159,6 @@ let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let aiBotCount = 10;
 let rankingMode = "points";
-let globalStats = {};
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -176,30 +179,7 @@ alive:true
 };
 
 }
-function getPlayer(name, x, y, color){
 
-if(!globalStats[name]){
-    globalStats[name] = {
-        elo: 1500,
-        points: 0,
-        lastChange: 0
-    };
-}
-
-const data = globalStats[name];
-
-return {
-    x,
-    y,
-    radius: playerRadiusSetting,
-    color,
-    name,
-    points: data.points,
-    elo: data.elo,
-    lastChange: data.lastChange,
-    alive: true
-};
-}
 // ---------------- INPUT ----------------
 const keys = {};
 document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
@@ -342,7 +322,7 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 
 }
 // ---------------- START ----------------
-    function startGame(selectedMode){
+function startGame(selectedMode){
 
     if(mode !== "ai"){
         currentRound = 1;
@@ -362,34 +342,44 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
     running = true;
     startTime = Date.now();
 
-    // =========================
-    // SINGLEPLAYER (TURNIER)
-    // =========================
+    // ================================
+    // SINGLEPLAYER = TURNIER SYSTEM
+    // ================================
     if(mode === "single"){
 
-        const player = getPlayer(
-            "Spieler",
+        const player = createPlayer(
             canvas.width / 2,
             canvas.height / 2,
-            "#00ff88"
+            "#00ff88",
+            "Spieler"
         );
+
+        player.points = 0;
+        player.elo = 1500;
+        player.lastChange = 0;
 
         players.push(player);
         ranking.push(player);
 
+        // Bots als Gegner
         for(let i = 0; i < aiBotCount; i++){
 
-            const bot = getPlayer(
-                "Bot " + (i + 1),
+            const bot = createPlayer(
                 Math.random() * canvas.width,
                 Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`
+                `hsl(${i * 360 / aiBotCount},100%,50%)`,
+                "Bot " + (i + 1)
             );
+
+            bot.points = 0;
+            bot.elo = 1500;
+            bot.lastChange = 0;
 
             players.push(bot);
             ranking.push(bot);
         }
 
+        // Start-Bälle
         for(let i = 0; i < startBallCount; i++){
             createBall();
         }
@@ -397,29 +387,18 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
         spawnLoop();
     }
 
-    // =========================
-    // MULTIPLAYER + BOTS
-    // =========================
+    // ================================
+    // MULTIPLAYER
+    // ================================
     if(mode === "multi"){
 
-        const p1 = getPlayer("Spieler 1", 200, 200, "#00ff88");
-        const p2 = getPlayer("Spieler 2", 400, 200, "#4488ff");
+        const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
+        const p2 = createPlayer(400,200,"#4488ff","Spieler 2");
+
+        p1.points = 0;
+        p2.points = 0;
 
         players.push(p1, p2);
-        ranking.push(p1, p2);
-
-        for(let i = 0; i < aiBotCount; i++){
-
-            const bot = getPlayer(
-                "Bot " + (i + 1),
-                Math.random() * canvas.width,
-                Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`
-            );
-
-            players.push(bot);
-            ranking.push(bot);
-        }
 
         for(let i = 0; i < startBallCount; i++){
             createBall();
@@ -428,9 +407,9 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
         spawnLoop();
     }
 
-    // =========================
-    // AI SPECTATE
-    // =========================
+    // ================================
+    // AI SPECTATE (TURNIER MODE)
+    // ================================
     if(mode === "ai"){
 
         if(currentRound === 1){
@@ -439,12 +418,16 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 
         for(let i = 0; i < aiBotCount; i++){
 
-            const bot = getPlayer(
-                "Bot " + (i + 1),
+            const bot = createPlayer(
                 Math.random() * canvas.width,
                 Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`
+                `hsl(${i * 360 / aiBotCount},100%,50%)`,
+                "Bot " + (i + 1)
             );
+
+            bot.points = 0;
+            bot.elo = 1500;
+            bot.lastChange = 0;
 
             bot.aggressiveness = Math.random();
             bot.fear = Math.random();
@@ -512,7 +495,7 @@ if(!running) return;
 document.getElementById("time").textContent =
 Math.floor((Date.now()-startTime)/1000);
 
-// MOVEMENT (MULTI)
+// MOVEMENT
 if(mode==="multi"){
 if(keys["w"]) players[0].y-=5;
 if(keys["s"]) players[0].y+=5;
@@ -525,14 +508,18 @@ if(keys["arrowleft"]) players[1].x-=5;
 if(keys["arrowright"]) players[1].x+=5;
 }
 
-// 🧠 BOTS IMMER BEWEGEN (HIER REIN!)
+if(mode==="ai"){
+
 for(const p of players){
 
-    if(!p.alive) continue;
+if(p.alive){
+updateAI(p);
+}
 
-    if(p.name.includes("Spieler")) continue;
+}
 
-    updateAI(p);
+updateRanking();
+
 }
 
 // bounds
@@ -554,9 +541,8 @@ if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
 for(const p of players){
 check(p);
 }
-
-updateRanking();
 }
+
 // ---------------- COLLISION ----------------
 function check(p){
 if(!p.alive) return;
@@ -571,125 +557,248 @@ let d = Math.sqrt(dx*dx + dy*dy);
 if(d < p.radius + b.radius){
 
 p.alive = false;
-eliminated.push({
-    ...p,
-    deathIndex: eliminated.length
-});
 
-// 👉 WICHTIG: nur 1 Spieler übrig?
+if(mode === "ai"){
+
+eliminated.push(p);
+
 const alive = players.filter(x => x.alive);
 
-if(alive.length === 1){
-finishArena(); // TURNIER ENDE
+if(alive.length <= 1){
+finishArena();
+}
+return;
+
+}else if(mode === "multi"){
+
+const winner = players.find(x => x !== p && x.alive);
+
+if(winner){
+if(winner === players[0]) multiplayerScores[0].points++;
+else multiplayerScores[1].points++;
 }
 
+updateMultiplayerRanking();
+gameOver();
+return;
+
+}else{
+
+eliminated.push(p);
+
+const alive = players.filter(x => x.alive);
+
+if(alive.length === 0){
+finishArena();
+}
+
+gameOver();
 return;
 }
+
+}
+
 }
 }
 function finishArena(){
+if (mode === "single") {
 
-// letzte Person hinzufügen
-const alive = players.find(p => p.alive);
-if(alive) eliminated.push(alive);
+    const player = players[0];
 
-// Reihenfolge: letzter ist Gewinner
+    if (rankingMode === "points") {
+        player.points += eliminated.length;
+    }
 
+    if (rankingMode === "elo") {
 
-const K = 24;
+        const K = 16;
 
-// =========================
-// POINTS SYSTEM
-// =========================
+        const expected = 0.5; // solo match
+        const gain = K * (1 - expected);
+
+        player.elo += gain;
+        player.lastChange = gain;
+    }
+
+    updateRanking();
+
+    gameOver();
+    return;
+}
+eliminated.reverse();
+
 if(rankingMode === "points"){
 
-for(let i = 0; i < eliminated.length; i++){
-eliminated[i].points += (eliminated.length - i - 1);
+for(let i=0;i<eliminated.length;i++){
+
+const bot =
+ranking.find(
+b=>b.name===eliminated[i].name
+);
+
+if(bot){
+
+bot.points +=
+eliminated.length-i-1;
+
+}
+
+}
+
+}else{
+
+const K = 16;
+for(const bot of ranking){
+bot.lastChange = 0;
+}
+for(let i=0;i<eliminated.length;i++){
+
+const botA =
+ranking.find(
+b=>b.name===eliminated[i].name
+);
+
+for(let j=i+1;j<eliminated.length;j++){
+
+const botB =
+ranking.find(
+b=>b.name===eliminated[j].name
+);
+
+const expectedA =
+1/(1+Math.pow(
+10,
+(botB.elo-botA.elo)/400
+));
+
+const expectedB =
+1-expectedA;
+
+const gainA = K*(1-expectedA);
+const gainB = K*(0-expectedB);
+
+botA.elo += gainA;
+botB.elo += gainB;
+
+botA.lastChange += gainA;
+botB.lastChange += gainB;
+
 }
 
 }
 
-// =========================
-// ELO SYSTEM (korrekt)
-// =========================
-else{
-
-for(let i = 0; i < eliminated.length; i++){
-
-for(let j = i + 1; j < eliminated.length; j++){
-
-let A = eliminated[i];
-let B = eliminated[j];
-
-let expectedA = 1 / (1 + Math.pow(10, (B.elo - A.elo) / 400));
-let expectedB = 1 - expectedA;
-
-// 👉 wichtig: Ranking-basierter Kampf
-let scoreA = 1;
-let scoreB = 0;
-
-let gainA = K * (scoreA - expectedA);
-let gainB = K * (scoreB - expectedB);
-
-A.elo += gainA;
-B.elo += gainB;
-
-A.lastChange = (A.lastChange || 0) + gainA;
-B.lastChange = (B.lastChange || 0) + gainB;
-
-}
-}
 }
 
-// Ranking aktualisieren
 updateRanking();
 
 running = false;
 roundFinished = true;
-for (const p of players) {
-    globalStats[p.name] = {
-        elo: p.elo,
-        points: p.points,
-        lastChange: p.lastChange
-    };
-}
+
 const winner = eliminated[0];
 
 document.getElementById("gameOver").style.display = "flex";
+
 document.getElementById("finalTime").innerHTML =
-"Sieger: " + winner.name;
+"Runde " + currentRound + "/" + tournamentRounds +
+"<br>Sieger: " + winner.name;
+
+if(currentRound < tournamentRounds){
+
+currentRound++;
+
+setTimeout(()=>{
+
+document.getElementById("gameOver").style.display="none";
+
+restartGame();
+
+},15000);
+
+}else{
+
+document.getElementById("finalTime").innerHTML +=
+"<br><br><b>TURNIER BEENDET</b>";
+
 }
-// AFTER Ranking + Winner calculation
+}
 
 function updateRanking(){
 
-const sorted = [...eliminated];
+const sorted = [...ranking];
 
-// lebende am Ende hinzufügen
-for(const p of players){
-    if(p.alive && !sorted.includes(p)){
-        sorted.push(p);
-    }
+if(rankingMode === "points"){
+
+sorted.sort(
+(a,b)=>b.points-a.points
+);
+
+}else{
+
+sorted.sort(
+(a,b)=>b.elo-a.elo
+);
+
 }
 
 let html =
 "<b>Turnier Ranking</b><br>" +
-"Modus: " + rankingMode + "<br>" +
-"Runde: " + currentRound + "/" + tournamentRounds + "<br><br>";
+"Modus: " +
+(rankingMode==="elo"?"ELO":"Punkte") +
+"<br>" +
+"Runde: " +
+currentRound +
+"/" +
+tournamentRounds +
+"<br><br>";
 
 for(let i=0;i<sorted.length;i++){
 
-let p = sorted[i];
+if(rankingMode==="elo"){
 
-if(rankingMode === "elo"){
-html += (i+1)+". "+p.name+" - "+Math.round(p.elo)+" ELO<br>";
+html +=
+(i+1)+". "
++sorted[i].name
++" - "
++Math.round(sorted[i].elo)
++" ELO ("
++(sorted[i].lastChange >= 0 ? "+" : "")
++Math.round(sorted[i].lastChange)
++")<br>";
+
 }else{
-html += (i+1)+". "+p.name+" - "+p.points+" Punkte<br>";
-}
+
+html +=
+(i+1)+". "
++sorted[i].name
++" - "
++sorted[i].points
++" Punkte<br>";
 
 }
 
-document.getElementById("ranking").innerHTML = html;
+}
+
+document.getElementById("ranking").innerHTML =
+html;
+}
+function updateMultiplayerRanking(){
+
+let html =
+"<b>Multiplayer Ranking</b><br><br>";
+
+html +=
+"1. Spieler 1 - "
++ multiplayerScores[0].points
++ " Punkte<br>";
+
+html +=
+"2. Spieler 2 - "
++ multiplayerScores[1].points
++ " Punkte<br>";
+
+document.getElementById("ranking").innerHTML =
+html;
+
 }
 // ---------------- DRAW ----------------
 function draw(){
