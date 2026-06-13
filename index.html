@@ -260,7 +260,14 @@ vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
 
 document.getElementById("balls").textContent = balls.length;
 }
+function spawnLoop(){
+    if(!running) return;
 
+    spawnTimer = setTimeout(()=>{
+        createBall();
+        spawnLoop();
+    }, spawnDelay);
+}
 // ---------------- AI ----------------
 function updateAI(p){
 
