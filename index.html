@@ -674,7 +674,7 @@ function startTournament(){
             "DU"
         )
     );
-
+players = participants;
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
@@ -755,7 +755,12 @@ function tryMatchmaking(){
         }
 
         const p2 = waitingQueue[bestIndex];
+       const recent = recentOpponents.get(p1.name) || [];
+       const count = recent.filter(x => x === p2.name).length;
 
+       if(count >= 1){
+          continue; // blockt dieses Match
+      }
         used.add(p1.name);
         used.add(p2.name);
 
@@ -920,16 +925,11 @@ function updateMatch(match){
     const players = match.players;
 
     // AI
-    for(const p of players){
-
-        if(
-            p.alive &&
-            p.name.startsWith("Bot")
-        ){
-            updateAI(p, match.balls);
-        }
-
+   for(const p of players){
+    if(p.alive){
+        updateAI(p, match.balls);
     }
+}
 
     // BALLS
     for(const b of match.balls){
