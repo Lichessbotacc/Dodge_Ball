@@ -467,13 +467,13 @@ spawnLoop();
 updateRanking();
 }
 function startTournament(){
-
+running = true;
 balls = [];
 players = [];
 ranking = [];
 
 participants = [];
-running = true;
+
 // DU + Bots
 participants.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","DU"));
 
