@@ -419,13 +419,14 @@ if(ranking.length === 0){
 
 for(let i=0;i<aiBotCount;i++){
 
-ranking.push({
-name:"Bot "+(i+1),
-color:`hsl(${i*360/aiBotCount},100%,50%)`,
-points:0,
-elo:1500,
-lastChange:0
-});
+ranking.push(
+createPlayer(
+0,
+0,
+`hsl(${i*360/aiBotCount},100%,50%)`,
+"Bot "+(i+1)
+)
+);
 
 }
 
