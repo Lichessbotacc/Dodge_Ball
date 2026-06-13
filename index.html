@@ -699,56 +699,67 @@ function tryMatchmaking(){
 
     if(waitingQueue.length < 2) return;
 
-    // Nach ELO sortieren
+    // nach ELO sortieren = Ranking / Platzierung
     waitingQueue.sort((a,b)=>b.elo-a.elo);
 
-    while(waitingQueue.length >= 2){
+    const used = new Set();
+    const newQueue = [];
 
-        const p1 = waitingQueue.shift();
+    for(let i = 0; i < waitingQueue.length; i++){
+
+        const p1 = waitingQueue[i];
+
+        if(used.has(p1.name)) continue;
 
         let bestIndex = -1;
-        let bestScore = Infinity;
 
-        const recent =
-            recentOpponents.get(p1.name) || [];
+        // suche nächsten freien Nachbarn (nach unten und oben)
+        for(let offset = 1; offset < waitingQueue.length; offset++){
 
-        for(let i=0;i<waitingQueue.length;i++){
+            // nach unten
+            const down = i + offset;
+            if(down < waitingQueue.length){
 
-            const p2 = waitingQueue[i];
+                const p2 = waitingQueue[down];
 
-            const eloDiff =
-                Math.abs(
-                    p1.elo - p2.elo
-                );
+                if(!used.has(p2.name)){
 
-            const recentlyPlayed =
-                recent.includes(p2.name);
+                    bestIndex = down;
+                    break;
 
-            const score =
-                eloDiff +
-                (recentlyPlayed ? 10000 : 0);
+                }
 
-            if(score < bestScore){
+            }
 
-                bestScore = score;
-                bestIndex = i;
+            // nach oben
+            const up = i - offset;
+            if(up >= 0){
+
+                const p2 = waitingQueue[up];
+
+                if(!used.has(p2.name)){
+
+                    bestIndex = up;
+                    break;
+
+                }
 
             }
 
         }
 
+        // wenn kein Gegner gefunden → bleibt in Queue
         if(bestIndex === -1){
-            bestIndex = 0;
+            newQueue.push(p1);
+            continue;
         }
 
-        const p2 =
-            waitingQueue.splice(bestIndex,1)[0];
+        const p2 = waitingQueue[bestIndex];
 
-        // Gegner speichern
-        rememberMatch(p1,p2);
+        used.add(p1.name);
+        used.add(p2.name);
 
-        const match =
-            createMatch(p1,p2);
+        const match = createMatch(p1, p2);
 
         setupMatch(match);
 
@@ -756,8 +767,10 @@ function tryMatchmaking(){
 
         playerMatchMap.set(p1.name, match);
         playerMatchMap.set(p2.name, match);
-
     }
+
+    // nur ungematchte bleiben drin
+    waitingQueue = newQueue;
 
 }
 
