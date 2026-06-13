@@ -188,7 +188,9 @@ document.getElementById("record").textContent = record;
 // ---------------- PLAYER FACTORY ----------------
 function createPlayer(x,y,color,name,skill=null){
 
-skill = Math.random(); // IMMER komplett neu random
+skill = Math.random();
+
+const base = skill;
 
 return {
     x,
@@ -202,14 +204,14 @@ return {
     alive: true,
     games: 0,
 
-    // alles komplett zufällig wie früher
     skill,
 
-    speed: 4 + Math.random()*3,
-    reaction: 1 + Math.random()*1.2,
-    awareness: 180 + Math.random()*180,
-    randomness: Math.random()*1.2,
-    dodgePower: 1.5 + Math.random()*2,
+    // 🔥 stark unterschiedliche Werte pro Bot
+    speed: 3 + base * 6,          // 3–9 (große Unterschiede)
+    reaction: 0.5 + base * 2.5,   // 0.5–3
+    awareness: 120 + base * 260,  // 120–380
+    randomness: base * 2.2,       // 0–2.2
+    dodgePower: 1 + base * 3.5,   // 1–4.5
 
     targetX: null,
     targetY: null
