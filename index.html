@@ -323,34 +323,35 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
+
 if(mode !== "ai"){
-currentRound = 1;
+    currentRound = 1;
 }
+
 mode = selectedMode;
 document.getElementById("mode").textContent = mode;
 
-document.getElementById("menu").style.display="none";
-document.getElementById("gameOver").style.display="none";
+document.getElementById("menu").style.display = "none";
+document.getElementById("gameOver").style.display = "none";
 
 balls = [];
 players = [];
+ranking = [];
+eliminated = [];
 
 running = true;
 startTime = Date.now();
 
-if (mode === "single") {
-
-    eliminated = [];
-    ranking = [];
+// ---------------- SINGLE + AI = GLEICHES SYSTEM ----------------
+if(mode === "single" || mode === "ai"){
 
     const p = createPlayer(
         canvas.width / 2,
         canvas.height / 2,
         "#00ff88",
-        "Spieler"
+        mode === "single" ? "Spieler" : "Bot 1"
     );
 
-    // Spieler bekommt auch Turnier-Stats
     p.points = 0;
     p.elo = 1500;
     p.lastChange = 0;
@@ -358,82 +359,37 @@ if (mode === "single") {
     players.push(p);
     ranking.push(p);
 
-    // Start Bälle wie AI Modus
-    for (let i = 0; i < startBallCount; i++) {
+    for(let i = 0; i < aiBotCount; i++){
+
+        const bot = createBot(i);
+
+        if(mode === "single"){
+            bot.name = "Bot " + (i+1);
+        }
+
+        players.push(bot);
+        ranking.push(bot);
+    }
+
+    for(let i = 0; i < startBallCount; i++){
         createBall();
     }
 
     spawnLoop();
 }
 
-if(mode==="multi"){
-players.push(
-createPlayer(
-200,
-200,
-"#00ff88",
-"Spieler 1"
-)
-);
+// ---------------- MULTI ----------------
+if(mode === "multi"){
 
-players.push(
-createPlayer(
-400,
-200,
-"#4488ff",
-"Spieler 2"
-)
-);
+    players.push(createPlayer(200,200,"#00ff88","Spieler 1"));
+    players.push(createPlayer(400,200,"#4488ff","Spieler 2"));
+
+    for(let i = 0; i < startBallCount; i++){
+        createBall();
+    }
+
+    spawnLoop();
 }
-
-if(mode==="ai"){
-
-eliminated = [];
-
-if(currentRound === 1){
-
-ranking = [];
-
-for(let i=0;i<aiBotCount;i++){
-
-const hue = (i * 360 / aiBotCount);
-
-const bot = createPlayer(
-Math.random()*canvas.width,
-Math.random()*canvas.height,
-`hsl(${hue},100%,50%)`,
-"Bot " + (i+1)
-);
-
-players.push(bot);
-ranking.push(bot);
-
-}
-
-}else{
-
-for(const oldBot of ranking){
-
-const bot = createPlayer(
-Math.random()*canvas.width,
-Math.random()*canvas.height,
-oldBot.color,
-oldBot.name
-);
-
-bot.points = oldBot.points;
-bot.elo = oldBot.elo;
-
-players.push(bot);
-
-}
-
-}
-
-}
-
-for(let i=0;i<startBallCount;i++) createBall();
-spawnLoop();
 }
 
 // ---------------- SPAWN ----------------
