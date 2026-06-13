@@ -342,6 +342,8 @@ function startGame(selectedMode){
 
 mode = selectedMode;
 
+document.getElementById("eloTable").style.display =
+(mode === "tournament") ? "block" : "none";
 document.getElementById("mode").textContent = mode;
 document.getElementById("menu").style.display = "none";
 document.getElementById("gameOver").style.display = "none";
@@ -664,6 +666,7 @@ function updateTournament(){
     // Timer UI
     document.getElementById("time").textContent =
         Math.floor((Date.now()-startTime)/1000);
+    updateEloTable();
 }
 // ---------------- COLLISION ----------------
 function check(p){
