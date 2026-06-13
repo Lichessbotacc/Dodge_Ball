@@ -333,7 +333,7 @@ function spawnLoop(){
 
 }
 // ---------------- AI ----------------
-function updateAI(p){
+function updateAI(p, activeBalls = balls){
 
 // Ziel wechseln
 if(
@@ -376,7 +376,7 @@ avoidY += (wallMargin - p.y) * 0.03;
 if(p.y > canvas.height - wallMargin){
 avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
 }
-for(const b of balls){
+for(const b of activeBalls){
 
 const dx = p.x - b.x;
 const dy = p.y - b.y;
