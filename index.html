@@ -278,14 +278,15 @@ function tournamentSpawnLoop(){
 }
 function spawnLoop(){
 
-    if(!running) return;
+    spawnTimer = setTimeout(() => {
 
-    createBall();
+        if(running){
+            createBall();
+            spawnLoop();
+        }
 
-    spawnTimer = setTimeout(
-        spawnLoop,
-        spawnDelay
-    );
+    }, spawnDelay);
+
 }
 // ---------------- AI ----------------
 function updateAI(p){
