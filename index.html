@@ -194,9 +194,9 @@ return {
     radius: playerRadiusSetting,
     color,
     name,
-    points: data.points,
-    elo: data.elo,
-    lastChange: data.lastChange,
+    points: data.points || 0,
+    elo: data.elo ?? 1500,
+    lastChange: data.lastChange || 0,
     alive: true
 };
 }
@@ -342,137 +342,7 @@ p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
 
 }
 // ---------------- START ----------------
-function startGame(selectedMode){
 
-    if(mode !== "ai"){
-        currentRound = 1;
-    }
-
-    mode = selectedMode;
-    document.getElementById("mode").textContent = mode;
-
-    document.getElementById("menu").style.display = "none";
-    document.getElementById("gameOver").style.display = "none";
-
-    balls = [];
-    players = [];
-    ranking = [];
-    eliminated = [];
-
-    running = true;
-    startTime = Date.now();
-
-    // ================================
-    // SINGLEPLAYER = TURNIER SYSTEM
-    // ================================
-    if(mode === "single"){
-
-        const player = createPlayer(
-            canvas.width / 2,
-            canvas.height / 2,
-            "#00ff88",
-            "Spieler"
-        );
-
-        player.points = 0;
-        player.elo = 1500;
-        player.lastChange = 0;
-
-        players.push(player);
-        ranking.push(player);
-
-        // Bots als Gegner
-        for(let i = 0; i < aiBotCount; i++){
-
-            const bot = createPlayer(
-                Math.random() * canvas.width,
-                Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`,
-                "Bot " + (i + 1)
-            );
-
-            
-
-            players.push(bot);
-            ranking.push(bot);
-        }
-
-        // Start-Bälle
-        for(let i = 0; i < startBallCount; i++){
-            createBall();
-        }
-
-        spawnLoop();
-    }
-
-    // ================================
-    // MULTIPLAYER
-    // ================================
-    
-    if(mode === "multi"){
-
-    const p1 = createPlayer(200,200,"#00ff88","Spieler 1");
-    const p2 = createPlayer(400,200,"#4488ff","Spieler 2");
-
-    players.push(p1, p2);
-    ranking.push(p1, p2);
-
-    // 🤖 BOTS AUCH DABEI
-    for(let i = 0; i < aiBotCount; i++){
-
-        const bot = createPlayer(
-            Math.random() * canvas.width,
-            Math.random() * canvas.height,
-            `hsl(${i * 360 / aiBotCount},100%,50%)`,
-            "Bot " + (i + 1)
-        );
-
-        players.push(bot);
-        ranking.push(bot);
-    }
-
-    for(let i = 0; i < startBallCount; i++){
-        createBall();
-    }
-
-    spawnLoop();
-}
-
-    // ================================
-    // AI SPECTATE (TURNIER MODE)
-    // ================================
-    if(mode === "ai"){
-
-        if(currentRound === 1){
-            ranking = [];
-        }
-
-        for(let i = 0; i < aiBotCount; i++){
-
-            const bot = createPlayer(
-                Math.random() * canvas.width,
-                Math.random() * canvas.height,
-                `hsl(${i * 360 / aiBotCount},100%,50%)`,
-                "Bot " + (i + 1)
-            );
-
-            
-
-            bot.aggressiveness = Math.random();
-            bot.fear = Math.random();
-            bot.wander = Math.random();
-            bot.speed = 2.5 + Math.random() * 0.5;
-            bot.safeRadius = 120 + Math.random() * 120;
-
-            players.push(bot);
-            ranking.push(bot);
-        }
-
-        for(let i = 0; i < startBallCount; i++){
-            createBall();
-        }
-
-        spawnLoop();
     }function startGame(selectedMode){
 
     if(mode !== "ai"){
@@ -781,12 +651,13 @@ document.getElementById("gameOver").style.display = "flex";
 document.getElementById("finalTime").innerHTML =
 "Sieger: " + winner.name;
 }
+// AFTER Ranking + Winner calculation
 for(const p of ranking){
-globalStats[p.name] = {
-    elo: p.elo,
-    points: p.points,
-    lastChange: p.lastChange
-};
+    globalStats[p.name] = {
+        elo: p.elo,
+        points: p.points,
+        lastChange: p.lastChange
+    };
 }
 function updateRanking(){
 
