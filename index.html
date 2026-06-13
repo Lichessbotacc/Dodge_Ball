@@ -1112,15 +1112,16 @@ function moveSingle(x,y){
         const m = matches[activeMatchIndex];
         if(!m) return;
 
-        for(const p of m.alive){
+        if(m.p1.name === "DU"){
+            m.p1.x = x;
+            m.p1.y = y;
+            return;
+        }
 
-            if(p.name === "DU"){
-
-                p.x = x;
-                p.y = y;
-                return;
-
-            }
+        if(m.p2.name === "DU"){
+            m.p2.x = x;
+            m.p2.y = y;
+            return;
         }
 
         return;
