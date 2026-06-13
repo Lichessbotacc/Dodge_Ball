@@ -961,9 +961,9 @@ for(const bot of ranking){
 bot.lastChange = 0;
 }
 
-for(let i=0;i<eliminated.length;i++){
+for(let i=0;i<eliminated.length-1;i++){
 
-for(let j=i+1;j<eliminated.length;j++){
+let j = i + 1;
 
 let a =
 ranking.find(
@@ -1021,9 +1021,9 @@ b.lastChange += changeB;
 
 }
 
-}
 
-}
+
+
 
 updateRanking();
 
