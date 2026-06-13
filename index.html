@@ -486,6 +486,10 @@ function createMatch(p1,p2){
     };
 
 }
+function resetAI(p){
+    p.targetX = null;
+    p.targetY = null;
+}
 function rememberMatch(p1, p2){
 
     if(!recentOpponents.has(p1.name)){
@@ -759,7 +763,11 @@ function tryMatchmaking(){
 }
 
 function setupMatch(match){
-
+for(const p of match.players){
+    p.alive = true;
+    p.targetX = null;
+    p.targetY = null;
+}
     const p1 = match.players[0];
     const p2 = match.players[1];
 
@@ -1056,15 +1064,17 @@ function finishMatch(match, winner, loser){
     const nextMatchDelay =
         3000 + Math.random() * 2000;
 
-    setTimeout(() => {
+ setTimeout(() => {
 
-        waitingQueue.push(winner);
-        waitingQueue.push(loser);
+    resetAI(winner);
+    resetAI(loser);
 
-        tryMatchmaking();
+    waitingQueue.push(winner);
+    waitingQueue.push(loser);
 
-    }, nextMatchDelay);
+    tryMatchmaking();
 
+}, nextMatchDelay);
 }
 function finishArena(){
 
