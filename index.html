@@ -591,7 +591,7 @@ const alive = players.find(p => p.alive);
 if(alive) eliminated.push(alive);
 
 // Reihenfolge: letzter ist Gewinner
-eliminated.reverse();
+
 
 const K = 24;
 
@@ -660,62 +660,32 @@ document.getElementById("finalTime").innerHTML =
 
 function updateRanking(){
 
-const sorted = [...ranking];
+const sorted = [...players]
+    .filter(p => p.deathIndex !== undefined)
+    .sort((a,b) => a.deathIndex - b.deathIndex);
 
-if(rankingMode === "points"){
-
-sorted.sort(
-(a,b)=>b.points-a.points
-);
-
-}else{
-
-sorted.sort(
-(a,b)=>b.elo-a.elo
-);
-
-}
+// lebende ans Ende
+const alive = players.filter(p => p.alive);
+sorted.push(...alive);
 
 let html =
 "<b>Turnier Ranking</b><br>" +
-"Modus: " +
-(rankingMode==="elo"?"ELO":"Punkte") +
-"<br>" +
-"Runde: " +
-currentRound +
-"/" +
-tournamentRounds +
-"<br><br>";
+"Modus: " + rankingMode + "<br>" +
+"Runde: " + currentRound + "/" + tournamentRounds + "<br><br>";
 
 for(let i=0;i<sorted.length;i++){
 
-if(rankingMode==="elo"){
+let p = sorted[i];
 
-html +=
-(i+1)+". "
-+sorted[i].name
-+" - "
-+Math.round(sorted[i].elo)
-+" ELO ("
-+(sorted[i].lastChange >= 0 ? "+" : "")
-+Math.round(sorted[i].lastChange)
-+")<br>";
-
+if(rankingMode === "elo"){
+html += (i+1)+". "+p.name+" - "+Math.round(p.elo)+" ELO<br>";
 }else{
-
-html +=
-(i+1)+". "
-+sorted[i].name
-+" - "
-+sorted[i].points
-+" Punkte<br>";
-
+html += (i+1)+". "+p.name+" - "+p.points+" Punkte<br>";
 }
 
 }
 
-document.getElementById("ranking").innerHTML =
-html;
+document.getElementById("ranking").innerHTML = html;
 }
 
 // ---------------- DRAW ----------------
