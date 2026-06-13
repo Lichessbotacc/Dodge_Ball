@@ -177,6 +177,7 @@ let activeMatchIndex = 0;
 let tournamentRunning = false;
 let spawnActive = false;
 let endDelay = 10000;
+let gameTimer = null;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -434,7 +435,13 @@ eliminated = [];
 
 running = true;
 startTime = Date.now();
+if (gameTimer) clearTimeout(gameTimer);
 
+gameTimer = setTimeout(() => {
+    if (running) {
+        gameOver();
+    }
+}, 10000);
 if(mode !== "multi"){
 
 if(ranking.length === 0){
