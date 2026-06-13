@@ -967,12 +967,19 @@ function finishArena(){
         }
 
         // Dynamisches K
-        const K =
-            Math.max(
-                1,
-                16 / eliminated.length
-            );
+        let round = currentRound;
 
+let K;
+
+if(round <= 3){
+    K = 40;      // 🔥 riesige Sprünge
+}
+else if(round <= 8){
+    K = 18;      // mittel
+}
+else{
+    K = 6;       // klein
+}
         // Alle Spieler absichern
         for(const p of eliminated){
 
