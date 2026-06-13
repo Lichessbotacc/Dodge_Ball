@@ -596,6 +596,8 @@ eliminated.sort(
 
 if(rankingMode==="points"){
 
+const totalPlayers = eliminated.length;
+
 for(let i=0;i<eliminated.length;i++){
 
 const p = eliminated[i];
@@ -603,20 +605,24 @@ const p = eliminated[i];
 const rankPlayer =
 ranking.find(x=>x.name===p.name);
 
+const gainedPoints =
+totalPlayers - i;
+
 if(rankPlayer){
 
-rankPlayer.points +=
-(eliminated.length-i);
+rankPlayer.points += gainedPoints;
 
 }else{
 
 ranking.push({
 name:p.name,
 color:p.color,
-points:(eliminated.length-i),
+points:gainedPoints,
 elo:1500,
 lastChange:0
 });
+
+}
 
 }
 
