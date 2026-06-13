@@ -577,94 +577,60 @@ return;
 }
 }
 function finishArena(){
-if (mode === "single") {
 
-    const player = players[0];
+// letzte Person hinzufügen
+const alive = players.find(p => p.alive);
+if(alive) eliminated.push(alive);
 
-    if (rankingMode === "points") {
-        player.points += eliminated.length;
-    }
-
-    if (rankingMode === "elo") {
-
-        const K = 16;
-
-        const expected = 0.5; // solo match
-        const gain = K * (1 - expected);
-
-        player.elo += gain;
-        player.lastChange = gain;
-    }
-
-    updateRanking();
-
-    gameOver();
-    return;
-}
+// Reihenfolge: letzter ist Gewinner
 eliminated.reverse();
 
+const K = 24;
+
+// =========================
+// POINTS SYSTEM
+// =========================
 if(rankingMode === "points"){
 
-for(let i=0;i<eliminated.length;i++){
-
-const bot =
-ranking.find(
-b=>b.name===eliminated[i].name
-);
-
-if(bot){
-
-bot.points +=
-eliminated.length-i-1;
-
+for(let i = 0; i < eliminated.length; i++){
+eliminated[i].points += (eliminated.length - i - 1);
 }
 
 }
 
-}else{
+// =========================
+// ELO SYSTEM (korrekt)
+// =========================
+else{
 
-const K = 16;
-for(const bot of ranking){
-bot.lastChange = 0;
-}
-for(let i=0;i<eliminated.length;i++){
+for(let i = 0; i < eliminated.length; i++){
 
-const botA =
-ranking.find(
-b=>b.name===eliminated[i].name
-);
+for(let j = i + 1; j < eliminated.length; j++){
 
-for(let j=i+1;j<eliminated.length;j++){
+let A = eliminated[i];
+let B = eliminated[j];
 
-const botB =
-ranking.find(
-b=>b.name===eliminated[j].name
-);
+let expectedA = 1 / (1 + Math.pow(10, (B.elo - A.elo) / 400));
+let expectedB = 1 - expectedA;
 
-const expectedA =
-1/(1+Math.pow(
-10,
-(botB.elo-botA.elo)/400
-));
+// 👉 wichtig: Ranking-basierter Kampf
+let scoreA = 1;
+let scoreB = 0;
 
-const expectedB =
-1-expectedA;
+let gainA = K * (scoreA - expectedA);
+let gainB = K * (scoreB - expectedB);
 
-const gainA = K*(1-expectedA);
-const gainB = K*(0-expectedB);
+A.elo += gainA;
+B.elo += gainB;
 
-botA.elo += gainA;
-botB.elo += gainB;
-
-botA.lastChange += gainA;
-botB.lastChange += gainB;
+A.lastChange = (A.lastChange || 0) + gainA;
+B.lastChange = (B.lastChange || 0) + gainB;
 
 }
-
+}
 }
 
-}
-
+// Ranking aktualisieren
 updateRanking();
 
 running = false;
@@ -673,29 +639,8 @@ roundFinished = true;
 const winner = eliminated[0];
 
 document.getElementById("gameOver").style.display = "flex";
-
 document.getElementById("finalTime").innerHTML =
-"Runde " + currentRound + "/" + tournamentRounds +
-"<br>Sieger: " + winner.name;
-
-if(currentRound < tournamentRounds){
-
-currentRound++;
-
-setTimeout(()=>{
-
-document.getElementById("gameOver").style.display="none";
-
-restartGame();
-
-},15000);
-
-}else{
-
-document.getElementById("finalTime").innerHTML +=
-"<br><br><b>TURNIER BEENDET</b>";
-
-}
+"Sieger: " + winner.name;
 }
 
 function updateRanking(){
