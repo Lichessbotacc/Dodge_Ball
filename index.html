@@ -908,157 +908,158 @@ if(matches.length > 0){
 }
 function finishArena(){
 
-// NICHT stoppen im Turnier
-if(mode !== "tournament"){
-    running = false;
-}
+    if(mode !== "tournament"){
+        running = false;
+    }
 
-if(spawnTimer){
-clearTimeout(spawnTimer);
-}
+    if(spawnTimer){
+        clearTimeout(spawnTimer);
+    }
 
-eliminated.sort(
-(a,b)=>b.deathTime-a.deathTime
-);
+    eliminated.sort(
+        (a,b)=>b.deathTime-a.deathTime
+    );
 
-if(rankingMode==="points"){
+    // ---------------- POINTS SYSTEM ----------------
+    if(rankingMode==="points"){
 
-const totalPlayers = eliminated.length;
+        const totalPlayers = eliminated.length;
 
-for(let i=0;i<eliminated.length;i++){
+        for(let i=0;i<eliminated.length;i++){
 
-const p = eliminated[i];
+            const p = eliminated[i];
 
-const rankPlayer =
-ranking.find(x=>x.name===p.name);
+            let rankPlayer =
+                ranking.find(x=>x.name===p.name);
 
-const gainedPoints =
-totalPlayers - i;
+            const gainedPoints =
+                totalPlayers - i;
 
-if(rankPlayer){
+            if(rankPlayer){
 
-rankPlayer.points += gainedPoints;
+                rankPlayer.points += gainedPoints;
 
-}else{
+            }else{
 
-ranking.push({
-name:p.name,
-color:p.color,
-points:gainedPoints,
-elo:1500,
-lastChange:0
-});
+                ranking.push({
+                    name:p.name,
+                    color:p.color,
+                    points:gainedPoints,
+                    elo:1500,
+                    lastChange:0
+                });
 
-}
+            }
 
-}
+        }
 
-}else{
+    }
 
-const K = 24;
+    // ---------------- ELO SYSTEM ----------------
+    else{
 
-for(const bot of ranking){
-bot.lastChange = 0;
-}
+        const K = 24;
 
-for(let i=0;i<eliminated.length-1;i++){
+        for(const bot of ranking){
+            bot.lastChange = 0;
+        }
 
-let j = i + 1;
+        for(let i=0;i<eliminated.length-1;i++){
 
-let a =
-ranking.find(
-x=>x.name===eliminated[i].name
-);
+            let j = i + 1;
 
-if(!a){
+            let a =
+                ranking.find(
+                    x=>x.name===eliminated[i].name
+                );
 
-a = {
-name:eliminated[i].name,
-color:eliminated[i].color,
-points:0,
-elo:1500,
-lastChange:0
-};
+            if(!a){
 
-ranking.push(a);
-}
+                a = {
+                    name:eliminated[i].name,
+                    color:eliminated[i].color,
+                    points:0,
+                    elo:1500,
+                    lastChange:0
+                };
 
-let b =
-ranking.find(
-x=>x.name===eliminated[j].name
-);
+                ranking.push(a);
+            }
 
-if(!b){
+            let b =
+                ranking.find(
+                    x=>x.name===eliminated[j].name
+                );
 
-b = {
-name:eliminated[j].name,
-color:eliminated[j].color,
-points:0,
-elo:1500,
-lastChange:0
-};
+            if(!b){
 
-ranking.push(b);
-}
+                b = {
+                    name:eliminated[j].name,
+                    color:eliminated[j].color,
+                    points:0,
+                    elo:1500,
+                    lastChange:0
+                };
 
-const expectedA =
-1/(1+Math.pow(10,(b.elo-a.elo)/400));
+                ranking.push(b);
+            }
 
-const expectedB =
-1-expectedA;
+            const expectedA =
+                1/(1+Math.pow(10,(b.elo-a.elo)/400));
 
-const changeA =
-K*(1-expectedA);
+            const expectedB =
+                1-expectedA;
 
-const changeB =
-K*(0-expectedB);
+            const changeA =
+                K*(1-expectedA);
 
-a.elo += changeA;
-b.elo += changeB;
+            const changeB =
+                K*(0-expectedB);
 
-a.lastChange += changeA;
-b.lastChange += changeB;
+            a.elo += changeA;
+            b.elo += changeB;
 
-}
+            a.lastChange += changeA;
+            b.lastChange += changeB;
+        }
+    }
 
+    // ---------------- ALWAYS RUN ----------------
 
+    updateRanking();
 
+    const winner = eliminated[0];
 
+    document.getElementById("gameOver").style.display =
+        "flex";
 
-updateRanking();
+    document.getElementById("finalTime").innerHTML =
+        "Runde "
+        + currentRound
+        + "/"
+        + tournamentRounds
+        + "<br>Sieger: "
+        + winner.name;
 
-const winner = eliminated[0];
+    if(currentRound < tournamentRounds){
 
-document.getElementById("gameOver").style.display =
-"flex";
+        currentRound++;
 
-document.getElementById("finalTime").innerHTML =
-"Runde "
-+ currentRound
-+ "/"
-+ tournamentRounds
-+ "<br>Sieger: "
-+ winner.name;
+        setTimeout(()=>{
 
-if(currentRound < tournamentRounds){
+            document.getElementById("gameOver").style.display =
+                "none";
 
-currentRound++;
+            startGame(mode);
 
-setTimeout(()=>{
+        },10000);
 
-document.getElementById("gameOver").style.display =
-"none";
+    }else{
 
-startGame(mode);
+        document.getElementById("finalTime").innerHTML +=
+            "<br><br><b>TURNIER BEENDET</b>";
 
-},15000);
-
-}else{
-
-document.getElementById("finalTime").innerHTML +=
-"<br><br><b>TURNIER BEENDET</b>";
-
-}
+    }
 
 }
 
