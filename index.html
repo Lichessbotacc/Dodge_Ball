@@ -176,8 +176,6 @@ let matches = [];
 let activeMatchIndex = 0;
 let tournamentRunning = false;
 let spawnActive = false;
-let endDelay = 10000;
-let gameTimer = null;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -418,11 +416,7 @@ Math.min(canvas.height-p.radius,p.y)
 function startGame(selectedMode){
 
 mode = selectedMode;
-if (selectedMode === "tournament") {
-    endDelay = 2000;
-} else {
-    endDelay = 10000;
-}
+
 document.getElementById("eloTable").style.display =
 (mode === "tournament") ? "block" : "none";
 document.getElementById("mode").textContent = mode;
@@ -435,13 +429,7 @@ eliminated = [];
 
 running = true;
 startTime = Date.now();
-if (gameTimer) clearTimeout(gameTimer);
 
-gameTimer = setTimeout(() => {
-    if (running) {
-        gameOver();
-    }
-}, 10000);
 if(mode !== "multi"){
 
 if(ranking.length === 0){
@@ -837,19 +825,22 @@ m.finished = true;
 const winner = m.alive[0];
 const loser = (winner === m.p1) ? m.p2 : m.p1;
 
-function getKFactor(){
-    let round = currentRound;
+function getKFactor(player){
 
-    if(round <= 3){
-        return 80;   // 🔥 extrem hohe Sprünge
-    }
-    else if(round <= 8){
-        return 30;   // mittel
-    }
-    else{
-        return 10;   // stabil
-    }
+// nur ganz am Anfang große Sprünge
+if(player.games < 3){
+    return 50;
 }
+
+// kurz danach fast normal
+if(player.games < 8){
+    return 28;
+}
+
+// stabiles Rating
+return 12;
+}
+
 const K =
 (
 getKFactor(winner)
@@ -860,11 +851,7 @@ getKFactor(loser)
 const expected =
 1/(1+Math.pow(10,(loser.elo - winner.elo)/400));
 
-const change =
-Math.max(
-0.5,
-K * (1 - expected)
-);
+const change = K * (1 - expected);
 
 winner.elo += change;
 loser.elo -= change;
@@ -878,246 +865,196 @@ activeMatchIndex++;
 
 
 
-setTimeout(() => {
+if(activeMatchIndex < matches.length){
 
-    activeMatchIndex++;
-
-    if (activeMatchIndex < matches.length) {
+    setTimeout(()=>{
         startMatch(activeMatchIndex);
-    } else {
+    }, 2000);
+
+}else{
+
+    // Turnierrunde fertig → neue Paarungen bauen
+
+    setTimeout(()=>{
 
         participants.sort((a,b)=>b.elo-a.elo);
 
-        matches = [];
-        activeMatchIndex = 0;
+matches = [];
+activeMatchIndex = 0;
 
-        for (let i = 0; i < participants.length; i += 2) {
-            if (!participants[i+1]) break;
+for(let i=0;i<participants.length;i+=2){
 
-            matches.push({
-                p1: participants[i],
-                p2: participants[i+1],
-                alive: [],
-                finished: false
-            });
-        }
+    if(!participants[i+1]) continue;
 
-        if (matches.length > 0) {
-            setTimeout(() => {
-                startMatch(0);
-            }, endDelay);
-        }
+    matches.push({
+        p1: participants[i],
+        p2: participants[i+1],
+        alive: [],
+        finished:false
+    });
 
-    }
+}
 
-}, endDelay);
+if(matches.length > 0){
+    startMatch(0);
+}
 
-    
+    }, 2000);
+}
 }
 function finishArena(){
 
-    // Spiel stoppen
-    if(mode !== "tournament"){
-        running = false;
-    }
-
-    // Spawn stoppen
-    if(spawnTimer){
-        clearTimeout(spawnTimer);
-    }
-
-    // Ranking nach Überlebenszeit
-    eliminated.sort(
-        (a,b)=>b.deathTime-a.deathTime
-    );
-
-    // Sieger markieren
-    const winner = eliminated[0];
-
-    // ---------------- POINT SYSTEM ----------------
-    if(rankingMode === "points"){
-
-        const totalPlayers = eliminated.length;
-
-        for(let i=0;i<eliminated.length;i++){
-
-            const p = eliminated[i];
-
-            let rankPlayer =
-                ranking.find(x=>x.name===p.name);
-
-            const gainedPoints =
-                totalPlayers - i;
-
-            if(rankPlayer){
-
-                rankPlayer.points += gainedPoints;
-
-            }else{
-
-                ranking.push({
-                    name:p.name,
-                    color:p.color,
-                    points:gainedPoints,
-                    elo:1500,
-                    lastChange:0
-                });
-
-            }
-
-        }
-
-    }
-
-    // ---------------- ELO SYSTEM ----------------
-    else{
-
-        // Anzeige reset
-        for(const bot of ranking){
-            bot.lastChange = 0;
-        }
-
-        // Dynamisches K
-        let round = currentRound;
-
-let K;
-
-if(round <= 3){
-    K = 40;      // 🔥 riesige Sprünge
+// NICHT stoppen im Turnier
+if(mode !== "tournament"){
+    running = false;
 }
-else if(round <= 8){
-    K = 18;      // mittel
+
+if(spawnTimer){
+clearTimeout(spawnTimer);
 }
-else{
-    K = 6;       // klein
+
+eliminated.sort(
+(a,b)=>b.deathTime-a.deathTime
+);
+
+if(rankingMode==="points"){
+
+const totalPlayers = eliminated.length;
+
+for(let i=0;i<eliminated.length;i++){
+
+const p = eliminated[i];
+
+const rankPlayer =
+ranking.find(x=>x.name===p.name);
+
+const gainedPoints =
+totalPlayers - i;
+
+if(rankPlayer){
+
+rankPlayer.points += gainedPoints;
+
+}else{
+
+ranking.push({
+name:p.name,
+color:p.color,
+points:gainedPoints,
+elo:1500,
+lastChange:0
+});
+
 }
-        // Alle Spieler absichern
-        for(const p of eliminated){
 
-            let existing =
-                ranking.find(x=>x.name===p.name);
+}
 
-            if(!existing){
+}else{
 
-                ranking.push({
-                    name:p.name,
-                    color:p.color,
-                    points:0,
-                    elo:1500,
-                    lastChange:0
-                });
+const K = 24;
 
-            }
+for(const bot of ranking){
+bot.lastChange = 0;
+}
 
-        }
+for(let i=0;i<eliminated.length;i++){
 
-        // Jeder gegen jeden
-        for(let i=0;i<eliminated.length;i++){
+for(let j=i+1;j<eliminated.length;j++){
 
-            for(let j=i+1;j<eliminated.length;j++){
+let a =
+ranking.find(
+x=>x.name===eliminated[i].name
+);
 
-                const winnerData = eliminated[i];
-                const loserData = eliminated[j];
+if(!a){
 
-                const winnerPlayer =
-                    ranking.find(
-                        x=>x.name===winnerData.name
-                    );
+a = {
+name:eliminated[i].name,
+color:eliminated[i].color,
+points:0,
+elo:1500,
+lastChange:0
+};
 
-                const loserPlayer =
-                    ranking.find(
-                        x=>x.name===loserData.name
-                    );
+ranking.push(a);
+}
 
-                // Expected
-                const expectedWinner =
-                    1/(1+Math.pow(
-                        10,
-                        (loserPlayer.elo-winnerPlayer.elo)/400
-                    ));
+let b =
+ranking.find(
+x=>x.name===eliminated[j].name
+);
 
-                const expectedLoser =
-                    1 - expectedWinner;
+if(!b){
 
-                // Änderungen
-                const winnerChange = K * (1 - expectedWinner) * 2;
-                const loserChange = K * (0 - expectedLoser) * 2;
-                // Anwenden
-                winnerPlayer.elo += winnerChange;
-                loserPlayer.elo += loserChange;
+b = {
+name:eliminated[j].name,
+color:eliminated[j].color,
+points:0,
+elo:1500,
+lastChange:0
+};
 
-                winnerPlayer.lastChange += winnerChange;
-                loserPlayer.lastChange += loserChange;
+ranking.push(b);
+}
 
-            }
+const expectedA =
+1/(1+Math.pow(10,(b.elo-a.elo)/400));
 
-        }
+const expectedB =
+1-expectedA;
 
-    }
+const changeA =
+K*(1-expectedA);
 
-    // ---------------- UI UPDATE ----------------
+const changeB =
+K*(0-expectedB);
 
-    updateRanking();
+a.elo += changeA;
+b.elo += changeB;
 
-    document.getElementById("gameOver").style.display =
-        "flex";
+a.lastChange += changeA;
+b.lastChange += changeB;
 
-    // Tournament Anzeige
-    if(mode === "tournament"){
+}
 
-        document.getElementById("finalTime").innerHTML =
-            "Runde "
-            + currentRound
-            + "/"
-            + tournamentRounds
-            + "<br>Sieger: "
-            + winner.name;
+}
 
-        if(currentRound < tournamentRounds){
+}
 
-            currentRound++;
+updateRanking();
 
-            
+const winner = eliminated[0];
 
-        }else{
+document.getElementById("gameOver").style.display =
+"flex";
 
-            document.getElementById("finalTime").innerHTML +=
-                "<br><br><b>TURNIER BEENDET</b>";
+document.getElementById("finalTime").innerHTML =
+"Runde "
++ currentRound
++ "/"
++ tournamentRounds
++ "<br>Sieger: "
++ winner.name;
 
-        }
+if(currentRound < tournamentRounds){
 
-    }
+currentRound++;
 
-    // Normale Modi
-    else{
+setTimeout(()=>{
 
-        const survived =
-            Math.floor(
-                (Date.now()-startTime)/1000
-            );
+document.getElementById("gameOver").style.display =
+"none";
 
-        // Rekord
-        if(survived > record){
+startGame(mode);
 
-            record = survived;
+},15000);
 
-            localStorage.setItem(
-                "fingerDodgeRecord",
-                record
-            );
+}else{
 
-            document.getElementById("record").textContent =
-                record;
-        }
+document.getElementById("finalTime").innerHTML +=
+"<br><br><b>TURNIER BEENDET</b>";
 
-        document.getElementById("finalTime").innerHTML =
-            "Überlebt: "
-            + survived
-            + "s<br><br>"
-            + "Sieger: "
-            + winner.name;
-
-    }
+}
 
 }
 
