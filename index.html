@@ -271,6 +271,17 @@ function tournamentSpawnLoop(){
 
     setTimeout(tournamentSpawnLoop, spawnDelay);
 }
+function spawnLoop(){
+
+    if(!running) return;
+
+    createBall();
+
+    spawnTimer = setTimeout(
+        spawnLoop,
+        spawnDelay
+    );
+}
 // ---------------- AI ----------------
 function updateAI(p){
 
