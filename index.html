@@ -188,38 +188,32 @@ document.getElementById("record").textContent = record;
 // ---------------- PLAYER FACTORY ----------------
 function createPlayer(x,y,color,name,skill=null){
 
-skill = skill ?? Math.random();
+skill = Math.random(); // IMMER komplett neu random
 
 return {
-x,
-y,
-radius:playerRadiusSetting,
-color,
-name,
-points:0,
-elo:1500,
-lastChange:0,
-alive:true,
-games:0,
+    x,
+    y,
+    radius: playerRadiusSetting,
+    color,
+    name,
+    points: 0,
+    elo: 1500,
+    lastChange: 0,
+    alive: true,
+    games: 0,
 
-// BASIS SKILL
-skill,
+    // alles komplett zufällig wie früher
+    skill,
 
-// 🔥 individuelle Eigenschaften
-speed: 4 + Math.random()*3,
+    speed: 4 + Math.random()*3,
+    reaction: 1 + Math.random()*1.2,
+    awareness: 180 + Math.random()*180,
+    randomness: Math.random()*1.2,
+    dodgePower: 1.5 + Math.random()*2,
 
-reaction: 1 + Math.random()*1.2,
-
-awareness: 180 + Math.random()*180,
-
-randomness: Math.random()*1.2,
-
-dodgePower: 1.5 + Math.random()*2,
-
-targetX:null,
-targetY:null
+    targetX: null,
+    targetY: null
 };
-
 }
 // ---------------- UI ----------------
 function openSettings(){
@@ -680,13 +674,12 @@ players = participants;
     for(let i=0;i<aiBotCount;i++){
 
        participants.push(
-    createPlayer(
-        Math.random()*canvas.width,
-        Math.random()*canvas.height,
-        `hsl(${i*360/aiBotCount},100%,50%)`,
-        "Bot "+(i+1),
-        Math.random()
-    )
+createPlayer(
+    Math.random()*canvas.width,
+    Math.random()*canvas.height,
+    `hsl(${i*360/aiBotCount},100%,50%)`,
+    "Bot "+(i+1)
+)
 );
 
     }
