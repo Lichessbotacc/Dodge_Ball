@@ -701,67 +701,35 @@ function tryMatchmaking(){
 
     if(waitingQueue.length < 2) return;
 
-    // nach ELO sortieren (faire Paarung)
+    // immer sauber sortiert nach ELO
     waitingQueue.sort((a,b)=>b.elo-a.elo);
 
-    const used = new Set();
     const newQueue = [];
 
-    for(let i = 0; i < waitingQueue.length; i++){
+    for(let i = 0; i < waitingQueue.length; i += 2){
 
         const p1 = waitingQueue[i];
+        const p2 = waitingQueue[i + 1];
 
-        if(used.has(p1.name)) continue;
-
-        let opponent = null;
-
-        // suche besten passenden Gegner (nah an ELO)
-        let bestScore = Infinity;
-        let bestIndex = -1;
-
-        for(let j = 0; j < waitingQueue.length; j++){
-
-            if(i === j) continue;
-
-            const p2 = waitingQueue[j];
-            if(used.has(p2.name)) continue;
-
-            // ❌ optional: keine direkten Repeats
-            const history = recentOpponents.get(p1.name) || [];
-            if(history.includes(p2.name)) continue;
-
-            const eloDiff = Math.abs(p1.elo - p2.elo);
-
-            if(eloDiff < bestScore){
-                bestScore = eloDiff;
-                bestIndex = j;
-                opponent = p2;
-            }
-        }
-
-        if(opponent){
-
-            const match = createMatch(p1, opponent);
-            setupMatch(match);
-
-            matches.push(match);
-
-            playerMatchMap.set(p1.name, match);
-            playerMatchMap.set(opponent.name, match);
-
-            used.add(p1.name);
-            used.add(opponent.name);
-
-            rememberMatch(p1, opponent);
-
-        } else {
+        // falls kein Gegner da ist → zurück in Queue
+        if(!p2){
             newQueue.push(p1);
+            continue;
         }
+
+        const match = createMatch(p1, p2);
+        setupMatch(match);
+
+        matches.push(match);
+
+        playerMatchMap.set(p1.name, match);
+        playerMatchMap.set(p2.name, match);
+
+        rememberMatch(p1, p2);
     }
 
     waitingQueue = newQueue;
 }
-
 function setupMatch(match){
 for(const p of match.players){
     p.alive = true;
