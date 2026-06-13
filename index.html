@@ -538,13 +538,10 @@ function startMatch(i){
     spawnLoop();
 }
 // ---------------- SPAWN ----------------
-function spawnLoop(){
-    if(!running) return;
-
-    setTimeout(()=>{
-        createBall();
-        spawnLoop();
-    }, spawnDelay);
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
 }
 
 // ---------------- RESTART ----------------
