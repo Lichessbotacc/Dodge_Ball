@@ -571,7 +571,10 @@ let d = Math.sqrt(dx*dx + dy*dy);
 if(d < p.radius + b.radius){
 
 p.alive = false;
-eliminated.push(p);
+eliminated.push({
+    ...p,
+    deathIndex: eliminated.length
+});
 
 // 👉 WICHTIG: nur 1 Spieler übrig?
 const alive = players.filter(x => x.alive);
@@ -660,13 +663,14 @@ document.getElementById("finalTime").innerHTML =
 
 function updateRanking(){
 
-const sorted = [...players]
-    .filter(p => p.deathIndex !== undefined)
-    .sort((a,b) => a.deathIndex - b.deathIndex);
+const sorted = [...eliminated];
 
-// lebende ans Ende
-const alive = players.filter(p => p.alive);
-sorted.push(...alive);
+// lebende am Ende hinzufügen
+for(const p of players){
+    if(p.alive && !sorted.includes(p)){
+        sorted.push(p);
+    }
+}
 
 let html =
 "<b>Turnier Ranking</b><br>" +
@@ -687,7 +691,6 @@ html += (i+1)+". "+p.name+" - "+p.points+" Punkte<br>";
 
 document.getElementById("ranking").innerHTML = html;
 }
-
 // ---------------- DRAW ----------------
 function draw(){
 ctx.clearRect(0,0,canvas.width,canvas.height);
