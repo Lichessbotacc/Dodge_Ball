@@ -908,20 +908,26 @@ if(matches.length > 0){
 }
 function finishArena(){
 
+    // Spiel stoppen
     if(mode !== "tournament"){
         running = false;
     }
 
+    // Spawn stoppen
     if(spawnTimer){
         clearTimeout(spawnTimer);
     }
 
+    // Ranking nach Überlebenszeit
     eliminated.sort(
         (a,b)=>b.deathTime-a.deathTime
     );
 
-    // ---------------- POINTS SYSTEM ----------------
-    if(rankingMode==="points"){
+    // Sieger markieren
+    const winner = eliminated[0];
+
+    // ---------------- POINT SYSTEM ----------------
+    if(rankingMode === "points"){
 
         const totalPlayers = eliminated.length;
 
@@ -958,106 +964,154 @@ function finishArena(){
     // ---------------- ELO SYSTEM ----------------
     else{
 
-        const K = 24;
-
+        // Anzeige reset
         for(const bot of ranking){
             bot.lastChange = 0;
         }
 
-        for(let i=0;i<eliminated.length-1;i++){
+        // Dynamisches K
+        const K =
+            Math.max(
+                1,
+                16 / eliminated.length
+            );
 
-            let j = i + 1;
+        // Alle Spieler absichern
+        for(const p of eliminated){
 
-            let a =
-                ranking.find(
-                    x=>x.name===eliminated[i].name
-                );
+            let existing =
+                ranking.find(x=>x.name===p.name);
 
-            if(!a){
+            if(!existing){
 
-                a = {
-                    name:eliminated[i].name,
-                    color:eliminated[i].color,
+                ranking.push({
+                    name:p.name,
+                    color:p.color,
                     points:0,
                     elo:1500,
                     lastChange:0
-                };
+                });
 
-                ranking.push(a);
             }
 
-            let b =
-                ranking.find(
-                    x=>x.name===eliminated[j].name
-                );
-
-            if(!b){
-
-                b = {
-                    name:eliminated[j].name,
-                    color:eliminated[j].color,
-                    points:0,
-                    elo:1500,
-                    lastChange:0
-                };
-
-                ranking.push(b);
-            }
-
-            const expectedA =
-                1/(1+Math.pow(10,(b.elo-a.elo)/400));
-
-            const expectedB =
-                1-expectedA;
-
-            const changeA =
-                K*(1-expectedA);
-
-            const changeB =
-                K*(0-expectedB);
-
-            a.elo += changeA;
-            b.elo += changeB;
-
-            a.lastChange += changeA;
-            b.lastChange += changeB;
         }
+
+        // Jeder gegen jeden
+        for(let i=0;i<eliminated.length;i++){
+
+            for(let j=i+1;j<eliminated.length;j++){
+
+                const winnerData = eliminated[i];
+                const loserData = eliminated[j];
+
+                const winnerPlayer =
+                    ranking.find(
+                        x=>x.name===winnerData.name
+                    );
+
+                const loserPlayer =
+                    ranking.find(
+                        x=>x.name===loserData.name
+                    );
+
+                // Expected
+                const expectedWinner =
+                    1/(1+Math.pow(
+                        10,
+                        (loserPlayer.elo-winnerPlayer.elo)/400
+                    ));
+
+                const expectedLoser =
+                    1 - expectedWinner;
+
+                // Änderungen
+                const winnerChange =
+                    K * (1 - expectedWinner);
+
+                const loserChange =
+                    K * (0 - expectedLoser);
+
+                // Anwenden
+                winnerPlayer.elo += winnerChange;
+                loserPlayer.elo += loserChange;
+
+                winnerPlayer.lastChange += winnerChange;
+                loserPlayer.lastChange += loserChange;
+
+            }
+
+        }
+
     }
 
-    // ---------------- ALWAYS RUN ----------------
+    // ---------------- UI UPDATE ----------------
 
     updateRanking();
-
-    const winner = eliminated[0];
 
     document.getElementById("gameOver").style.display =
         "flex";
 
-    document.getElementById("finalTime").innerHTML =
-        "Runde "
-        + currentRound
-        + "/"
-        + tournamentRounds
-        + "<br>Sieger: "
-        + winner.name;
+    // Tournament Anzeige
+    if(mode === "tournament"){
 
-    if(currentRound < tournamentRounds){
+        document.getElementById("finalTime").innerHTML =
+            "Runde "
+            + currentRound
+            + "/"
+            + tournamentRounds
+            + "<br>Sieger: "
+            + winner.name;
 
-        currentRound++;
+        if(currentRound < tournamentRounds){
 
-        setTimeout(()=>{
+            currentRound++;
 
-            document.getElementById("gameOver").style.display =
-                "none";
+            setTimeout(()=>{
 
-            startGame(mode);
+                document.getElementById("gameOver").style.display =
+                    "none";
 
-        },10000);
+                startGame(mode);
 
-    }else{
+            }, 5000);
 
-        document.getElementById("finalTime").innerHTML +=
-            "<br><br><b>TURNIER BEENDET</b>";
+        }else{
+
+            document.getElementById("finalTime").innerHTML +=
+                "<br><br><b>TURNIER BEENDET</b>";
+
+        }
+
+    }
+
+    // Normale Modi
+    else{
+
+        const survived =
+            Math.floor(
+                (Date.now()-startTime)/1000
+            );
+
+        // Rekord
+        if(survived > record){
+
+            record = survived;
+
+            localStorage.setItem(
+                "fingerDodgeRecord",
+                record
+            );
+
+            document.getElementById("record").textContent =
+                record;
+        }
+
+        document.getElementById("finalTime").innerHTML =
+            "Überlebt: "
+            + survived
+            + "s<br><br>"
+            + "Sieger: "
+            + winner.name;
 
     }
 
