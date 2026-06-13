@@ -679,14 +679,15 @@ players = participants;
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
-        participants.push(
-            createPlayer(
-                Math.random()*canvas.width,
-                Math.random()*canvas.height,
-                `hsl(${i*360/aiBotCount},100%,50%)`,
-                "Bot "+(i+1)
-            )
-        );
+       participants.push(
+    createPlayer(
+        Math.random()*canvas.width,
+        Math.random()*canvas.height,
+        `hsl(${i*360/aiBotCount},100%,50%)`,
+        "Bot "+(i+1),
+        Math.random()
+    )
+);
 
     }
 
