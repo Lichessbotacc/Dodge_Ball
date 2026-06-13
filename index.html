@@ -367,74 +367,88 @@ function spawnLoop(){
 // ---------------- AI ----------------
 function updateAI(p, activeBalls = balls){
 
-// Ziel wechseln
-if(
-!p.targetX ||
-!p.targetY ||
-Math.random() < 0.003 * p.reaction
-){
-p.targetX = Math.random() * canvas.width;
-p.targetY = Math.random() * canvas.height;
-}
+    // ---------------- TARGET LOGIK ----------------
+    if(
+        !p.targetX ||
+        !p.targetY ||
+        Math.random() < 0.003 * p.reaction
+    ){
+        p.targetX = Math.random() * canvas.width;
+        p.targetY = Math.random() * canvas.height;
+    }
 
-// Richtung Ziel
-let moveX = p.targetX - p.x;
-let moveY = p.targetY - p.y;
+    let moveX = p.targetX - p.x;
+    let moveY = p.targetY - p.y;
 
-let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+    let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
 
-moveX /= moveDist;
-moveY /= moveDist;
+    moveX /= moveDist;
+    moveY /= moveDist;
 
-// Avoidance
-let avoidX = 0;
-let avoidY = 0;
+    // ---------------- AVOIDANCE ----------------
+    let avoidX = 0;
+    let avoidY = 0;
 
-const wallMargin = 140;
+    // Wände
+    const wallMargin = 140;
 
-if(p.x < wallMargin) avoidX += (wallMargin - p.x) * 0.03;
-if(p.x > canvas.width - wallMargin) avoidX -= (p.x - (canvas.width - wallMargin)) * 0.03;
-if(p.y < wallMargin) avoidY += (wallMargin - p.y) * 0.03;
-if(p.y > canvas.height - wallMargin) avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
+    if(p.x < wallMargin){
+        avoidX += (wallMargin - p.x) * 0.03;
+    }
+    if(p.x > canvas.width - wallMargin){
+        avoidX -= (p.x - (canvas.width - wallMargin)) * 0.03;
+    }
+    if(p.y < wallMargin){
+        avoidY += (wallMargin - p.y) * 0.03;
+    }
+    if(p.y > canvas.height - wallMargin){
+        avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
+    }
 
-// Balls
-for(const b of activeBalls){
+    // ---------------- BALL AVOIDANCE (FIXED) ----------------
+    for(const b of activeBalls){
 
-const dx = p.x - b.x;
-const dy = p.y - b.y;
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
 
-const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
 
-if(dist < p.awareness){
+        // 👉 FIX: weniger übertriebener Radius
+        const safeRadius = p.awareness * 0.5;
 
-const strength = (p.awareness / dist);
-const force = Math.min(strength * p.dodgePower, 10);
+        if(dist < safeRadius){
 
-avoidX += (dx / dist) * force;
-avoidY += (dy / dist) * force;
+            const strength = (safeRadius - dist) / safeRadius;
 
-}
+            const force = strength * p.dodgePower;
 
-}
+            avoidX += (dx / dist) * force;
+            avoidY += (dy / dist) * force;
+        }
+    }
 
-// Mischung
-let vx = moveX * 3 + avoidX * 20;
-let vy = moveY * 3 + avoidY * 20;
+    // ---------------- MOVEMENT MIX ----------------
+    let vx =
+        moveX * 4 +
+        avoidX * 10;
 
-// randomness
-vx += (Math.random()-0.5) * p.randomness;
-vy += (Math.random()-0.5) * p.randomness;
+    let vy =
+        moveY * 4 +
+        avoidY * 10;
 
-// speed
-let len = Math.sqrt(vx*vx + vy*vy) || 1;
+    // kleine Unruhe
+    vx += (Math.random() - 0.5) * p.randomness;
+    vy += (Math.random() - 0.5) * p.randomness;
 
-p.x += (vx/len) * p.speed;
-p.y += (vy/len) * p.speed;
+    // normalisieren
+    let len = Math.sqrt(vx*vx + vy*vy) || 1;
 
-// bounds
-p.x = Math.max(p.radius, Math.min(canvas.width-p.radius, p.x));
-p.y = Math.max(p.radius, Math.min(canvas.height-p.radius, p.y));
+    p.x += (vx / len) * p.speed;
+    p.y += (vy / len) * p.speed;
 
+    // ---------------- BOUNDS ----------------
+    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
 }
 function createMatch(p1,p2){
 
