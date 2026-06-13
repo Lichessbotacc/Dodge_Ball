@@ -155,6 +155,7 @@ let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let aiBotCount = 10;
 let rankingMode = "points";
+let globalStats = {};
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -175,7 +176,30 @@ alive:true
 };
 
 }
+function getPlayer(name, x, y, color){
 
+if(!globalStats[name]){
+    globalStats[name] = {
+        elo: 1500,
+        points: 0,
+        lastChange: 0
+    };
+}
+
+const data = globalStats[name];
+
+return {
+    x,
+    y,
+    radius: playerRadiusSetting,
+    color,
+    name,
+    points: data.points,
+    elo: data.elo,
+    lastChange: data.lastChange,
+    alive: true
+};
+}
 // ---------------- INPUT ----------------
 const keys = {};
 document.addEventListener("keydown",(e)=>keys[e.key.toLowerCase()]=true);
@@ -367,9 +391,7 @@ function startGame(selectedMode){
                 "Bot " + (i + 1)
             );
 
-            bot.points = 0;
-            bot.elo = 1500;
-            bot.lastChange = 0;
+            
 
             players.push(bot);
             ranking.push(bot);
@@ -434,9 +456,126 @@ function startGame(selectedMode){
                 "Bot " + (i + 1)
             );
 
-            bot.points = 0;
-            bot.elo = 1500;
-            bot.lastChange = 0;
+            
+
+            bot.aggressiveness = Math.random();
+            bot.fear = Math.random();
+            bot.wander = Math.random();
+            bot.speed = 2.5 + Math.random() * 0.5;
+            bot.safeRadius = 120 + Math.random() * 120;
+
+            players.push(bot);
+            ranking.push(bot);
+        }
+
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
+    }function startGame(selectedMode){
+
+    if(mode !== "ai"){
+        currentRound = 1;
+    }
+
+    mode = selectedMode;
+    document.getElementById("mode").textContent = mode;
+
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("gameOver").style.display = "none";
+
+    balls = [];
+    players = [];
+    ranking = [];
+    eliminated = [];
+
+    running = true;
+    startTime = Date.now();
+
+    // =========================
+    // SINGLEPLAYER (TURNIER)
+    // =========================
+    if(mode === "single"){
+
+        const player = getPlayer(
+            "Spieler",
+            canvas.width / 2,
+            canvas.height / 2,
+            "#00ff88"
+        );
+
+        players.push(player);
+        ranking.push(player);
+
+        for(let i = 0; i < aiBotCount; i++){
+
+            const bot = getPlayer(
+                "Bot " + (i + 1),
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                `hsl(${i * 360 / aiBotCount},100%,50%)`
+            );
+
+            players.push(bot);
+            ranking.push(bot);
+        }
+
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
+    }
+
+    // =========================
+    // MULTIPLAYER + BOTS
+    // =========================
+    if(mode === "multi"){
+
+        const p1 = getPlayer("Spieler 1", 200, 200, "#00ff88");
+        const p2 = getPlayer("Spieler 2", 400, 200, "#4488ff");
+
+        players.push(p1, p2);
+        ranking.push(p1, p2);
+
+        for(let i = 0; i < aiBotCount; i++){
+
+            const bot = getPlayer(
+                "Bot " + (i + 1),
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                `hsl(${i * 360 / aiBotCount},100%,50%)`
+            );
+
+            players.push(bot);
+            ranking.push(bot);
+        }
+
+        for(let i = 0; i < startBallCount; i++){
+            createBall();
+        }
+
+        spawnLoop();
+    }
+
+    // =========================
+    // AI SPECTATE
+    // =========================
+    if(mode === "ai"){
+
+        if(currentRound === 1){
+            ranking = [];
+        }
+
+        for(let i = 0; i < aiBotCount; i++){
+
+            const bot = getPlayer(
+                "Bot " + (i + 1),
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                `hsl(${i * 360 / aiBotCount},100%,50%)`
+            );
 
             bot.aggressiveness = Math.random();
             bot.fear = Math.random();
@@ -642,7 +781,13 @@ document.getElementById("gameOver").style.display = "flex";
 document.getElementById("finalTime").innerHTML =
 "Sieger: " + winner.name;
 }
-
+for(const p of ranking){
+globalStats[p.name] = {
+    elo: p.elo,
+    points: p.points,
+    lastChange: p.lastChange
+};
+}
 function updateRanking(){
 
 const sorted = [...ranking];
