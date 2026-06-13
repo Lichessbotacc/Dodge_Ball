@@ -180,6 +180,7 @@ let spawnActive = false;
 let waitingQueue = [];
 let playerMatchMap = new Map();
 let recentOpponents = new Map();
+const HUMAN_NAME = "DU";
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -856,12 +857,7 @@ if(mode==="ai" || mode==="single" || mode==="multi"){
 
 for(const p of players){
 
-if(
-p.alive &&
-(
-p.name.startsWith("Bot")
-)
-){
+if(p.alive && p.name !== HUMAN_NAME && p.name.startsWith("Bot")){
 updateAI(p);
 }
 
@@ -906,12 +902,11 @@ function updateMatch(match){
     const players = match.players;
 
     // AI
-   for(const p of players){
-    if(p.alive){
+ for(const p of players){
+    if(p.alive && p.name !== HUMAN_NAME){
         updateAI(p, match.balls);
     }
 }
-
     // BALLS
     for(const b of match.balls){
 
