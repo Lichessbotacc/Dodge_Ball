@@ -235,11 +235,41 @@ function createBallForMatch(match){
 
     const r = 15 + Math.random()*20;
 
+    let x,y;
+    let valid = false;
+
+    while(!valid){
+
+        x = Math.random()*(canvas.width - r*2) + r;
+        y = Math.random()*(canvas.height - r*2) + r;
+
+        valid = true;
+
+        for(const p of match.players){
+
+            if(!p.alive) continue;
+
+            const dx = p.x - x;
+            const dy = p.y - y;
+
+            const dist = Math.sqrt(dx*dx + dy*dy);
+
+            const minDistance =
+                p.radius + r + 80;
+
+            if(dist < minDistance){
+                valid = false;
+                break;
+            }
+
+        }
+
+    }
+
     match.balls.push({
 
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-
+        x,
+        y,
         radius:r,
 
         vx:(Math.random()*4+2)
@@ -253,7 +283,6 @@ function createBallForMatch(match){
     });
 
 }
-
 // ---------------- BALLS ----------------
 function createBall(){
 
@@ -944,12 +973,22 @@ function finishMatch(match,winner,loser){
     winner.lastChange = change;
     loser.lastChange = -change;
 
-    // zurück in queue
-    waitingQueue.push(winner);
-    waitingQueue.push(loser);
+    // RESET
+    winner.alive = true;
+    loser.alive = true;
 
-    // neues Match suchen
-    tryMatchmaking();
+    // Match entfernen
+    matches = matches.filter(m => m.id !== match.id);
+
+    // Queue mit Delay
+    setTimeout(()=>{
+
+        waitingQueue.push(winner);
+        waitingQueue.push(loser);
+
+        tryMatchmaking();
+
+    }, 2000);
 
 }
 function finishArena(){
