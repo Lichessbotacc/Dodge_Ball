@@ -1053,23 +1053,6 @@ function updateEloTable(){
     document.getElementById("eloList").innerHTML = html;
 }
 
-
-    for(const match of matches){
-        html += `
-        <div style="
-            margin-bottom:8px;
-            cursor:pointer;
-            color:${match.id === spectateMatchId ? 'lime' : 'yellow'}
-        "
-        onclick="spectateMatchId='${match.id}'; spectatorMode=true;">
-            🎥 ${match.players[0].name} vs ${match.players[1].name}
-        </div>
-        `;
-    }
-
-    document.getElementById("eloList").innerHTML = html;
-}
-
 function isPlayerInMatch(player){
     return matches.some(match =>
         match.running &&
@@ -1217,8 +1200,6 @@ setInterval(() => {
         seededMatchmaking();
     }
 }, 1000);
-
-loop();
 
 loop();
 </script>
