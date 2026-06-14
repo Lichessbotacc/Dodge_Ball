@@ -327,9 +327,9 @@ while(!valid){
     let safe = true;
 
     const allPlayers =
-    mode === "tournament"
-    ? matches[activeMatchIndex]?.players || []
-    : players;
+        mode === "tournament"
+        ? matches[activeMatchIndex]?.alive || []
+        : players;
 
     for(const p of allPlayers){
 
@@ -388,8 +388,7 @@ function spawnLoop(){
 
 }
 // ---------------- AI ----------------
-function updateAI(p, activeBalls){
-    if(!activeBalls) return;
+function updateAI(p, activeBalls = balls){
 
     // ---------------- TARGET LOGIK ----------------
   let danger = false;
@@ -522,18 +521,13 @@ function resetAIState(p){
     p.targetX = null;
     p.targetY = null;
 
+    // wichtig gegen “komisches Verhalten”
     p.deathTime = 0;
     p.alive = true;
 
-    p.lastVX = 0;
-    p.lastVY = 0;
-
-    p._vx = 0;
-    p._vy = 0;
-
-    p._lastAvoidX = 0;
-    p._lastAvoidY = 0;
-    p._stuckFrames = 0;
+    // optional, aber stabilisiert Verhalten stark
+    p.stuckVectorX = 0;
+    p.stuckVectorY = 0;
 }
 function rememberMatch(p1, p2){
 
@@ -702,9 +696,7 @@ for(let i=0;i<startBallCount;i++){
 createBall();
 }
 
-if(mode !== "tournament"){
-    spawnLoop();
-}
+spawnLoop();
 updateRanking();
 }
 function startTournament(){
@@ -714,34 +706,38 @@ function startTournament(){
     matches = [];
     participants = [];
     waitingQueue = [];
-    playerMatchMap.clear();
 
-    const me = createPlayer(
-        canvas.width/2,
-        canvas.height/2,
-        "#00ff88",
-        "DU"
+    // DU
+    participants.push(
+        createPlayer(
+            canvas.width/2,
+            canvas.height/2,
+            "#00ff88",
+            "DU"
+        )
     );
-
-    participants.push(me);
-
+balls = [];
+players = [];
+players = participants;
+    // Bots
     for(let i=0;i<aiBotCount;i++){
-        participants.push(
-            createPlayer(
-                Math.random()*canvas.width,
-                Math.random()*canvas.height,
-                `hsl(${i*360/aiBotCount},100%,50%)`,
-                "Bot "+(i+1)
-            )
-        );
+
+       participants.push(
+createPlayer(
+    Math.random()*canvas.width,
+    Math.random()*canvas.height,
+    `hsl(${i*360/aiBotCount},100%,50%)`,
+    "Bot "+(i+1)
+)
+);
+
     }
 
-    balls = [];
-    players = [];
-
+    // Alle warten auf Match
     waitingQueue.push(...participants);
 
     tryMatchmaking();
+
 }
 function tryMatchmaking(){
 
@@ -1068,11 +1064,8 @@ function finishMatch(match, winner, loser){
         resetAI(winner);
         resetAI(loser);
 
-        playerInMatch.delete(winner.name);
-playerInMatch.delete(loser.name);
-
-waitingQueue.push(winner, loser);
-tryMatchmaking();
+        waitingQueue.push(winner);
+        waitingQueue.push(loser);
 
         tryMatchmaking();
 
