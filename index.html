@@ -468,6 +468,13 @@ function startGame(selectedMode){
     document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
     document.getElementById("spectatorInfo").style.display = "none";
     document.getElementById("mode").textContent = mode;
+    if(mode === "tournament"){
+        document.getElementById("time").parentNode.innerHTML = `
+            ELO: <span id="time">1500</span><br>
+            Platz: <span id="record">1</span><br>
+            Spieler: <span id="balls">0</span>
+        `;
+    }
     document.getElementById("menu").style.display = "none";
     document.getElementById("gameOver").style.display = "none";
 
@@ -762,7 +769,8 @@ function updateTournament(){
         if(!match.running) continue;
         updateMatch(match);
     }
-
+  // Abgelaufene Matches endgültig entfernen
+    matches = matches.filter(m => m.running);
     updateEloTable();
 }
 
@@ -807,6 +815,7 @@ function updateMatch(match){
     }
 
     // COLLISION
+    // COLLISION
     for(const p of players){
         if(!p.alive) continue;
 
@@ -819,15 +828,16 @@ function updateMatch(match){
                 p.alive = false;
                 const alive = players.filter(x => x.alive);
 
-                if(alive.length === 1){
-                    finishMatch(match, alive[0], p);
+                if(alive.length <= 1){
+                    // Match sofort beenden und aus Liste entfernen
+                    match.running = false;
+                    clearInterval(match.spawnTimer);
+                    finishMatch(match, alive[0] || players.find(x => !x.alive), p);
+                    return; // Wichtig: Schleife abbrechen, da Match gelöscht wird
                 }
             }
         }
     }
-}
-
-// COLLISION
 function check(p){
     if(!p.alive) return;
 
@@ -1052,6 +1062,14 @@ function updateEloTable(){
              color:${match.id === spectateMatchId ? 'lime' : 'yellow'}">
             🎥 ${match.players[0].name} vs ${match.players[1].name}
         </div>`;
+    }
+      // Eigene ELO und Platz in der oberen UI anzeigen
+    const me = participants.find(p => p.name === "DU");
+    if(me){
+        const myRank = sorted.findIndex(p => p.name === "DU") + 1;
+        document.getElementById("time").textContent = Math.round(me.elo);
+        document.getElementById("record").textContent = myRank;
+        document.getElementById("balls").textContent = participants.length;
     }
     document.getElementById("eloList").innerHTML = html;
 }
