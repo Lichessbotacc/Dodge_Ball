@@ -292,16 +292,22 @@ function updateAI(p, activeBalls = balls){
 
 // ═══ PLAYER FACTORY ══════════════════════════════════════════════════════════
 function createPlayer(x,y,color,name){
-  const skill=Math.random();
+  const skill = {
+  aim: Math.random(),
+  reaction: Math.random(),
+  movement: Math.random(),
+  awareness: Math.random(),
+  aggression: Math.random()
+};
   return {
     x,y,radius:playerRadiusSetting,color,name,
     points:0,elo:1500,lastChange:0,alive:true,games:0,
     skill,
-    speed: 2 + skill * 10,
-    reaction: 0.2 + skill * 3.5,
-    awareness: 80 + skill * 120,
-    randomness: (1 - skill) * 4,
-    dodgePower: 0.5 + skill * 5,
+    speed: 2 + skill.movement * 8 + skill.aggression * 2,
+    reaction: 0.3 + skill.reaction * 4,
+    awareness: 60 + skill.awareness * 140,
+    randomness: (1 - skill.movement) * 5,
+    dodgePower: 0.5 + skill.aim * 3 + skill.reaction * 1.5,
     targetX:null,targetY:null,
     lastVX:0,lastVY:0,
     // Statistiken
