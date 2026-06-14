@@ -293,51 +293,74 @@ function updateAI(p, activeBalls = balls){
 // ═══ PLAYER FACTORY ══════════════════════════════════════════════════════════
 function createPlayer(x,y,color,name){
   const skill = {
-    aim: Math.random(),
-    reaction: Math.random(),
-    movement: Math.random(),
-    awareness: Math.random(),
-    aggression: Math.random()
-  };
+  aim: Math.random(),
+  reaction: Math.random(),
+  movement: Math.random(),
+  awareness: Math.random(),
+  aggression: Math.random()
+};
 
-  const skillBoost = 0.4 + skill.movement * 1.6;
+// 🎯 Human Curve (macht 50% = Durchschnitt realistischer)
+const humanSkill =
+  (skill.aim +
+   skill.reaction +
+   skill.movement +
+   skill.awareness +
+   skill.aggression) / 5;
 
-  return {
-    x, y,
-    radius: playerRadiusSetting,
-    color,
-    name,
-    points: 0,
-    elo: 1500,
-    lastChange: 0,
-    alive: true,
-    games: 0,
-    skill,
-    speed:
-    1.5 + skill.movement * 6.5 + skill.aggression * 2.5,
-reaction:
-  0.2 + skill.reaction * 4.5,
-awareness:
-  120 + skill.awareness * 260,
-randomness:
-  (1 - skill.movement) * 3.0,
-dodgePower:
-  0.9 + skill.aim * 3.2 + skill.reaction * 2.0,
-    targetX: null,
-    targetY: null,
-    lastVX: 0,
-    lastVY: 0,
-    stats: {
-      wins: 0,
-      losses: 0,
-      totalEloGain: 0,
-      totalEloLoss: 0,
-      matchesPlayed: 0,
-      bestStreak: 0,
-      currentStreak: 0
-    }
-  };
-} // 👈 DIESE KLAMMER hat gefehlt
+// leichte Normalisierung Richtung 0.5 Mitte
+const balancedSkill = 0.5 + (humanSkill - 0.5) * 0.9;
+
+return {
+  x, y,
+  radius: playerRadiusSetting,
+  color,
+  name,
+
+  skill,
+
+  points: 0,
+  elo: 1500,
+  lastChange: 0,
+  alive: true,
+  games: 0,
+
+  // ⚡ SPEED (realistisch menschlich!)
+  speed:
+    2.2 + balancedSkill * 3.8,   // max ~6.0
+
+  // 🧠 reaction = menschliche Verzögerung
+  reaction:
+    0.25 + balancedSkill * 1.8,  // kein instant reaction
+
+  // 👁 awareness = begrenztes Sichtfeld
+  awareness:
+    90 + balancedSkill * 180,    // max ~270
+
+  // 🎲 kleine Unsauberkeit wie Mensch
+  randomness:
+    (1 - balancedSkill) * 2.2,
+
+  // 🧨 dodge power, aber nicht OP
+  dodgePower:
+    0.8 + balancedSkill * 2.2,
+
+  targetX: null,
+  targetY: null,
+
+  lastVX: 0,
+  lastVY: 0,
+
+  stats: {
+    wins: 0,
+    losses: 0,
+    totalEloGain: 0,
+    totalEloLoss: 0,
+    matchesPlayed: 0,
+    bestStreak: 0,
+    currentStreak: 0
+  }
+};
 
 // ═══ SETTINGS ════════════════════════════════════════════════════════════════
 function openSettings(){
