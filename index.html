@@ -1067,16 +1067,39 @@ function draw() {
       const p2 = renderMatch.players[1];
 
       spectText.innerHTML = `
-        <div style="text-align:center">
-          <b>${p1.name}</b> (${Math.round(p1.elo)})<br>
-          Skill: <b>${Math.round((p1.skill || 0) * 100)}%</b>
-          <br><br>
-          <b>${p2.name}</b> (${Math.round(p2.elo)})<br>
-          Skill: <b>${Math.round((p2.skill || 0) * 100)}%</b>
-        </div>
-      `;
-    }
+  <div style="
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    font-size:14px;
+    line-height:1.2;
+  ">
 
+    <div style="text-align:center; min-width:90px;">
+      <b>${p1.name}</b><br>
+      ${Math.round(p1.elo)} ELO<br>
+      ${Math.round((p1.skill || 0) * 100)}%
+    </div>
+
+    <div style="
+      font-weight:bold;
+      font-size:16px;
+      opacity:0.8;
+      padding:0 6px;
+    ">
+      VS
+    </div>
+
+    <div style="text-align:center; min-width:90px;">
+      <b>${p2.name}</b><br>
+      ${Math.round(p2.elo)} ELO<br>
+      ${Math.round((p2.skill || 0) * 100)}%
+    </div>
+
+  </div>
+`;
+    }
     return;
   }
 
