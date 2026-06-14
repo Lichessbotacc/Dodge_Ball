@@ -590,9 +590,10 @@ function startTournament(){
 participants = [];
 spectateModeActive = false;
 spectatorMode = false;
-spectateMatchId = null;
+spectatingLocked = false;
 followMode = "none";
 targetName = null;
+spectateMatchId = null;
 participants.push(
     createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
 );
