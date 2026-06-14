@@ -1019,12 +1019,23 @@ function draw(){
             `Skill: <b>${Math.round(opp.skill*100)}%</b>`;
         }
       } else { oppDiv.style.display="none"; }
-      spectDiv.style.display="none";
-    } else if(spectateModeActive){
-      oppDiv.style.display="none";
-      spectDiv.style.display="block";
-      const p1=renderMatch.players[0],p2=renderMatch.players[1];
-      spectText.innerHTML=`<b>${p1.name}</b> (${Math.round(p1.elo)}) vs <b>${p2.name}</b> (${Math.round(p2.elo)})`;
+      spectDiv.style.display="none";} else if(spectateModeActive){
+  oppDiv.style.display="none";
+  spectDiv.style.display="block";
+
+  const p1 = renderMatch.players[0];
+  const p2 = renderMatch.players[1];
+
+  spectText.innerHTML = `
+    <div style="text-align:center">
+      <b>${p1.name}</b> (${Math.round(p1.elo)})<br>
+      Skill: <b>${Math.round((p1.skill || 0) * 100)}%</b>
+      <br><br>
+      <b>${p2.name}</b> (${Math.round(p2.elo)})<br>
+      Skill: <b>${Math.round((p2.skill || 0) * 100)}%</b>
+    </div>
+  `;
+}
     } else {
       oppDiv.style.display="none";spectDiv.style.display="none";
     }
