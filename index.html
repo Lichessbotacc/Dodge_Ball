@@ -76,6 +76,24 @@ align-items:center;
     font-size:14px;
     border-radius:8px;
 }
+#settings label{
+    font-size:16px;
+    margin-top:10px;
+}
+
+.inputBox{
+    display:flex;
+    gap:10px;
+    margin-top:8px;
+    margin-bottom:20px;
+}
+
+.inputBox button{
+    flex:1;
+    padding:12px;
+    font-size:14px;
+    border-radius:10px;
+}
 </style>
 </head>
 
@@ -144,11 +162,12 @@ border-radius:10px;
 <input id="botCount" type="number" value="10" min="2">
 <br><br>
 <div id="inputSettings">
-  <h3>Steuerung (nur PC)</h3>
+  <label>Steuerung (nur PC)</label>
 
-  <button onclick="setInputMode('keyboard')">Keyboard (Pfeiltasten)</button>
-  <button onclick="setInputMode('mouse')">Maus</button>
-</div>
+  <div class="inputBox">
+    <button onclick="setInputMode('keyboard')">Keyboard (Pfeiltasten)</button>
+    <button onclick="setInputMode('mouse')">Maus</button>
+  </div>
 <label>Ranking-System</label>
 <select id="rankingMode">
 <option value="points" selected>Punkte</option>
