@@ -211,26 +211,10 @@ let spectatorMode = false;
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
-// PLAYER FACTORY
+// PLAYER FACTORY - SMOOTH RANDOM SKILLS
 function createPlayer(x, y, color, name){
-    let tierRoll = Math.random();
-    let skill;
-
-    if(tierRoll < 0.25){
-        skill = Math.random() * 0.25;
-    }
-    else if(tierRoll < 0.55){
-        skill = 0.25 + Math.random() * 0.25;
-    }
-    else if(tierRoll < 0.85){
-        skill = 0.5 + Math.random() * 0.3;
-    }
-    else{
-        skill = 0.8 + Math.random() * 0.2;
-    }
-
-    const chaos = (Math.random() - 0.5) * 0.4;
-    const base = Math.max(0, Math.min(1, skill + chaos));
+    // Completely random skill from 0 to 1 (smooth, not tiered)
+    const skill = Math.random();
 
     return {
         x,
@@ -244,13 +228,14 @@ function createPlayer(x, y, color, name){
         alive: true,
         games: 0,
 
-        skill: base,
+        skill: skill,
 
-        speed: 2 + base * 10,
-        reaction: 0.2 + base * 3.5,
-        awareness: 60 + base * 600,
-        randomness: (1 - base) * 4,
-        dodgePower: 0.5 + base * 5,
+        // Smooth scaling based on skill
+        speed: 2 + skill * 10,             // 2 → 12
+        reaction: 0.2 + skill * 3.5,       // 0.2 → 3.7
+        awareness: 60 + skill * 600,       // 60 → 660
+        randomness: (1 - skill) * 4,       // 4 → 0 (skilled bots are predictable)
+        dodgePower: 0.5 + skill * 5,       // 0.5 → 5.5
 
         targetX: null,
         targetY: null,
@@ -360,7 +345,7 @@ function spawnLoop(){
     }, spawnDelay);
 }
 
-// AI - ONLY DODGE BALLS, IGNORE OTHER PLAYERS
+// AI - ONLY DODGE BALLS
 function updateAI(p, activeBalls = balls){
     let danger = false;
 
@@ -518,14 +503,17 @@ function startGame(selectedMode){
 
         for(const bot of ranking){
             if(bot.name === "Spieler") continue;
-            players.push({
-                ...bot,
-                x:Math.random()*canvas.width,
-                y:Math.random()*canvas.height,
-                radius:playerRadiusSetting,
-                alive:true,
-                skill: bot.skill ?? Math.random()
-            });
+            const newBot = createPlayer(
+                Math.random()*canvas.width,
+                Math.random()*canvas.height,
+                bot.color,
+                bot.name
+            );
+            // Keep stored skill and other attributes
+            newBot.elo = bot.elo;
+            newBot.points = bot.points;
+            newBot.lastChange = bot.lastChange;
+            players.push(newBot);
         }
     }
     else if(mode==="multi"){
@@ -551,14 +539,16 @@ function startGame(selectedMode){
     }
     else if(mode==="ai"){
         for(const bot of ranking){
-            players.push({
-                ...bot,
-                x:Math.random()*canvas.width,
-                y:Math.random()*canvas.height,
-                radius:playerRadiusSetting,
-                alive:true,
-                skill: bot.skill ?? Math.random()
-            });
+            const newBot = createPlayer(
+                Math.random()*canvas.width,
+                Math.random()*canvas.height,
+                bot.color,
+                bot.name
+            );
+            newBot.elo = bot.elo;
+            newBot.points = bot.points;
+            newBot.lastChange = bot.lastChange;
+            players.push(newBot);
         }
     }
 
@@ -861,6 +851,12 @@ function finishMatch(match, winner, loser){
 
     winner.arenaScore = (winner.arenaScore || 0) + 1;
 
+    // Update ranking with new ELO
+    const winnerRanked = ranking.find(x => x.name === winner.name);
+    const loserRanked = ranking.find(x => x.name === loser.name);
+    if(winnerRanked) winnerRanked.elo = winner.elo;
+    if(loserRanked) loserRanked.elo = loser.elo;
+
     matches = matches.filter(m => m.id !== match.id);
 
     playerMatchMap.delete(winner.name);
@@ -869,7 +865,6 @@ function finishMatch(match, winner, loser){
     const nextMatchDelay = 2500 + Math.random() * 1500;
 
     setTimeout(() => {
-        // IMPORTANT: Reset state before queueing
         resetAI(winner);
         resetAI(loser);
 
@@ -1098,8 +1093,10 @@ function draw(){
             const myMatch = playerMatchMap.get("DU");
             if(myMatch){
                 const opponent = myMatch.players.find(p => p.name !== "DU");
+                const skillPercent = Math.round(opponent.skill * 100);
                 document.getElementById("spectatorText").innerHTML = 
                     "Dein Gegner: <b>" + opponent.name + "</b><br>" +
+                    "Skill: " + skillPercent + "%<br>" +
                     opponent.name + " ELO: " + Math.round(opponent.elo);
             }
         }
