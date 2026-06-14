@@ -45,18 +45,6 @@ flex-direction:column;
 justify-content:center;
 align-items:center;
 }
-
-#spectatorInfo{
-    position:absolute;
-    bottom:20px;
-    left:20px;
-    color:white;
-    font-size:18px;
-    background:rgba(0,0,0,0.6);
-    padding:15px;
-    border-radius:10px;
-    display:none;
-}
 </style>
 </head>
 
@@ -75,20 +63,12 @@ right:20px;
 background:rgba(0,0,0,0.6);
 padding:10px;
 color:white;
-min-width:220px;
-max-height:70vh;
-overflow-y:auto;
-border-radius:10px;
+min-width:180px;
+pointer-events: none;
 ">
 <b>ELO LIVE</b>
 <div id="eloList"></div>
 </div>
-
-<div id="spectatorInfo">
-<b>Spectator Mode</b><br>
-<div id="spectatorText"></div>
-</div>
-
 <div id="menu">
 <h1>Finger Dodge</h1>
 <button onclick="startGame('single')">Singleplayer</button>
@@ -114,10 +94,10 @@ border-radius:10px;
 
 <label>Ball-Speed</label>
 <select id="ballSpeed">
-<option value="0.3">Langsam</option>
-<option value="0.5" selected>Normal</option>
-<option value="0.8">Schnell</option>
-<option value="1">Extrem</option>
+<option value="0.5">Langsam</option>
+<option value="1" selected>Normal</option>
+<option value="1.5">Schnell</option>
+<option value="2">Extrem</option>
 </select>
 
 <br><br>
@@ -188,7 +168,7 @@ let currentRound = 1;
 let roundFinished = false;
 let startBallCount = 3;
 let spawnDelay = 5000;
-let ballSpeedMultiplier = 0.5;
+let ballSpeedMultiplier = 1;
 let playerRadiusSetting = 18;
 let aiBotCount = 10;
 let rankingMode = "points";
@@ -201,64 +181,44 @@ let waitingQueue = [];
 let playerMatchMap = new Map();
 let recentOpponents = new Map();
 const HUMAN_NAME = "DU";
-let rematchCooldown = new Map();
-const REMATCH_BLOCK = 15000;
-let spectateMatchId = null;
-let keys = {};
-let spectatorMode = false;
-
+let rematchCooldown = new Map(); // name -> timestamp
+const REMATCH_BLOCK = 15000; // 15 Sekunden Sperre
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // ---------------- PLAYER FACTORY ----------------
-function createPlayer(x, y, color, name){
+function createPlayer(x,y,color,name,skill=null){
 
-    let tierRoll = Math.random();
+skill = Math.random();
 
-    let skill;
+const base = skill;
 
-    if(tierRoll < 0.25){
-        skill = Math.random() * 0.25;
-    }
-    else if(tierRoll < 0.55){
-        skill = 0.25 + Math.random() * 0.25;
-    }
-    else if(tierRoll < 0.85){
-        skill = 0.5 + Math.random() * 0.3;
-    }
-    else{
-        skill = 0.8 + Math.random() * 0.2;
-    }
+return {
+    x,
+    y,
+    radius: playerRadiusSetting,
+    color,
+    name,
+    points: 0,
+    elo: 1500,
+    lastChange: 0,
+    alive: true,
+    games: 0,
 
-    const chaos = (Math.random() - 0.5) * 0.4;
-    const base = Math.max(0, Math.min(1, skill + chaos));
+    skill,
 
-    return {
-        x,
-        y,
-        radius: playerRadiusSetting,
-        color,
-        name,
-        points: 0,
-        elo: 1500,
-        lastChange: 0,
-        alive: true,
-        games: 0,
+    // 🔥 stark unterschiedliche Werte pro Bot
+    speed: 3 + base * 6,          // 3–9 (große Unterschiede)
+    reaction: 0.5 + base * 2.5,   // 0.5–3
+    awareness: 120 + base * 500,  // 120–500
+    randomness: base * 2.2,       // 0–2.2
+    dodgePower: 1 + base * 3.5,   // 1–4.5
 
-        skill: base,
-
-        speed: 2 + base * 10,
-        reaction: 0.2 + base * 3.5,
-        awareness: 60 + base * 600,
-        randomness: (1 - base) * 4,
-        dodgePower: 0.5 + base * 5,
-
-        targetX: null,
-        targetY: null
-    };
+    targetX: null,
+    targetY: null
+};
 }
-
 // ---------------- UI ----------------
 function openSettings(){
 document.getElementById("menu").style.display="none";
@@ -271,158 +231,184 @@ spawnDelay = Number(document.getElementById("spawnTime").value)*1000;
 ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
 playerRadiusSetting = Number(document.getElementById("playerSize").value);
 aiBotCount = Number(document.getElementById("botCount").value);
-rankingMode = document.getElementById("rankingMode").value;
+rankingMode =
+document.getElementById("rankingMode").value;
 document.getElementById("settings").style.display="none";
 document.getElementById("menu").style.display="flex";
 }
-
 function createBallForMatch(match){
+
     const r = 15 + Math.random()*20;
+
     let x,y;
     let valid = false;
 
     while(!valid){
+
         x = Math.random()*(canvas.width - r*2) + r;
         y = Math.random()*(canvas.height - r*2) + r;
+
         valid = true;
 
         for(const p of match.players){
+
             if(!p.alive) continue;
+
             const dx = p.x - x;
             const dy = p.y - y;
+
             const dist = Math.sqrt(dx*dx + dy*dy);
-            const minDistance = p.radius + r + 80;
+
+            const minDistance =
+                p.radius + r + 80;
 
             if(dist < minDistance){
                 valid = false;
                 break;
             }
+
         }
+
     }
 
     match.balls.push({
+
         x,
         y,
         radius:r,
-        vx:(Math.random()*2+0.5) * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
-        vy:(Math.random()*2+0.5) * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
-    });
-}
 
+        vx:(Math.random()*4+2)
+            * ballSpeedMultiplier
+            * (Math.random()<0.5?-1:1),
+
+        vy:(Math.random()*4+2)
+            * ballSpeedMultiplier
+            * (Math.random()<0.5?-1:1)
+
+    });
+
+}
 // ---------------- BALLS ----------------
 function createBall(){
-    const r = 15 + Math.random()*20;
-    let x,y;
-    let valid = false;
 
-    while(!valid){
-        x = Math.random()*(canvas.width - r*2) + r;
-        y = Math.random()*(canvas.height - r*2) + r;
-        valid = true;
+const r = 15 + Math.random()*20;
 
-        let safe = true;
-        const allPlayers = mode === "tournament" ? matches[activeMatchIndex]?.players || [] : players;
+let x,y;
+let valid = false;
 
-        for(const p of allPlayers){
-            const dx = p.x - x;
-            const dy = p.y - y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            const minDistance = p.radius + r + 80;
+while(!valid){
 
-            if(dist < minDistance){
-                safe = false;
-                break;
-            }
-        }
+    x = Math.random()*(canvas.width - r*2) + r;
+    y = Math.random()*(canvas.height - r*2) + r;
 
-        if(!safe){
-            valid = false;
-        }
-    }
+    valid = true;
 
-    balls.push({
-        x,y,
-        radius:r,
-        vx:(Math.random()*2+0.5)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
-        vy:(Math.random()*2+0.5)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
-    });
+    let safe = true;
 
-    document.getElementById("balls").textContent = balls.length;
-}
+    const allPlayers =
+        mode === "tournament"
+        ? matches[activeMatchIndex]?.alive || []
+        : players;
 
-function tournamentSpawnLoop(){
-    if(mode !== "tournament") return;
-    spawnTimer = setTimeout(() => {
-        if(mode === "tournament" && running){
-            createBall();
-            tournamentSpawnLoop();
-        }
-    }, spawnDelay);
-}
+    for(const p of allPlayers){
 
-function spawnLoop(){
-    spawnTimer = setTimeout(() => {
-        if(running){
-            createBall();
-            spawnLoop();
-        }
-    }, spawnDelay);
-}
+        const dx = p.x - x;
+        const dy = p.y - y;
 
-// ---------------- AI ----------------
-function updateAI(p, activeBalls = balls, allOtherPlayers = []){
-
-    // Detect danger from balls AND enemy players
-    let danger = false;
-
-    for(const b of activeBalls){
-        const dx = p.x - b.x;
-        const dy = p.y - b.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
 
-        if(dist < p.awareness){
-            danger = true;
+        const minDistance = p.radius + r + 80;
+
+        if(dist < minDistance){
+            safe = false;
             break;
         }
     }
 
-    // Also detect enemy positions if they're close
-    if(!danger){
-        for(const enemy of allOtherPlayers){
-            if(enemy === p || !enemy.alive) continue;
-            const dx = p.x - enemy.x;
-            const dy = p.y - enemy.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if(dist < p.awareness * 0.3){
-                danger = true;
-                break;
-            }
-        }
+    if(!safe){
+        valid = false;
     }
+}
 
-    if(!danger){
-        if(
-            p.targetX === null ||
-            p.targetY === null ||
-            Math.random() < 0.02
-        ){
-            p.targetX = Math.random() * canvas.width;
-            p.targetY = Math.random() * canvas.height;
+balls.push({
+x,y,
+radius:r,
+vx:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
+vy:(Math.random()*4+2)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
+});
+
+document.getElementById("balls").textContent = balls.length;
+}
+
+function tournamentSpawnLoop(){
+
+    if(mode !== "tournament") return;
+
+    spawnTimer = setTimeout(() => {
+
+        if(mode === "tournament" && running){
+            createBall();
+            tournamentSpawnLoop();
         }
+
+    }, spawnDelay);
+
+}
+function spawnLoop(){
+
+    spawnTimer = setTimeout(() => {
+
+        if(running){
+            createBall();
+            spawnLoop();
+        }
+
+    }, spawnDelay);
+
+}
+// ---------------- AI ----------------
+function updateAI(p, activeBalls = balls){
+
+    // ---------------- TARGET LOGIK ----------------
+  let danger = false;
+
+for(const b of activeBalls){
+    const dx = p.x - b.x;
+    const dy = p.y - b.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if(dist < p.awareness * 0.5){
+        danger = true;
+        break;
     }
+}
+
+// 👉 nur neue Ziele wenn KEINE Gefahr
+if(!danger){
+
+    if(
+        p.targetX === null ||
+        p.targetY === null ||
+        Math.random() < 0.02
+    ){
+        p.targetX = Math.random() * canvas.width;
+        p.targetY = Math.random() * canvas.height;
+    }
+}
 
     let moveX = p.targetX - p.x;
     let moveY = p.targetY - p.y;
+
     let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
 
     moveX /= moveDist;
     moveY /= moveDist;
 
-    // AVOIDANCE
+    // ---------------- AVOIDANCE ----------------
     let avoidX = 0;
     let avoidY = 0;
 
+    // Wände
     const wallMargin = 140;
 
     if(p.x < wallMargin){
@@ -438,236 +424,307 @@ function updateAI(p, activeBalls = balls, allOtherPlayers = []){
         avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
     }
 
-    // BALL AVOIDANCE - SMARTER NOW
+    // ---------------- BALL AVOIDANCE (FIXED) ----------------
     for(const b of activeBalls){
+
         const dx = p.x - b.x;
         const dy = p.y - b.y;
+
         const dist = Math.sqrt(dx*dx + dy*dy) || 1;
 
-        // Use full awareness for better detection
-        const safeRadius = p.awareness;
+        // 👉 FIX: weniger übertriebener Radius
+        const safeRadius = p.awareness * 0.5;
 
         if(dist < safeRadius){
-            const strength = Math.max(0, (safeRadius - dist) / safeRadius);
-            const force = strength * p.dodgePower * 2; // Increased dodge power
+
+            const strength = (safeRadius - dist) / safeRadius;
+
+            const force = strength * p.dodgePower;
 
             avoidX += (dx / dist) * force;
             avoidY += (dy / dist) * force;
         }
     }
 
-    // ENEMY AVOIDANCE
-    for(const enemy of allOtherPlayers){
-        if(enemy === p || !enemy.alive) continue;
-        const dx = p.x - enemy.x;
-        const dy = p.y - enemy.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    // ---------------- MOVEMENT MIX ----------------
+    let vx =
+        moveX * 4 +
+        avoidX * 10;
 
-        if(dist < p.awareness * 0.5){
-            const strength = (p.awareness * 0.5 - dist) / (p.awareness * 0.5);
-            const force = strength * p.dodgePower;
-            avoidX += (dx / dist) * force * 0.5;
-            avoidY += (dy / dist) * force * 0.5;
-        }
-    }
+    let vy =
+        moveY * 4 +
+        avoidY * 10;
 
-    // MOVEMENT MIX
-    let vx = moveX * 4 + avoidX * 10;
-    let vy = moveY * 4 + avoidY * 10;
-
+    // kleine Unruhe
     vx += (Math.random() - 0.5) * p.randomness;
     vy += (Math.random() - 0.5) * p.randomness;
 
+    // normalisieren
     let len = Math.sqrt(vx*vx + vy*vy) || 1;
-    if(!p.lastVX) p.lastVX = 0;
-    if(!p.lastVY) p.lastVY = 0;
 
     p.x += (vx / len) * p.speed;
     p.y += (vy / len) * p.speed;
 
-    // BOUNDS
+    // ---------------- BOUNDS ----------------
     p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
     p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
-    p.lastVX = vx;
-    p.lastVY = vy;
 }
-
 function createMatch(p1,p2){
-    return {
-        id: crypto.randomUUID(),
-        players: [p1,p2],
-        balls: [],
-        running: true,
-        startTime: Date.now(),
-        spawnTimer:null
-    };
-}
 
+    return {
+
+        id: crypto.randomUUID(),
+
+        players: [p1,p2],
+
+        balls: [],
+
+        running: true,
+
+        startTime: Date.now(),
+
+        spawnTimer:null
+
+    };
+
+}
 function resetAI(p){
     p.targetX = null;
     p.targetY = null;
 }
+function rememberMatch(p1, p2){
 
-function resetAIState(p){
-    p.targetX = null;
-    p.targetY = null;
-    p.deathTime = 0;
-    p.alive = true;
-    p.stuckVectorX = 0;
-    p.stuckVectorY = 0;
+    if(!recentOpponents.has(p1.name)){
+        recentOpponents.set(p1.name, []);
+    }
+
+    if(!recentOpponents.has(p2.name)){
+        recentOpponents.set(p2.name, []);
+    }
+
+    recentOpponents.get(p1.name).push(p2.name);
+    recentOpponents.get(p2.name).push(p1.name);
+
+    const BLOCKED_OPPONENTS = 3;
+
+    recentOpponents.get(p1.name).splice(
+        0,
+        Math.max(
+            0,
+            recentOpponents.get(p1.name).length
+            - BLOCKED_OPPONENTS
+        )
+    );
+
+    recentOpponents.get(p2.name).splice(
+        0,
+        Math.max(
+            0,
+            recentOpponents.get(p2.name).length
+            - BLOCKED_OPPONENTS
+        )
+    );
+
 }
-
 // ---------------- START ----------------
 function startGame(selectedMode){
-    waitingQueue = [];
-    matches = [];
-    playerMatchMap.clear();
-    mode = selectedMode;
-    spectatorMode = false;
 
-    document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
-    document.getElementById("spectatorInfo").style.display = "none";
-    document.getElementById("mode").textContent = mode;
-    document.getElementById("menu").style.display = "none";
-    document.getElementById("gameOver").style.display = "none";
+mode = selectedMode;
 
-    balls = [];
-    players = [];
-    eliminated = [];
+document.getElementById("eloTable").style.display =
+(mode === "tournament") ? "block" : "none";
+document.getElementById("mode").textContent = mode;
+document.getElementById("menu").style.display = "none";
+document.getElementById("gameOver").style.display = "none";
 
-    running = true;
-    startTime = Date.now();
+balls = [];
+players = [];
+eliminated = [];
 
-    if(mode !== "multi"){
-        if(ranking.length === 0){
-            for(let i=0;i<aiBotCount;i++){
-                ranking.push(
-                    createPlayer(0, 0, `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1))
-                );
-            }
-        }
-    }
+running = true;
+startTime = Date.now();
 
-    if(mode === "single"){
-        const existingPlayer = ranking.find(x => x.name === "Spieler");
-        if(!existingPlayer){
-            ranking.push({
-                name:"Spieler",
-                color:"#00ff88",
-                points:0,
-                elo:1500,
-                lastChange:0
-            });
-        }
+if(mode !== "multi"){
 
-        players.push(
-            createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "Spieler")
-        );
+if(ranking.length === 0){
 
-        for(const bot of ranking){
-            if(bot.name === "Spieler") continue;
-            players.push({
-                ...bot,
-                x:Math.random()*canvas.width,
-                y:Math.random()*canvas.height,
-                radius:playerRadiusSetting,
-                alive:true,
-                skill: bot.skill ?? Math.random()
-            });
-        }
-    }
-    else if(mode==="multi"){
-        players.push(
-            createPlayer(200,200,"#00ff88","Spieler 1"),
-            createPlayer(400,200,"#4488ff","Spieler 2")
-        );
+for(let i=0;i<aiBotCount;i++){
 
-        for(let i=0;i<aiBotCount;i++){
-            players.push(
-                createPlayer(
-                    Math.random()*canvas.width,
-                    Math.random()*canvas.height,
-                    `hsl(${i*360/aiBotCount},100%,50%)`,
-                    "Bot "+(i+1)
-                )
-            );
-        }
-    }
-    else if(mode === "tournament"){
-        startTournament();
-        return;
-    }
-    else if(mode==="ai"){
-        for(const bot of ranking){
-            players.push({
-                ...bot,
-                x:Math.random()*canvas.width,
-                y:Math.random()*canvas.height,
-                radius:playerRadiusSetting,
-                alive:true,
-                skill: bot.skill ?? Math.random()
-            });
-        }
-    }
+ranking.push(
+createPlayer(
+0,
+0,
+`hsl(${i*360/aiBotCount},100%,50%)`,
+"Bot "+(i+1)
+)
+);
 
-    for(let i=0;i<startBallCount;i++){
-        createBall();
-    }
-
-    spawnLoop();
-    updateRanking();
 }
 
+}
+
+}
+if(mode === "single"){
+
+const existingPlayer =
+ranking.find(x => x.name === "Spieler");
+
+if(!existingPlayer){
+
+ranking.push({
+name:"Spieler",
+color:"#00ff88",
+points:0,
+elo:1500,
+lastChange:0
+});
+
+}
+
+}
+if(mode==="single"){
+
+players.push(
+createPlayer(
+canvas.width/2,
+canvas.height/2,
+"#00ff88",
+"Spieler"
+)
+);
+
+for(const bot of ranking){
+
+if(bot.name === "Spieler") continue;
+
+players.push({
+...bot,
+x:Math.random()*canvas.width,
+y:Math.random()*canvas.height,
+radius:playerRadiusSetting,
+alive:true,
+
+// 🔥 eigener Skill
+skill: bot.skill ?? Math.random()
+});
+}
+
+}
+
+else if(mode==="multi"){
+
+players.push(
+createPlayer(200,200,"#00ff88","Spieler 1"),
+createPlayer(400,200,"#4488ff","Spieler 2")
+);
+
+for(let i=0;i<aiBotCount;i++){
+
+players.push(
+createPlayer(
+Math.random()*canvas.width,
+Math.random()*canvas.height,
+`hsl(${i*360/aiBotCount},100%,50%)`,
+"Bot "+(i+1),
+Math.random()
+)
+);
+
+}
+
+}
+if(mode === "tournament"){
+    startTournament();
+    return;
+}
+
+else if(mode==="ai"){
+
+for(const bot of ranking){
+
+players.push({
+...bot,
+x:Math.random()*canvas.width,
+y:Math.random()*canvas.height,
+radius:playerRadiusSetting,
+alive:true,
+skill: bot.skill ?? Math.random()
+});
+
+}
+
+}
+
+for(let i=0;i<startBallCount;i++){
+createBall();
+}
+
+spawnLoop();
+updateRanking();
+}
 function startTournament(){
+
     running = true;
+
     matches = [];
     participants = [];
     waitingQueue = [];
 
+    // DU
     participants.push(
-        createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
+        createPlayer(
+            canvas.width/2,
+            canvas.height/2,
+            "#00ff88",
+            "DU"
+        )
     );
-    
-    balls = [];
-    players = [];
-    spectateMatchId = null;
-
+balls = [];
+players = [];
+players = participants;
+    // Bots
     for(let i=0;i<aiBotCount;i++){
-        participants.push(
-            createPlayer(
-                Math.random()*canvas.width,
-                Math.random()*canvas.height,
-                `hsl(${i*360/aiBotCount},100%,50%)`,
-                "Bot "+(i+1)
-            )
-        );
+
+       participants.push(
+createPlayer(
+    Math.random()*canvas.width,
+    Math.random()*canvas.height,
+    `hsl(${i*360/aiBotCount},100%,50%)`,
+    "Bot "+(i+1)
+)
+);
+
     }
 
-    waitingQueue = [...participants];
-    tryMatchmaking();
-}
+    // Alle warten auf Match
+    waitingQueue.push(...participants);
 
+    tryMatchmaking();
+
+}
 function tryMatchmaking(){
+
     while(waitingQueue.length >= 2){
+
         const p1 = waitingQueue.shift();
         const p2 = waitingQueue.shift();
 
         const match = createMatch(p1, p2);
+
         setupMatch(match);
+
         matches.push(match);
 
         playerMatchMap.set(p1.name, match);
         playerMatchMap.set(p2.name, match);
     }
 }
-
 function setupMatch(match){
+
     const [p1, p2] = match.players;
 
-    for(const p of match.players){
-        resetAIState(p);
-        p.alive = true;
-    }
+    p1.alive = true;
+    p2.alive = true;
 
     p1.x = canvas.width * 0.3;
     p1.y = canvas.height * 0.5;
@@ -675,21 +732,14 @@ function setupMatch(match){
     p2.x = canvas.width * 0.7;
     p2.y = canvas.height * 0.5;
 
-    if(match.players.some(p => p.name === "DU")){
-        spectateMatchId = match.id;
-        spectatorMode = true;
-        document.getElementById("spectatorInfo").style.display = "block";
-    }
-
     match.balls = [];
-    match.lastSpawn = Date.now();
-    match.spawnDelay = spawnDelay;
 
+    // initial spawn sauber
     for(let i = 0; i < startBallCount; i++){
         createBallForMatch(match);
     }
-}
 
+}
 // ---------------- SPAWN ----------------
 function loop(){
     update();
@@ -699,130 +749,131 @@ function loop(){
 
 // ---------------- RESTART ----------------
 function restartGame(){
-    if(spawnTimer) clearTimeout(spawnTimer);
-    const keepRound = currentRound;
-    startGame(mode);
-    currentRound = keepRound;
+if(spawnTimer) clearTimeout(spawnTimer);
+const keepRound = currentRound;
+startGame(mode);
+currentRound = keepRound;
 }
 
 // ---------------- RECORD ----------------
 function resetRecord(){
-    if(confirm("Rekord löschen?")){
-        record=0;
-        localStorage.setItem("fingerDodgeRecord",0);
-        document.getElementById("record").textContent=0;
-    }
+if(confirm("Rekord löschen?")){
+record=0;
+localStorage.setItem("fingerDodgeRecord",0);
+document.getElementById("record").textContent=0;
+}
 }
 
 // ---------------- GAME OVER ----------------
 function gameOver(){
-    running=false;
+running=false;
 
-    let survived=Math.floor((Date.now()-startTime)/1000);
+let survived=Math.floor((Date.now()-startTime)/1000);
 
-    if(survived>record){
-        record=survived;
-        localStorage.setItem("fingerDodgeRecord",record);
-        document.getElementById("record").textContent=record;
-    }
+if(survived>record){
+record=survived;
+localStorage.setItem("fingerDodgeRecord",record);
+document.getElementById("record").textContent=record;
+}
 
-    document.getElementById("finalTime").textContent=survived;
-    document.getElementById("gameOver").style.display="flex";
+document.getElementById("finalTime").textContent=survived;
+document.getElementById("gameOver").style.display="flex";
 }
 
 // ---------------- UPDATE ----------------
 function update(){
-    if(!running) return;
+if(!running) return;
+if(mode === "tournament"){
+    updateTournament();
+    return;
+}
+document.getElementById("time").textContent =
+Math.floor((Date.now()-startTime)/1000);
 
-    if(mode === "tournament" && spectateMatchId){
-        const match = matches.find(m => m.id === spectateMatchId);
-        if(match){
-            updateMatch(match);
-        }
+// MOVEMENT
+if(mode==="multi"){
+if(keys["w"]) players[0].y-=5;
+if(keys["s"]) players[0].y+=5;
+if(keys["a"]) players[0].x-=5;
+if(keys["d"]) players[0].x+=5;
+
+if(keys["arrowup"]) players[1].y-=5;
+if(keys["arrowdown"]) players[1].y+=5;
+if(keys["arrowleft"]) players[1].x-=5;
+if(keys["arrowright"]) players[1].x+=5;
+}
+
+if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
+
+for(const p of players){
+
+if(p.alive && p.name !== HUMAN_NAME && p.name.startsWith("Bot")){
+updateAI(p);
+}
+
+}
+
+}
+// bounds
+for(const p of players){
+p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
+p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
+}
+
+// balls
+for(const b of balls){
+    b.x += b.vx;
+    b.y += b.vy;
+
+    if(b.x - b.radius < 0 || b.x + b.radius > canvas.width){
+        b.vx *= -1;
+        b.x = Math.max(b.radius, Math.min(canvas.width - b.radius, b.x));
     }
 
-    if(mode === "tournament"){
-        updateTournament();
-        return;
-    }
-
-    document.getElementById("time").textContent = Math.floor((Date.now()-startTime)/1000);
-
-    // MOVEMENT
-    if(mode==="multi"){
-        if(keys["w"]) players[0].y-=5;
-        if(keys["s"]) players[0].y+=5;
-        if(keys["a"]) players[0].x-=5;
-        if(keys["d"]) players[0].x+=5;
-
-        if(keys["arrowup"]) players[1].y-=5;
-        if(keys["arrowdown"]) players[1].y+=5;
-        if(keys["arrowleft"]) players[1].x-=5;
-        if(keys["arrowright"]) players[1].x+=5;
-    }
-
-    if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
-        for(const p of players){
-            if(p.alive && p.name !== HUMAN_NAME && p.name.startsWith("Bot")){
-                updateAI(p, balls, players);
-            }
-        }
-    }
-
-    // bounds
-    for(const p of players){
-        p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
-        p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
-    }
-
-    // balls
-    for(const b of balls){
-        b.x += b.vx;
-        b.y += b.vy;
-
-        if(b.x - b.radius < 0 || b.x + b.radius > canvas.width){
-            b.vx *= -1;
-            b.x = Math.max(b.radius, Math.min(canvas.width - b.radius, b.x));
-        }
-
-        if(b.y - b.radius < 0 || b.y + b.radius > canvas.height){
-            b.vy *= -1;
-            b.y = Math.max(b.radius, Math.min(canvas.height - b.radius, b.y));
-        }
-    }
-
-    // collision
-    if(mode !== "tournament"){
-        for(const p of players){
-            check(p);
-        }
+    if(b.y - b.radius < 0 || b.y + b.radius > canvas.height){
+        b.vy *= -1;
+        b.y = Math.max(b.radius, Math.min(canvas.height - b.radius, b.y));
     }
 }
 
+// collision
+if(mode !== "tournament"){
+    for(const p of players){
+        check(p);
+    }
+}
+}
 function updateTournament(){
+
     for(const match of [...matches]){
+
         if(!match.running) continue;
+
         updateMatch(match);
+
     }
 
     updateEloTable();
-}
 
+}
 function updateMatch(match){
+
     if(!match.running) return;
 
     const players = match.players;
 
-    // AI - Pass enemy players too
+    // ---------------- AI ----------------
     for(const p of players){
+
         if(p.alive && p.name.startsWith("Bot")){
-            const enemies = players.filter(x => x !== p);
-            updateAI(p, match.balls, enemies);
+            updateAI(p, match.balls);
         }
+
     }
 
-    // BALLS
+    // ---------------- BALLS ----------------
     for(const b of match.balls){
+
         b.x += b.vx;
         b.y += b.vy;
 
@@ -833,75 +884,122 @@ function updateMatch(match){
         if(b.y - b.radius < 0 || b.y + b.radius > canvas.height){
             b.vy *= -1;
         }
+
     }
 
-    // SPAWN
-    const now = Date.now();
-    if(now - match.lastSpawn >= match.spawnDelay){
+    // ---------------- SPAWN (NO SETINTERVAL) ----------------
+    match.spawnAccumulator += 16; // ~1 frame
+
+    if(match.spawnAccumulator >= spawnDelay){
         createBallForMatch(match);
-        match.lastSpawn = now;
+        match.spawnAccumulator = 0;
     }
 
-    // COLLISION
+    // ---------------- COLLISION ----------------
     for(const p of players){
+
         if(!p.alive) continue;
 
         for(const b of match.balls){
+
             const dx = p.x - b.x;
             const dy = p.y - b.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
 
             if(dist < p.radius + b.radius){
+
                 p.alive = false;
+
                 const alive = players.filter(x => x.alive);
 
                 if(alive.length === 1){
                     finishMatch(match, alive[0], p);
                 }
+
             }
+
         }
+
     }
 }
-
-// COLLISION
+// ---------------- COLLISION ----------------
 function check(p){
-    if(!p.alive) return;
 
-    for(const b of balls){
-        const dx = p.x - b.x;
-        const dy = p.y - b.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
+if(!p.alive) return;
 
-        if(dist < p.radius + b.radius){
-            p.alive = false;
-            p.deathTime = Date.now();
-            eliminated.push(p);
+for(const b of balls){
 
-            const alive = players.filter(x=>x.alive);
+const dx = p.x - b.x;
+const dy = p.y - b.y;
 
-            if(alive.length <= 1){
-                if(alive.length === 1){
-                    alive[0].deathTime = Infinity;
-                    eliminated.push(alive[0]);
-                }
-                finishArena();
-            }
-            return;
-        }
+const dist = Math.sqrt(dx*dx + dy*dy);
+
+if(dist < p.radius + b.radius){
+
+p.alive = false;
+p.deathTime = Date.now();
+
+eliminated.push(p);
+
+const alive =
+players.filter(x=>x.alive);
+
+if(alive.length <= 1){
+
+    if(alive.length === 1){
+        alive[0].deathTime = Infinity;
+        eliminated.push(alive[0]);
     }
+
+    finishArena();
+}
+return;
+
 }
 
+}
+}
+function checkTournament(p,m){
+
+if(!p.alive) return;
+
+for(const b of balls){
+
+const dx = p.x - b.x;
+const dy = p.y - b.y;
+const dist = Math.sqrt(dx*dx+dy*dy);
+
+if(dist < p.radius + b.radius){
+
+p.alive = false;
+p.deathTime = Date.now();
+
+m.alive = m.alive.filter(x=>x!==p);
+
+if(m.alive.length === 1){
+finishMatch(m);
+}
+
+return;
+}
+}
+}
 function finishMatch(match, winner, loser){
+
     clearInterval(match.spawnTimer);
     match.running = false;
 
     const now = Date.now();
 
+    // 🔥 Rematch protection (Lichess style)
     rematchCooldown.set(winner.name, now);
     rematchCooldown.set(loser.name, now);
 
     const K = 24;
-    const expected = 1 / (1 + Math.pow(10, (loser.elo - winner.elo) / 400));
+
+    const expected =
+        1 / (1 + Math.pow(10, (loser.elo - winner.elo) / 400));
+
     const change = K * (1 - expected);
 
     winner.elo += change;
@@ -913,6 +1011,7 @@ function finishMatch(match, winner, loser){
     winner.alive = true;
     loser.alive = true;
 
+    // 🔥 Arena points (Lichess-like activity scoring)
     winner.arenaScore = (winner.arenaScore || 0) + 1;
 
     matches = matches.filter(m => m.id !== match.id);
@@ -923,6 +1022,7 @@ function finishMatch(match, winner, loser){
     const nextMatchDelay = 2500 + Math.random() * 1500;
 
     setTimeout(() => {
+
         resetAI(winner);
         resetAI(loser);
 
@@ -930,141 +1030,255 @@ function finishMatch(match, winner, loser){
         waitingQueue.push(loser);
 
         tryMatchmaking();
+
     }, nextMatchDelay);
 }
-
 function finishArena(){
-    if(mode !== "tournament"){
-        running = false;
-    }
 
-    if(spawnTimer){
-        clearTimeout(spawnTimer);
-    }
+// NICHT stoppen im Turnier
+if(mode !== "tournament"){
+    running = false;
+}
 
-    eliminated.sort((a,b)=>b.deathTime-a.deathTime);
+if(spawnTimer){
+clearTimeout(spawnTimer);
+}
 
-    if(rankingMode==="points"){
-        const totalPlayers = eliminated.length;
+eliminated.sort(
+(a,b)=>b.deathTime-a.deathTime
+);
 
-        for(let i=0;i<eliminated.length;i++){
-            const p = eliminated[i];
-            const rankPlayer = ranking.find(x=>x.name===p.name);
-            const gainedPoints = totalPlayers - i;
+if(rankingMode==="points"){
 
-            if(rankPlayer){
-                rankPlayer.points += gainedPoints;
-            }else{
-                ranking.push({
-                    name:p.name,
-                    color:p.color,
-                    points:gainedPoints,
-                    elo:1500,
-                    lastChange:0
-                });
-            }
-        }
-    }else{
-        const K = 24;
+const totalPlayers = eliminated.length;
 
-        for(const bot of ranking){
-            bot.lastChange = 0;
-        }
+for(let i=0;i<eliminated.length;i++){
 
-        for(let i=0;i<eliminated.length;i++){
-            for(let j=i+1;j<eliminated.length;j++){
-                let a = ranking.find(x=>x.name===eliminated[i].name);
+const p = eliminated[i];
 
-                if(!a){
-                    a = {
-                        name:eliminated[i].name,
-                        color:eliminated[i].color,
-                        points:0,
-                        elo:1500,
-                        lastChange:0
-                    };
-                    ranking.push(a);
-                }
+const rankPlayer =
+ranking.find(x=>x.name===p.name);
 
-                let b = ranking.find(x=>x.name===eliminated[j].name);
+const gainedPoints =
+totalPlayers - i;
 
-                if(!b){
-                    b = {
-                        name:eliminated[j].name,
-                        color:eliminated[j].color,
-                        points:0,
-                        elo:1500,
-                        lastChange:0
-                    };
-                    ranking.push(b);
-                }
+if(rankPlayer){
 
-                const expectedA = 1/(1+Math.pow(10,(b.elo-a.elo)/400));
-                const expectedB = 1-expectedA;
+rankPlayer.points += gainedPoints;
 
-                const changeA = K*(1-expectedA);
-                const changeB = K*(0-expectedB);
+}else{
 
-                a.elo += changeA;
-                b.elo += changeB;
+ranking.push({
+name:p.name,
+color:p.color,
+points:gainedPoints,
+elo:1500,
+lastChange:0
+});
 
-                a.lastChange += changeA;
-                b.lastChange += changeB;
-            }
-        }
-    }
+}
 
-    updateRanking();
+}
 
-    const winner = eliminated[0];
+}else{
 
-    document.getElementById("gameOver").style.display = "flex";
-    document.getElementById("finalTime").innerHTML =
-        "Runde " + currentRound + "/" + tournamentRounds + "<br>Sieger: " + winner.name;
+const K = 24;
 
-    if(currentRound < tournamentRounds){
-        currentRound++;
-        setTimeout(()=>{
-            document.getElementById("gameOver").style.display = "none";
-            startGame(mode);
-        },15000);
-    }else{
-        document.getElementById("finalTime").innerHTML += "<br><br><b>TURNIER BEENDET</b>";
-    }
+for(const bot of ranking){
+bot.lastChange = 0;
+}
+
+for(let i=0;i<eliminated.length;i++){
+
+for(let j=i+1;j<eliminated.length;j++){
+
+let a =
+ranking.find(
+x=>x.name===eliminated[i].name
+);
+
+if(!a){
+
+a = {
+name:eliminated[i].name,
+color:eliminated[i].color,
+points:0,
+elo:1500,
+lastChange:0
+};
+
+ranking.push(a);
+}
+
+let b =
+ranking.find(
+x=>x.name===eliminated[j].name
+);
+
+if(!b){
+
+b = {
+name:eliminated[j].name,
+color:eliminated[j].color,
+points:0,
+elo:1500,
+lastChange:0
+};
+
+ranking.push(b);
+}
+
+const expectedA =
+1/(1+Math.pow(10,(b.elo-a.elo)/400));
+
+const expectedB =
+1-expectedA;
+
+const changeA =
+K*(1-expectedA);
+
+const changeB =
+K*(0-expectedB);
+
+a.elo += changeA;
+b.elo += changeB;
+
+a.lastChange += changeA;
+b.lastChange += changeB;
+
+}
+
+}
+
+}
+
+updateRanking();
+
+const winner = eliminated[0];
+
+document.getElementById("gameOver").style.display =
+"flex";
+
+document.getElementById("finalTime").innerHTML =
+"Runde "
++ currentRound
++ "/"
++ tournamentRounds
++ "<br>Sieger: "
++ winner.name;
+
+if(currentRound < tournamentRounds){
+
+currentRound++;
+
+setTimeout(()=>{
+
+document.getElementById("gameOver").style.display =
+"none";
+
+startGame(mode);
+
+},15000);
+
+}else{
+
+document.getElementById("finalTime").innerHTML +=
+"<br><br><b>TURNIER BEENDET</b>";
+
+}
+
 }
 
 function updateRanking(){
-    let sorted;
 
-    if(rankingMode==="elo"){
-        sorted = [...ranking].sort((a,b)=>b.elo-a.elo);
-    }else{
-        sorted = [...ranking].sort((a,b)=>b.points-a.points);
-    }
+let sorted;
 
-    let html = "<b>TURNIER RANKING</b><br><br>";
+if(rankingMode==="elo"){
 
-    for(let i=0;i<sorted.length;i++){
-        if(rankingMode==="elo"){
-            html += (i+1)+". "+sorted[i].name+" | "+Math.round(sorted[i].elo)+" ELO "+
-                "("+(sorted[i].lastChange>=0?"+":"")+Math.round(sorted[i].lastChange)+")<br>";
-        }else{
-            html += (i+1)+". "+sorted[i].name+" | "+sorted[i].points+" Punkte<br>";
-        }
-    }
+sorted =
+[...ranking].sort(
+(a,b)=>b.elo-a.elo
+);
 
-    document.getElementById("ranking").innerHTML = html;
+}else{
+
+sorted =
+[...ranking].sort(
+(a,b)=>b.points-a.points
+);
+
 }
 
+let html =
+"<b>TURNIER RANKING</b><br><br>";
+
+for(let i=0;i<sorted.length;i++){
+
+if(rankingMode==="elo"){
+
+html +=
+(i+1)+". "
++sorted[i].name
++" | "
++Math.round(sorted[i].elo)
++" ELO "
++"("
++(sorted[i].lastChange>=0?"+":"")
++Math.round(sorted[i].lastChange)
++")<br>";
+
+}else{
+
+html +=
+(i+1)+". "
++sorted[i].name
++" | "
++sorted[i].points
++" Punkte<br>";
+
+}
+
+}
+
+document.getElementById("ranking").innerHTML =
+html;
+}
+function updateMultiplayerRanking(){
+
+let html =
+"<b>Multiplayer Ranking</b><br><br>";
+
+html +=
+"1. Spieler 1 - "
++ multiplayerScores[0].points
++ " Punkte<br>";
+
+html +=
+"2. Spieler 2 - "
++ multiplayerScores[1].points
++ " Punkte<br>";
+
+document.getElementById("ranking").innerHTML =
+html;
+
+}
 function updateEloTable(){
-    let sorted = [...participants].sort((a,b)=>b.elo-a.elo);
+
+    let sorted =
+        [...participants]
+        .sort((a,b)=>b.elo-a.elo);
 
     let html = "";
 
     for(let i=0;i<sorted.length;i++){
+
         const p = sorted[i];
-        const active = isPlayerInMatch(p);
-        const statusColor = active ? "lime" : "red";
+
+        const active =
+            isPlayerInMatch(p);
+
+        const statusColor =
+            active ? "lime" : "red";
 
         html += `
         <div style="
@@ -1073,6 +1287,7 @@ function updateEloTable(){
             gap:8px;
             margin-bottom:8px;
         ">
+
             <div style="
                 width:12px;
                 height:12px;
@@ -1080,113 +1295,99 @@ function updateEloTable(){
                 background:${statusColor};
                 flex-shrink:0;
             "></div>
+
             <div>
                 ${i+1}. ${p.name}<br>
+
                 ${Math.round(p.elo)}
-                <span style="color:${p.lastChange >= 0 ? 'lime' : 'red'}">
-                (${p.lastChange >= 0 ? '+' : ''}${Math.round(p.lastChange)})
+
+                <span style="
+                    color:${
+                        p.lastChange >= 0
+                        ? 'lime'
+                        : 'red'
+                    }
+                ">
+                (
+                    ${p.lastChange >= 0 ? '+' : ''}
+                    ${Math.round(p.lastChange)}
+                )
                 </span>
+
             </div>
+
         </div>
         `;
     }
 
-    for(const match of matches){
-        html += `
-        <div style="
-            margin-bottom:8px;
-            cursor:pointer;
-            color:${match.id === spectateMatchId ? 'lime' : 'yellow'}
-        "
-        onclick="spectateMatchId='${match.id}'; spectatorMode=true;">
-            🎥 ${match.players[0].name} vs ${match.players[1].name}
-        </div>
-        `;
-    }
-
-    document.getElementById("eloList").innerHTML = html;
+    document.getElementById("eloList").innerHTML =
+        html;
 }
-
 function isPlayerInMatch(player){
+
     return matches.some(match =>
         match.running &&
         match.players.includes(player)
     );
-}
 
-// DRAW
+}
+// ---------------- DRAW ----------------
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    if(mode === "tournament" && spectateMatchId){
-        const match = matches.find(m => m.id === spectateMatchId);
+  if(mode === "tournament"){
 
-        if(!match) return;
+    const myMatch =
+        playerMatchMap.get("DU");
 
-        // BALLS
-        for(const b of match.balls){
-            ctx.beginPath();
-            ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-            ctx.fillStyle="#ff4444";
-            ctx.fill();
-        }
+    if(myMatch && myMatch.running){
 
-        // PLAYERS
-        for(const p of match.players){
-            if(!p.alive) continue;
+        for(const b of myMatch.balls){
 
             ctx.beginPath();
-            ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
-            ctx.fillStyle=p.color;
+            ctx.arc(
+                b.x,
+                b.y,
+                b.radius,
+                0,
+                Math.PI*2
+            );
+
+            ctx.fillStyle = "#ff4444";
             ctx.fill();
 
-            ctx.fillStyle="white";
-            ctx.font="14px Arial";
-            ctx.textAlign="center";
-            ctx.fillText(p.name, p.x, p.y - p.radius - 10);
         }
 
-        // Update spectator info
-        if(spectatorMode){
-            const myMatch = playerMatchMap.get("DU");
-            if(myMatch){
-                const opponent = myMatch.players.find(p => p.name !== "DU");
-                document.getElementById("spectatorText").innerHTML = 
-                    "Dein Gegner: <b>" + opponent.name + "</b><br>" +
-                    opponent.name + " ELO: " + Math.round(opponent.elo);
-            }
-        }
-
-        return;
     }
 
-    if(mode === "tournament"){
-        const myMatch = playerMatchMap.get("DU");
-        if(myMatch && myMatch.running){
-            for(const b of myMatch.balls){
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
-                ctx.fillStyle = "#ff4444";
-                ctx.fill();
-            }
-        }
-    }else{
-        for(const b of balls){
-            ctx.beginPath();
-            ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-            ctx.fillStyle="#ff4444";
-            ctx.fill();
-        }
+}else{
+    for(const b of balls){
+
+        ctx.beginPath();
+        ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+        ctx.fillStyle="#ff4444";
+        ctx.fill();
+
     }
 
-    let render = players;
+}
 
-    if(mode === "tournament"){
-        const myMatch = playerMatchMap.get("DU");
-        render = myMatch ? myMatch.players : [];
-    }
+    // 🔥 FIX: Tournament benutzt alive statt players
+ let render = players;
 
+if(mode === "tournament"){
+
+    const myMatch =
+        playerMatchMap.get("DU");
+
+    render =
+        myMatch
+        ? myMatch.players
+        : [];
+
+}
     for(const p of render){
+
         if(!p.alive) continue;
 
         ctx.beginPath();
@@ -1197,38 +1398,38 @@ function draw(){
         ctx.fillStyle="white";
         ctx.font="14px Arial";
         ctx.textAlign="center";
+
         ctx.fillText(p.name, p.x, p.y - p.radius - 10);
     }
 }
-
-// SINGLE CONTROL
+// ---------------- SINGLE CONTROL ----------------
 function moveSingle(x,y){
-    if(mode === "tournament"){
-        const match = playerMatchMap.get("DU");
-        if(!match) return;
 
-        const me = match.players.find(p => p.name === "DU");
-        if(!me) return;
+   if(mode === "tournament"){
 
-        me.x = x;
-        me.y = y;
-        return;
-    }
+    const match =
+        playerMatchMap.get("DU");
+
+    if(!match) return;
+
+    const me =
+        match.players.find(
+            p => p.name === "DU"
+        );
+
+    if(!me) return;
+
+    me.x = x;
+    me.y = y;
+
+    return;
+}
 
     if(players[0]){
         players[0].x = x;
         players[0].y = y;
     }
 }
-
-document.addEventListener("keydown", (e) => {
-    keys[e.key.toLowerCase()] = true;
-});
-
-document.addEventListener("keyup", (e) => {
-    keys[e.key.toLowerCase()] = false;
-});
-
 canvas.addEventListener("mousemove",(e)=>{
     if(running && (mode==="single" || mode==="tournament")){
         moveSingle(e.clientX,e.clientY);
@@ -1237,10 +1438,12 @@ canvas.addEventListener("mousemove",(e)=>{
 
 canvas.addEventListener("touchmove",(e)=>{
     if(running && (mode==="single" || mode==="tournament")){
-        moveSingle(e.touches[0].clientX,e.touches[0].clientY);
+        moveSingle(
+            e.touches[0].clientX,
+            e.touches[0].clientY
+        );
     }
 });
-
 loop();
 </script>
 </body>
