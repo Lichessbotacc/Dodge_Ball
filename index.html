@@ -878,15 +878,18 @@ function finishMatch(match, winner, loser){
     rematchCooldown.set(winner.name, now);
     rematchCooldown.set(loser.name, now);
 
-    const K = 24;
-    const expected = 1 / (1 + Math.pow(10, (loser.elo - winner.elo) / 400));
-    const change = K * (1 - expected);
+    const diff = loser.elo - winner.elo;
 
-    winner.elo += change;
-    loser.elo -= change;
+let change = 5 + diff / 100;
 
-    winner.lastChange = change;
-    loser.lastChange = -change;
+// Begrenzung
+change = Math.max(1, Math.min(15, change));
+
+winner.elo += change;
+loser.elo -= change;
+
+winner.lastChange = change;
+loser.lastChange = -change;
 
     winner.alive = true;
     loser.alive = true;
