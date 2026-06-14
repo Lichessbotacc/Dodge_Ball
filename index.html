@@ -211,6 +211,7 @@ let keys = {};
 let spectatorMode = false;
 let tvMode = "none";
 let spectatingLocked = false;
+let spectateModeActive = false;
 // RECORD
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -606,7 +607,10 @@ waitingQueue = [...participants];
 
 // SEEDED MATCHMAKING - Match by ELO ranking with slight variation
 function seededMatchmaking(){
+    if(spectateModeActive){
     waitingQueue = waitingQueue.filter(p => p.name !== "DU");
+}
+    
     const activeCount = matches.length * 2;
     const idle = waitingQueue.length;
     const everyoneIdle = activeCount === 0;
@@ -1201,6 +1205,7 @@ function setTVMode(mode){
             spectateMatchId = match.id;
             spectatorMode = true;
             spectatingLocked = true;
+            spectateModeActive = true;
         }
         // DU aus aktiver Turnierlogik entfernen
 waitingQueue = waitingQueue.filter(p => p.name !== "DU");
@@ -1245,8 +1250,8 @@ function pickBestMatch(){
     }
 }
 function resumePlay(){
+    spectateModeActive = false;
     spectatingLocked = false;
-    waitingQueue.push(participants.find(p => p.name === "DU"));
     seededMatchmaking();
 }
 // SINGLE CONTROL
