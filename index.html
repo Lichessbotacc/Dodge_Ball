@@ -57,9 +57,6 @@ align-items:center;
     border-radius:10px;
     display:none;
 }
-#eloTable{
-    display:none;
-}
 </style>
 </head>
 
@@ -82,9 +79,7 @@ min-width:220px;
 max-height:70vh;
 overflow-y:auto;
 border-radius:10px;
-z-index:1000;
 ">
-
 <b>ELO LIVE</b>
 <div id="eloList"></div>
 
@@ -93,8 +88,11 @@ z-index:1000;
     <button onclick="setTVMode('random')">RANDOM TV</button>
     <button onclick="setTVMode('target')">TARGET TV</button>
 </div>
-
+<div id="spectatorInfo">
+<b>Spectator Mode</b><br>
+<div id="spectatorText"></div>
 </div>
+</div> <!-- CLOSE eloTable -->
     
 <div id="menu">
 <h1>Finger Dodge</h1>
@@ -476,13 +474,15 @@ function startGame(selectedMode){
     mode = selectedMode;
     spectatorMode = false;
 
-    const elo = document.getElementById("eloTable");
-if(elo){
-    elo.style.display = (mode === "tournament") ? "block" : "none";
-}
+    document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
     document.getElementById("spectatorInfo").style.display = "none";
     document.getElementById("mode").textContent = mode;
-    
+    if(mode === "tournament"){
+        document.getElementById("time").parentNode.innerHTML = `
+            ELO: <span id="time">1500</span><br>
+            Platz: <span id="record">1</span><br>
+            Spieler: <span id="balls">0</span>
+        `;
     }
     document.getElementById("menu").style.display = "none";
     document.getElementById("gameOver").style.display = "none";
@@ -602,7 +602,7 @@ for(let i=0;i<aiBotCount;i++){
 }
 
 // WICHTIG: erst HIER Queue bauen
-waitingQueue = [...participants];
+waitingQueue = [...participants].filter(p => p.name !== "DU");
     seededMatchmaking();
 }
 
