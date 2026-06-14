@@ -1175,12 +1175,17 @@ function draw(){
         }
     }
 
-    let render = players;
+   let render = players;
 
-    if(mode === "tournament"){
-        const myMatch = playerMatchMap.get("DU");
-        render = myMatch ? myMatch.players : [];
+if(mode === "tournament"){
+    const myMatch = playerMatchMap.get("DU");
+
+    if(myMatch && myMatch.players && myMatch.players.length > 0){
+        render = myMatch.players;
+    } else {
+        render = players.filter(p => p.alive);
     }
+}
 
     for(const p of render){
         if(!p.alive) continue;
