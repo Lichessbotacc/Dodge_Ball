@@ -704,123 +704,40 @@ createPlayer(
 }
 function tryMatchmaking(){
 
-    if(waitingQueue.length < 2) return;
+    while(waitingQueue.length >= 2){
 
-    const now = Date.now();
+        const p1 = waitingQueue.shift();
+        const p2 = waitingQueue.shift();
 
-    // 1) Sortierung wie Lichess: zuerst Score, dann Elo
-    waitingQueue.sort((a,b)=>{
-        if((b.arenaScore ?? 0) !== (a.arenaScore ?? 0)){
-            return (b.arenaScore ?? 0) - (a.arenaScore ?? 0);
-        }
-        return b.elo - a.elo;
-    });
+        const match = createMatch(p1, p2);
 
-    const used = new Set();
-    const newQueue = [];
+        setupMatch(match);
 
-    for(let i=0;i<waitingQueue.length;i++){
+        matches.push(match);
 
-        const p1 = waitingQueue[i];
-        if(used.has(p1.name)) continue;
-
-        const recent = recentOpponents.get(p1.name) || [];
-
-        let opponent = null;
-
-        // 2) Lichess-style pairing: gleiche Score-Gruppe bevorzugen
-        const p1Score = p1.arenaScore ?? 0;
-
-        const candidates = waitingQueue.filter(p =>
-            !used.has(p.name) &&
-            p.name !== p1.name &&
-            (p.arenaScore ?? 0) === p1Score
-        );
-
-        // 3) fallback: nahe Score-Gruppen
-        const fallback = waitingQueue.filter(p =>
-            !used.has(p.name) &&
-            p.name !== p1.name &&
-            Math.abs((p.arenaScore ?? 0) - p1Score) <= 1
-        );
-
-        const pool =
-            candidates.length >= 1 ? candidates :
-            fallback.length >= 1 ? fallback :
-            waitingQueue;
-
-        for(const p2 of pool){
-
-            if(used.has(p2.name)) continue;
-
-            // ❌ Rematch block (Lichess-like)
-            if(recent.includes(p2.name)) continue;
-
-            const last = rematchCooldown.get(p2.name) || 0;
-            if(last + 15000 > now) continue;
-
-            opponent = p2;
-            break;
-        }
-
-        if(opponent){
-
-            const match = createMatch(p1, opponent);
-            setupMatch(match);
-
-            matches.push(match);
-
-            playerMatchMap.set(p1.name, match);
-            playerMatchMap.set(opponent.name, match);
-
-            used.add(p1.name);
-            used.add(opponent.name);
-
-            rememberMatch(p1, opponent);
-
-        } else {
-            newQueue.push(p1);
-        }
-    }
-
-    waitingQueue = newQueue;
-
-    // wenn noch Spieler übrig → nochmal versuchen
-    if(waitingQueue.length >= 2){
-        setTimeout(tryMatchmaking, 500);
+        playerMatchMap.set(p1.name, match);
+        playerMatchMap.set(p2.name, match);
     }
 }
 function setupMatch(match){
-for(const p of match.players){
-    p.alive = true;
-    p.targetX = null;
-    p.targetY = null;
-}
-    const p1 = match.players[0];
-    const p2 = match.players[1];
+
+    const [p1, p2] = match.players;
 
     p1.alive = true;
     p2.alive = true;
 
     p1.x = canvas.width * 0.3;
-    p1.y = canvas.height/2;
+    p1.y = canvas.height * 0.5;
 
     p2.x = canvas.width * 0.7;
-    p2.y = canvas.height/2;
+    p2.y = canvas.height * 0.5;
 
     match.balls = [];
 
-    for(let i=0;i<startBallCount;i++){
+    // initial spawn sauber
+    for(let i = 0; i < startBallCount; i++){
         createBallForMatch(match);
     }
-
-    match.spawnTimer = setInterval(()=>{
-
-        if(match.running){
-            createBallForMatch(match);
-        }
-
-    }, spawnDelay);
 
 }
 // ---------------- SPAWN ----------------
@@ -941,31 +858,44 @@ function updateTournament(){
 }
 function updateMatch(match){
 
+    if(!match.running) return;
+
     const players = match.players;
 
-    // AI
- for(const p of players){
-    if(p.alive && p.name !== HUMAN_NAME){
-        updateAI(p, match.balls);
+    // ---------------- AI ----------------
+    for(const p of players){
+
+        if(p.alive && p.name.startsWith("Bot")){
+            updateAI(p, match.balls);
+        }
+
     }
-}
-    // BALLS
+
+    // ---------------- BALLS ----------------
     for(const b of match.balls){
 
         b.x += b.vx;
         b.y += b.vy;
 
-        if(b.x-b.radius<0||b.x+b.radius>canvas.width){
+        if(b.x - b.radius < 0 || b.x + b.radius > canvas.width){
             b.vx *= -1;
         }
 
-        if(b.y-b.radius<0||b.y+b.radius>canvas.height){
+        if(b.y - b.radius < 0 || b.y + b.radius > canvas.height){
             b.vy *= -1;
         }
 
     }
 
-    // COLLISION
+    // ---------------- SPAWN (NO SETINTERVAL) ----------------
+    match.spawnAccumulator += 16; // ~1 frame
+
+    if(match.spawnAccumulator >= spawnDelay){
+        createBallForMatch(match);
+        match.spawnAccumulator = 0;
+    }
+
+    // ---------------- COLLISION ----------------
     for(const p of players){
 
         if(!p.alive) continue;
@@ -974,25 +904,16 @@ function updateMatch(match){
 
             const dx = p.x - b.x;
             const dy = p.y - b.y;
-
-            const dist =
-                Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx*dx + dy*dy);
 
             if(dist < p.radius + b.radius){
 
                 p.alive = false;
 
-                const alive =
-                    players.filter(x=>x.alive);
+                const alive = players.filter(x => x.alive);
 
                 if(alive.length === 1){
-
-                    finishMatch(
-                        match,
-                        alive[0],
-                        p
-                    );
-
+                    finishMatch(match, alive[0], p);
                 }
 
             }
@@ -1000,7 +921,6 @@ function updateMatch(match){
         }
 
     }
-
 }
 // ---------------- COLLISION ----------------
 function check(p){
