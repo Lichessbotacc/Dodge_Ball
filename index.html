@@ -185,6 +185,7 @@ let recentOpponents = new Map();
 const HUMAN_NAME = "DU";
 let rematchCooldown = new Map(); // name -> timestamp
 const REMATCH_BLOCK = 15000; // 15 Sekunden Sperre
+let spectateMatchId = null;
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -720,6 +721,7 @@ function startTournament(){
     );
 balls = [];
 players = [];
+spectateMatchId = null;
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
@@ -768,7 +770,9 @@ function setupMatch(match){
 
     p2.x = canvas.width * 0.7;
     p2.y = canvas.height * 0.5;
-
+if(match.players.some(p => p.name === "DU")){
+    spectateMatchId = match.id;
+}
     match.balls = [];
 
     match.lastSpawn = Date.now();
@@ -821,6 +825,14 @@ document.getElementById("gameOver").style.display="flex";
 // ---------------- UPDATE ----------------
 function update(){
 if(!running) return;
+if(mode === "tournament" && spectateMatchId){
+
+    const match = matches.find(m => m.id === spectateMatchId);
+
+    if(match){
+        updateMatch(match);
+    }
+}
 if(mode === "tournament"){
     updateTournament();
     return;
@@ -1357,7 +1369,20 @@ function updateEloTable(){
         </div>
         `;
     }
+for(const match of matches){
 
+    html += `
+    <div style="
+        margin-bottom:8px;
+        cursor:pointer;
+        color:${match.id === spectateMatchId ? 'lime' : 'yellow'}
+    "
+    onclick="spectateMatchId='${match.id}'">
+
+        🎥 ${match.players[0].name} vs ${match.players[1].name}
+    </div>
+    `;
+}
     document.getElementById("eloList").innerHTML =
         html;
 }
@@ -1372,7 +1397,35 @@ function isPlayerInMatch(player){
 // ---------------- DRAW ----------------
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
+if(mode === "tournament" && spectateMatchId){
 
+    const match = matches.find(m => m.id === spectateMatchId);
+
+    if(!match) return;
+
+    // BALLS
+    for(const b of match.balls){
+        ctx.beginPath();
+        ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+        ctx.fillStyle="#ff4444";
+        ctx.fill();
+    }
+
+    // PLAYERS
+    for(const p of match.players){
+        if(!p.alive) continue;
+
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
+        ctx.fillStyle=p.color;
+        ctx.fill();
+
+        ctx.fillStyle="white";
+        ctx.fillText(p.name, p.x, p.y - 15);
+    }
+
+    return;
+}
   if(mode === "tournament"){
 
     const myMatch =
