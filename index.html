@@ -606,7 +606,7 @@ waitingQueue = [...participants];
 
 // SEEDED MATCHMAKING - Match by ELO ranking with slight variation
 function seededMatchmaking(){
-    
+    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
     const activeCount = matches.length * 2;
     const idle = waitingQueue.length;
     const everyoneIdle = activeCount === 0;
