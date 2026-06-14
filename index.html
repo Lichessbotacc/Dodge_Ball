@@ -476,7 +476,10 @@ function startGame(selectedMode){
     mode = selectedMode;
     spectatorMode = false;
 
-    document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
+    const elo = document.getElementById("eloTable");
+if(elo){
+    elo.style.display = (mode === "tournament") ? "block" : "none";
+}
     document.getElementById("spectatorInfo").style.display = "none";
     document.getElementById("mode").textContent = mode;
     if(mode === "tournament"){
