@@ -288,8 +288,9 @@ function createBallForMatch(match){
 
     const baseSpeed = 5 + Math.random() * 6;
 
-    balls.push({
-        x,y,
+    match.balls.push({
+        x,
+        y,
         radius:r,
         vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
         vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
