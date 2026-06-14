@@ -293,66 +293,51 @@ function updateAI(p, activeBalls = balls){
 // ═══ PLAYER FACTORY ══════════════════════════════════════════════════════════
 function createPlayer(x,y,color,name){
   const skill = {
-  aim: Math.random(),
-  reaction: Math.random(),
-  movement: Math.random(),
-  awareness: Math.random(),
-  aggression: Math.random()
-};
+    aim: Math.random(),
+    reaction: Math.random(),
+    movement: Math.random(),
+    awareness: Math.random(),
+    aggression: Math.random()
+  };
 
-return {
-  x, y,
-  radius: playerRadiusSetting,
-  color,
-  name,
+  const skillBoost = 0.4 + skill.movement * 1.6;
 
-  points: 0,
-  elo: 1500,
-  lastChange: 0,
-  alive: true,
-  games: 0,
-
-  skill,
-
-  // ⚡ SPEED (jetzt schneller + größere Unterschiede)
-  speed:
-    2.0 +
-    skill.movement * 7.5 +
-    skill.aggression * 3.0,
-
-  // ⚡ REACTION (wichtiger für AI Verhalten)
-  reaction:
-    0.2 + skill.reaction * 5.0,
-
-  // 👁️ deutlich größere Awareness Range
-  awareness:
-    100 + skill.awareness * 320,
-
-  // 🎲 weniger “Random Stottern”, mehr klare Bewegung
-  randomness:
-    (1 - skill.movement) * 3.5,
-
-  // 🧠 Dodge Power stärker differenziert
-  dodgePower:
-    0.8 +
-    skill.aim * 3.8 +
-    skill.reaction * 2.2,
-
-  targetX: null,
-  targetY: null,
-
-  lastVX: 0,
-  lastVY: 0,
+  return {
+    x, y,
+    radius: playerRadiusSetting,
+    color,
+    name,
+    points: 0,
+    elo: 1500,
+    lastChange: 0,
+    alive: true,
+    games: 0,
+    skill,
+    speed:
+    2.6 + skill.movement * 6.5 + skill.aggression * 2.5,
+reaction:
+  0.2 + skill.reaction * 4.5,
+awareness:
+  120 + skill.awareness * 260,
+randomness:
+  (1 - skill.movement) * 3.0,
+dodgePower:
+  0.9 + skill.aim * 3.2 + skill.reaction * 2.0,
+    targetX: null,
+    targetY: null,
+    lastVX: 0,
+    lastVY: 0,
     stats: {
-    wins: 0,
-    losses: 0,
-    totalEloGain: 0,
-    totalEloLoss: 0,
-    matchesPlayed: 0,
-    bestStreak: 0,
-    currentStreak: 0
-  }
-};
+      wins: 0,
+      losses: 0,
+      totalEloGain: 0,
+      totalEloLoss: 0,
+      matchesPlayed: 0,
+      bestStreak: 0,
+      currentStreak: 0
+    }
+  };
+} // 👈 DIESE KLAMMER hat gefehlt
 
 // ═══ SETTINGS ════════════════════════════════════════════════════════════════
 function openSettings(){
