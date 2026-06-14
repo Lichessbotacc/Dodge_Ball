@@ -1277,24 +1277,28 @@ canvas.addEventListener("touchmove",(e)=>{
     }
 });
 document.addEventListener("keydown", (e) => {
+    if (!running) return;
     if (inputMode !== "keyboard") return;
 
+    const speed = 6;
     const key = e.key.toLowerCase();
-    const speed = 5;
 
-    if (players[0]) {
-        if (key === "arrowleft" || key === "a") players[0].x -= speed;
-        if (key === "arrowright" || key === "d") players[0].x += speed;
-        if (key === "arrowup" || key === "w") players[0].y -= speed;
-        if (key === "arrowdown" || key === "s") players[0].y += speed;
+    let p = null;
+
+    if (mode === "tournament") {
+        const match = playerMatchMap.get("DU");
+        if (!match) return;
+        p = match.players.find(x => x.name === "DU");
+    } else {
+        p = players.find(x => x.name === "Spieler") || players[0];
     }
 
-    if (players[1]) {
-        if (key === "arrowleft") players[1].x -= speed;
-        if (key === "arrowright") players[1].x += speed;
-        if (key === "arrowup") players[1].y -= speed;
-        if (key === "arrowdown") players[1].y += speed;
-    }
+    if (!p) return;
+
+    if (key === "arrowleft" || key === "a") p.x -= speed;
+    if (key === "arrowright" || key === "d") p.x += speed;
+    if (key === "arrowup" || key === "w") p.y -= speed;
+    if (key === "arrowdown" || key === "s") p.y += speed;
 });
 document.getElementById("eloList").addEventListener("click", (e) => {
     const el = e.target.closest("[data-match-id]");
