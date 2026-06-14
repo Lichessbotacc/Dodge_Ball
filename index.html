@@ -734,11 +734,12 @@ function setupMatch(match){
 
     match.balls = [];
 
-    // initial spawn sauber
+    match.lastSpawn = Date.now();   // 🔥 FIX
+    match.spawnDelay = spawnDelay;  // wichtig pro Match speichern
+
     for(let i = 0; i < startBallCount; i++){
         createBallForMatch(match);
     }
-
 }
 // ---------------- SPAWN ----------------
 function loop(){
@@ -887,13 +888,13 @@ function updateMatch(match){
 
     }
 
-    // ---------------- SPAWN (NO SETINTERVAL) ----------------
-    match.spawnAccumulator += 16; // ~1 frame
+    // // ---------------- SPAWN (STABLE) ----------------
+const now = Date.now();
 
-    if(match.spawnAccumulator >= spawnDelay){
-        createBallForMatch(match);
-        match.spawnAccumulator = 0;
-    }
+if(now - match.lastSpawn >= match.spawnDelay){
+    createBallForMatch(match);
+    match.lastSpawn = now;
+}
 
     // ---------------- COLLISION ----------------
     for(const p of players){
