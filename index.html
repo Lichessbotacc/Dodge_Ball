@@ -230,11 +230,11 @@ function createPlayer(x, y, color, name, forcedSkill = null){
         skill: skill,
 
         // Smooth scaling based on skill
-       speed: 1.5 + skill * 8,
-        reaction: 0.3 + skill * 4,
-        awareness: 50 + skill * 95,
-        randomness: (1 - skill) * 5,
-        dodgePower: 0.3 + skill * 4,
+       speed: 1 + skill * 5,
+       reaction: 0.2 + skill * 2,
+       awareness: 35 + skill * 65,
+       randomness: (1 - skill) * 8,
+       dodgePower: 0.2 + skill * 2,
 
         targetX: null,
         targetY: null,
