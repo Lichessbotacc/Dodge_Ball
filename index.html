@@ -482,13 +482,17 @@ if(!danger){
 
     // normalisieren
     let len = Math.sqrt(vx*vx + vy*vy) || 1;
-
+// stabilisiert Verhalten über viele Matches
+if(!p.lastVX) p.lastVX = 0;
+if(!p.lastVY) p.lastVY = 0;
     p.x += (vx / len) * p.speed;
     p.y += (vy / len) * p.speed;
 
     // ---------------- BOUNDS ----------------
     p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
     p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+    p.lastVX = vx;
+    p.lastVY = vy;
 }
 function createMatch(p1,p2){
 
@@ -512,6 +516,18 @@ function createMatch(p1,p2){
 function resetAI(p){
     p.targetX = null;
     p.targetY = null;
+}
+function resetAIState(p){
+    p.targetX = null;
+    p.targetY = null;
+
+    // wichtig gegen “komisches Verhalten”
+    p.deathTime = 0;
+    p.alive = true;
+
+    // optional, aber stabilisiert Verhalten stark
+    p.stuckVectorX = 0;
+    p.stuckVectorY = 0;
 }
 function rememberMatch(p1, p2){
 
@@ -741,11 +757,11 @@ function tryMatchmaking(){
     }
 }
 function setupMatch(match){
-
     const [p1, p2] = match.players;
 
-    p1.alive = true;
-    p2.alive = true;
+    for(const p of match.players){
+        resetAIState(p);
+    }
 
     p1.x = canvas.width * 0.3;
     p1.y = canvas.height * 0.5;
@@ -755,8 +771,8 @@ function setupMatch(match){
 
     match.balls = [];
 
-    match.lastSpawn = Date.now();   // 🔥 FIX
-    match.spawnDelay = spawnDelay;  // wichtig pro Match speichern
+    match.lastSpawn = Date.now();
+    match.spawnDelay = spawnDelay;
 
     for(let i = 0; i < startBallCount; i++){
         createBallForMatch(match);
