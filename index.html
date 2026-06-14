@@ -185,6 +185,7 @@ let recentOpponents = new Map();
 const HUMAN_NAME = "DU";
 let rematchCooldown = new Map(); // name -> timestamp
 const REMATCH_BLOCK = 15000; // 15 Sekunden Sperre
+let playerInMatch = new Map();
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -757,14 +758,22 @@ function tryMatchmaking(){
         const p1 = waitingQueue.shift();
         const p2 = waitingQueue.shift();
 
-        const match = createMatch(p1, p2);
+        // 🔥 BLOCK: already in match?
+        if(playerInMatch.get(p1.name) || playerInMatch.get(p2.name)){
+            continue;
+        }
 
+        const match = createMatch(p1, p2);
         setupMatch(match);
 
         matches.push(match);
 
         playerMatchMap.set(p1.name, match);
         playerMatchMap.set(p2.name, match);
+
+        // 🔥 LOCK players
+        playerInMatch.set(p1.name, true);
+        playerInMatch.set(p2.name, true);
     }
 }
 function setupMatch(match){
@@ -1074,10 +1083,10 @@ function finishMatch(match, winner, loser){
 
         resetAI(winner);
         resetAI(loser);
-
-        waitingQueue.push(winner);
-        waitingQueue.push(loser);
-
+playerInMatch.delete(winner.name);
+playerInMatch.delete(loser.name);
+        if(!playerInMatch.get(winner.name)) waitingQueue.push(winner);
+        if(!playerInMatch.get(loser.name)) waitingQueue.push(loser);
         tryMatchmaking();
 
     }, nextMatchDelay);
