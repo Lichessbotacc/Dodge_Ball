@@ -1207,6 +1207,8 @@ function setTVMode(mode){
             spectatorMode = true;
             spectatingLocked = true;
         }
+        // DU aus aktiver Turnierlogik entfernen
+waitingQueue = waitingQueue.filter(p => p.name !== "DU");
         return;
     }
 
