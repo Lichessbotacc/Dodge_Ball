@@ -1122,9 +1122,10 @@ function draw(){
             const myMatch = playerMatchMap.get("DU");
             if(myMatch && myMatch.running){
                 const opponent = myMatch.players.find(p => p.name !== "DU");
-                document.getElementById("spectatorText").innerHTML = 
-                    "Dein Gegner: <b>" + opponent.name + "</b><br>" +
-                    "ELO: " + Math.round(opponent.elo);
+                document.getElementById("spectatorText").innerHTML =
+    "Dein Gegner: <b>" + opponent.name + "</b><br>" +
+    "ELO: " + Math.round(opponent.elo) + "<br>" +
+    "Skill: " + Math.round(opponent.skill * 100) + "%";
             } else if(spectateMatchId){
                 const watchedMatch = matches.find(m => m.id === spectateMatchId);
                 if(watchedMatch){
