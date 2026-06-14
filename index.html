@@ -63,8 +63,10 @@ right:20px;
 background:rgba(0,0,0,0.6);
 padding:10px;
 color:white;
-min-width:180px;
-pointer-events: none;
+min-width:220px;
+max-height:70vh;
+overflow-y:auto;
+border-radius:10px;
 ">
 <b>ELO LIVE</b>
 <div id="eloList"></div>
@@ -188,36 +190,55 @@ let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // ---------------- PLAYER FACTORY ----------------
-function createPlayer(x,y,color,name,skill=null){
+function createPlayer(x, y, color, name){
 
-skill = Math.random();
+    // 🎯 Skill wird stark segmentiert statt smooth random
+    let tierRoll = Math.random();
 
-const base = skill;
+    let skill;
 
-return {
-    x,
-    y,
-    radius: playerRadiusSetting,
-    color,
-    name,
-    points: 0,
-    elo: 1500,
-    lastChange: 0,
-    alive: true,
-    games: 0,
+    if(tierRoll < 0.25){
+        skill = Math.random() * 0.25;        // ❌ dumme Bots
+    }
+    else if(tierRoll < 0.55){
+        skill = 0.25 + Math.random() * 0.25; // ⚠️ mittel
+    }
+    else if(tierRoll < 0.85){
+        skill = 0.5 + Math.random() * 0.3;   // 🔥 gute Bots
+    }
+    else{
+        skill = 0.8 + Math.random() * 0.2;   // 💀 cracked Bots
+    }
 
-    skill,
+    // 🎲 Chaos-Faktor (macht Unterschiede wirklich spürbar)
+    const chaos = (Math.random() - 0.5) * 0.4;
 
-    // 🔥 stark unterschiedliche Werte pro Bot
-    speed: 3 + base * 6,          // 3–9 (große Unterschiede)
-    reaction: 0.5 + base * 2.5,   // 0.5–3
-    awareness: 120 + base * 500,  // 120–500
-    randomness: base * 2.2,       // 0–2.2
-    dodgePower: 1 + base * 3.5,   // 1–4.5
+    const base = Math.max(0, Math.min(1, skill + chaos));
 
-    targetX: null,
-    targetY: null
-};
+    return {
+        x,
+        y,
+        radius: playerRadiusSetting,
+        color,
+        name,
+        points: 0,
+        elo: 1500,
+        lastChange: 0,
+        alive: true,
+        games: 0,
+
+        skill: base,
+
+        // 🔥 extrem gestreute Werte
+        speed: 2 + base * 10,             // 2 → 12 (riesige Range)
+        reaction: 0.2 + base * 3.5,       // sehr schwache bis super schnelle Reaktion
+        awareness: 60 + base * 600,       // blind → fast wallhack
+        randomness: (1 - base) * 4,       // dumme Bots = chaotisch
+        dodgePower: 0.5 + base * 5,       // massiv Unterschied
+
+        targetX: null,
+        targetY: null
+    };
 }
 // ---------------- UI ----------------
 function openSettings(){
@@ -367,7 +388,8 @@ function spawnLoop(){
 
 }
 // ---------------- AI ----------------
-function updateAI(p, activeBalls = balls){
+function updateAI(p, activeBalls){
+    if(!activeBalls) return;
 
     // ---------------- TARGET LOGIK ----------------
   let danger = false;
@@ -461,13 +483,17 @@ if(!danger){
 
     // normalisieren
     let len = Math.sqrt(vx*vx + vy*vy) || 1;
-
+// stabilisiert Verhalten über viele Matches
+if(!p.lastVX) p.lastVX = 0;
+if(!p.lastVY) p.lastVY = 0;
     p.x += (vx / len) * p.speed;
     p.y += (vy / len) * p.speed;
 
     // ---------------- BOUNDS ----------------
     p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
     p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+    p.lastVX = vx;
+    p.lastVY = vy;
 }
 function createMatch(p1,p2){
 
@@ -491,6 +517,21 @@ function createMatch(p1,p2){
 function resetAI(p){
     p.targetX = null;
     p.targetY = null;
+}
+function resetAIState(p){
+    p.targetX = null;
+    p.targetY = null;
+
+    p.deathTime = 0;
+    p.alive = true;
+
+    // 🔥 WICHTIG: kill ALL runtime memory
+    p.lastVX = 0;
+    p.lastVY = 0;
+
+    // verhindert “Restverhalten”
+    p._vx = 0;
+    p._vy = 0;
 }
 function rememberMatch(p1, p2){
 
@@ -681,7 +722,14 @@ function startTournament(){
     );
 balls = [];
 players = [];
-players = participants;
+players = participants.map(p => ({
+    ...p,
+    alive: true,
+    targetX: null,
+    targetY: null,
+    lastVX: 0,
+    lastVY: 0
+}));
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
@@ -720,11 +768,11 @@ function tryMatchmaking(){
     }
 }
 function setupMatch(match){
-
     const [p1, p2] = match.players;
 
-    p1.alive = true;
-    p2.alive = true;
+    for(const p of match.players){
+        resetAIState(p);
+    }
 
     p1.x = canvas.width * 0.3;
     p1.y = canvas.height * 0.5;
@@ -734,11 +782,12 @@ function setupMatch(match){
 
     match.balls = [];
 
-    // initial spawn sauber
+    match.lastSpawn = Date.now();
+    match.spawnDelay = spawnDelay;
+
     for(let i = 0; i < startBallCount; i++){
         createBallForMatch(match);
     }
-
 }
 // ---------------- SPAWN ----------------
 function loop(){
@@ -887,13 +936,13 @@ function updateMatch(match){
 
     }
 
-    // ---------------- SPAWN (NO SETINTERVAL) ----------------
-    match.spawnAccumulator += 16; // ~1 frame
+    // // ---------------- SPAWN (STABLE) ----------------
+const now = Date.now();
 
-    if(match.spawnAccumulator >= spawnDelay){
-        createBallForMatch(match);
-        match.spawnAccumulator = 0;
-    }
+if(now - match.lastSpawn >= match.spawnDelay){
+    createBallForMatch(match);
+    match.lastSpawn = now;
+}
 
     // ---------------- COLLISION ----------------
     for(const p of players){
