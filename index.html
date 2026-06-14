@@ -57,6 +57,25 @@ align-items:center;
     border-radius:10px;
     display:none;
 }
+#inputSettings{
+    margin-top:20px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:10px;
+    font-size:14px;
+}
+
+#inputSettings h3{
+    font-size:16px;
+    margin-bottom:10px;
+}
+
+#inputSettings button{
+    padding:10px 18px;
+    font-size:14px;
+    border-radius:8px;
+}
 </style>
 </head>
 
@@ -728,17 +747,28 @@ function update(){
     document.getElementById("time").textContent = Math.floor((Date.now()-startTime)/1000);
 
     // MOVEMENT
-    if(mode==="multi"){
-        if(keys["w"]) players[0].y-=5;
-        if(keys["s"]) players[0].y+=5;
-        if(keys["a"]) players[0].x-=5;
-        if(keys["d"]) players[0].x+=5;
+   document.addEventListener("keydown", (e) => {
+    if (inputMode !== "keyboard") return;
 
-        if(keys["arrowup"]) players[1].y-=5;
-        if(keys["arrowdown"]) players[1].y+=5;
-        if(keys["arrowleft"]) players[1].x-=5;
-        if(keys["arrowright"]) players[1].x+=5;
+    const key = e.key.toLowerCase();
+    const speed = 5;
+
+    // SINGLEPLAYER / TOURNAMENT / MULTI PLAYER 1
+    if (players[0]) {
+        if (key === "arrowleft" || key === "a") players[0].x -= speed;
+        if (key === "arrowright" || key === "d") players[0].x += speed;
+        if (key === "arrowup" || key === "w") players[0].y -= speed;
+        if (key === "arrowdown" || key === "s") players[0].y += speed;
     }
+
+    // MULTI PLAYER 2 (nur wenn vorhanden)
+    if (players[1]) {
+        if (key === "arrowleft") players[1].x -= speed;
+        if (key === "arrowright") players[1].x += speed;
+        if (key === "arrowup") players[1].y -= speed;
+        if (key === "arrowdown") players[1].y += speed;
+    }
+});
 
     if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
         for(const p of players){
