@@ -602,15 +602,13 @@ for(let i=0;i<aiBotCount;i++){
 }
 
 // WICHTIG: erst HIER Queue bauen
-waitingQueue = [...participants].filter(p => p.name !== "DU");
+waitingQueue = [...participants];
     seededMatchmaking();
 }
 
 // SEEDED MATCHMAKING - Match by ELO ranking with slight variation
 function seededMatchmaking(){
-    if(spectatingLocked && participants.some(p => p.name === "DU")){
-    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
-}
+    
     const activeCount = matches.length * 2;
     const idle = waitingQueue.length;
     const everyoneIdle = activeCount === 0;
