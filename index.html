@@ -565,7 +565,9 @@ function rememberMatch(p1, p2){
 }
 // ---------------- START ----------------
 function startGame(selectedMode){
-
+waitingQueue = [];
+matches = [];
+playerMatchMap.clear();
 mode = selectedMode;
 
 document.getElementById("eloTable").style.display =
@@ -718,7 +720,6 @@ function startTournament(){
     );
 balls = [];
 players = [];
-players = participants;
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
@@ -734,9 +735,8 @@ createPlayer(
     }
 
     // Alle warten auf Match
-    waitingQueue.push(...participants);
-
-    tryMatchmaking();
+    waitingQueue = [...participants];
+tryMatchmaking();
 
 }
 function tryMatchmaking(){
@@ -760,9 +760,9 @@ function setupMatch(match){
     const [p1, p2] = match.players;
 
     for(const p of match.players){
-        resetAIState(p);
-    }
-
+    resetAIState(p);
+    p.alive = true;
+}
     p1.x = canvas.width * 0.3;
     p1.y = canvas.height * 0.5;
 
@@ -846,7 +846,7 @@ if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
 for(const p of players){
 
 if(p.alive && p.name !== HUMAN_NAME && p.name.startsWith("Bot")){
-updateAI(p);
+updateAI(p, balls);
 }
 
 }
