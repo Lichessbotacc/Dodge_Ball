@@ -325,25 +325,20 @@ return {
   alive: true,
   games: 0,
 
-  // ⚡ SPEED (realistisch menschlich!)
-  speed:
-    1.0 + balancedSkill * 2.5,   // max ~6.0
+ speed:
+  1.0 + balancedSkill * 1.2,   // vorher 2.5 → deutlich langsamer (max ~2.2)
 
-  // 🧠 reaction = menschliche Verzögerung
-  reaction:
-    0.1 + balancedSkill * 2.5,  // kein instant reaction
+reaction:
+  0.25 + balancedSkill * 1.0,  // deutlich träger, kein fast-instant reagieren mehr
 
-  // 👁 awareness = begrenztes Sichtfeld
-  awareness:
-    90 + balancedSkill * 180,    // max ~270
+awareness:
+  70 + balancedSkill * 90,     // vorher +180 → viel kleineres Sichtfeld (max ~160)
 
-  // 🎲 kleine Unsauberkeit wie Mensch
-  randomness:
-    (1 - balancedSkill) * 3.1,
+randomness:
+  (1 - balancedSkill) * 4.0,   // mehr menschliche Fehler bei niedrigen Bots
 
-  // 🧨 dodge power, aber nicht OP
-  dodgePower:
-    0.5 + balancedSkill * 3.5,
+dodgePower:
+  0.4 + balancedSkill * 1.6    // vorher 3.5 → stark reduziert (max ~2.0)
 
   targetX: null,
   targetY: null,
