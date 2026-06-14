@@ -1070,13 +1070,7 @@ function updateEloTable(){
             </div>
         </div>`;
     }
-    for(const match of matches){
-        html += `
-        <div data-match-id="${match.id}" style="margin-bottom:8px;cursor:pointer;
-             color:${match.id === spectateMatchId ? 'lime' : 'yellow'}">
-            🎥 ${match.players[0].name} vs ${match.players[1].name}
-        </div>`;
-    }
+    
       // Eigene ELO und Platz in der oberen UI anzeigen
     const me = participants.find(p => p.name === "DU");
     if(me){
