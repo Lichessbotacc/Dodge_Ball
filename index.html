@@ -212,6 +212,8 @@ let spectatorMode = false;
 let tvMode = "none";
 let spectatingLocked = false;
 let spectateModeActive = false;
+let followMode = "none"; // best | random | target | none
+let targetName = null;
 // RECORD
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -786,6 +788,7 @@ function updateTournament(){
   // Abgelaufene Matches endgültig entfernen
     matches = matches.filter(m => m.running);
     updateEloTable();
+    autoFollowSpectate();
 }
 
 function updateMatch(match){
@@ -1192,32 +1195,22 @@ function draw(){
 
 function setTVMode(mode){
     tvMode = mode;
+    followMode = mode;
 
     if(mode === "target"){
         const name = prompt("Wen willst du zuschauen?");
         if(!name) return;
 
-        const match = matches.find(m =>
-            m.players.some(p => p.name.toLowerCase() === name.toLowerCase())
-        );
-
-        if(match){
-            spectateMatchId = match.id;
-            spectatorMode = true;
-            spectatingLocked = true;
-            spectateModeActive = true;
-        }
-        // DU aus aktiver Turnierlogik entfernen
-waitingQueue = waitingQueue.filter(p => p.name !== "DU");
-        return;
+        targetName = name.toLowerCase();
+        spectateModeActive = true;
     }
 
     if(mode === "random"){
-        pickRandomMatch();
+        spectateModeActive = true;
     }
 
     if(mode === "best"){
-        pickBestMatch();
+        spectateModeActive = true;
     }
 }
 
