@@ -388,8 +388,7 @@ function spawnLoop(){
 
 }
 // ---------------- AI ----------------
-function updateAI(p, activeBalls){
-    if(!activeBalls) return;
+function updateAI(p, activeBalls = balls){
 
     // ---------------- TARGET LOGIK ----------------
   let danger = false;
@@ -522,16 +521,13 @@ function resetAIState(p){
     p.targetX = null;
     p.targetY = null;
 
+    // wichtig gegen “komisches Verhalten”
     p.deathTime = 0;
     p.alive = true;
 
-    // 🔥 WICHTIG: kill ALL runtime memory
-    p.lastVX = 0;
-    p.lastVY = 0;
-
-    // verhindert “Restverhalten”
-    p._vx = 0;
-    p._vy = 0;
+    // optional, aber stabilisiert Verhalten stark
+    p.stuckVectorX = 0;
+    p.stuckVectorY = 0;
 }
 function rememberMatch(p1, p2){
 
@@ -722,14 +718,7 @@ function startTournament(){
     );
 balls = [];
 players = [];
-players = participants.map(p => ({
-    ...p,
-    alive: true,
-    targetX: null,
-    targetY: null,
-    lastVX: 0,
-    lastVY: 0
-}));
+players = participants;
     // Bots
     for(let i=0;i<aiBotCount;i++){
 
