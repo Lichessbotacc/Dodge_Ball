@@ -482,12 +482,7 @@ if(elo){
 }
     document.getElementById("spectatorInfo").style.display = "none";
     document.getElementById("mode").textContent = mode;
-    if(mode === "tournament"){
-        document.getElementById("time").parentNode.innerHTML = `
-            ELO: <span id="time">1500</span><br>
-            Platz: <span id="record">1</span><br>
-            Spieler: <span id="balls">0</span>
-        `;
+    
     }
     document.getElementById("menu").style.display = "none";
     document.getElementById("gameOver").style.display = "none";
