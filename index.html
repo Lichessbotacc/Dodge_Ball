@@ -194,70 +194,86 @@ function showEloAnimation(change){
 
 // ═══ VERBESSERTE AI ══════════════════════════════════════════════════════════
 // Physik-basiertes Ausweichen: berechnet ob ein Ball auf Kollisionskurs ist
-function updateAI(p, activeBalls=balls){
-  let ax=0, ay=0;
+function updateAI(p, activeBalls = balls){
+    let danger = false;
 
-  // Wandabstoßung
-  const wm=120;
-  if(p.x<wm) ax+=(wm-p.x)*0.05;
-  if(p.x>canvas.width-wm) ax-=(p.x-(canvas.width-wm))*0.05;
-  if(p.y<wm) ay+=(wm-p.y)*0.05;
-  if(p.y>canvas.height-wm) ay-=(p.y-(canvas.height-wm))*0.05;
+    // Only detect danger from balls
+    for(const b of activeBalls){
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
 
-  let danger=false;
-
-  for(const b of activeBalls){
-    const dx=p.x-b.x, dy=p.y-b.y;
-    const dist=Math.sqrt(dx*dx+dy*dy)||1;
-
-    // Vorhersage: wo ist Ball in N Frames?
-    const predictX=b.x+b.vx*p.reaction;
-    const predictY=b.y+b.vy*p.reaction;
-    const pdx=p.x-predictX, pdy=p.y-predictY;
-    const predictDist=Math.sqrt(pdx*pdx+pdy*pdy)||1;
-    const threat=p.awareness*1.4;
-
-    if(predictDist<threat){
-      danger=true;
-      const str=Math.max(0,(threat-predictDist)/threat);
-      // Senkrechtausweichen: Kreuzprodukt-basiert
-      // Bestimme ob Ball links oder rechts vorbeifliegt
-      const cross=b.vx*dy-b.vy*dx; // positiv = Ball fliegt links vorbei
-      let perpX,perpY;
-      if(cross>0){ perpX=b.vy; perpY=-b.vx; }
-      else { perpX=-b.vy; perpY=b.vx; }
-      const plen=Math.sqrt(perpX*perpX+perpY*perpY)||1;
-      const force=str*p.dodgePower*3.5;
-      ax+=perpX/plen*force+(dx/dist)*force*0.5;
-      ay+=perpY/plen*force+(dy/dist)*force*0.5;
-    } else if(dist<p.awareness){
-      // Sanfte Abstoßung wenn in Nähe aber kein direkter Kurs
-      const str=Math.max(0,(p.awareness-dist)/p.awareness)*0.4;
-      ax+=dx/dist*str*p.dodgePower;
-      ay+=dy/dist*str*p.dodgePower;
+        if(dist < p.awareness){
+            danger = true;
+            break;
+        }
     }
-  }
 
-  // Wandern wenn keine Gefahr
-  if(!danger){
-    if(p.targetX===null||Math.random()<0.015){
-      p.targetX=p.radius+Math.random()*(canvas.width-p.radius*2);
-      p.targetY=p.radius+Math.random()*(canvas.height-p.radius*2);
+    if(!danger){
+        if(p.targetX === null || p.targetY === null || Math.random() < 0.02){
+            p.targetX = Math.random() * canvas.width;
+            p.targetY = Math.random() * canvas.height;
+        }
     }
-    const tx=p.targetX-p.x, ty=p.targetY-p.y;
-    const td=Math.sqrt(tx*tx+ty*ty)||1;
-    ax+=tx/td*0.8; ay+=ty/td*0.8;
-  }
 
-  // Zufälliges Rauschen (niedrig-skill Bots schwanken mehr)
-  ax+=(Math.random()-0.5)*p.randomness;
-  ay+=(Math.random()-0.5)*p.randomness;
+    let moveX = p.targetX - p.x;
+    let moveY = p.targetY - p.y;
+    let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
 
-  const len=Math.sqrt(ax*ax+ay*ay)||1;
-  p.x+=ax/len*p.speed; p.y+=ay/len*p.speed;
-  p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
-  p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
-  p.lastVX=ax; p.lastVY=ay;
+    moveX /= moveDist;
+    moveY /= moveDist;
+
+    let avoidX = 0;
+    let avoidY = 0;
+
+    const wallMargin = 140;
+
+    if(p.x < wallMargin){
+        avoidX += (wallMargin - p.x) * 0.03;
+    }
+    if(p.x > canvas.width - wallMargin){
+        avoidX -= (p.x - (canvas.width - wallMargin)) * 0.03;
+    }
+    if(p.y < wallMargin){
+        avoidY += (wallMargin - p.y) * 0.03;
+    }
+    if(p.y > canvas.height - wallMargin){
+        avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
+    }
+
+    // ONLY BALL AVOIDANCE
+    for(const b of activeBalls){
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+
+        const safeRadius = p.awareness;
+
+        if(dist < safeRadius){
+            const strength = Math.max(0, (safeRadius - dist) / safeRadius);
+            const force = strength * p.dodgePower * 2;
+
+            avoidX += (dx / dist) * force;
+            avoidY += (dy / dist) * force;
+        }
+    }
+
+    let vx = moveX * 4 + avoidX * 10;
+    let vy = moveY * 4 + avoidY * 10;
+
+    vx += (Math.random() - 0.5) * p.randomness;
+    vy += (Math.random() - 0.5) * p.randomness;
+
+    let len = Math.sqrt(vx*vx + vy*vy) || 1;
+
+    p.x += (vx / len) * p.speed;
+    p.y += (vy / len) * p.speed;
+
+    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+
+    p.lastVX = vx;
+    p.lastVY = vy;
 }
 
 // ═══ PLAYER FACTORY ══════════════════════════════════════════════════════════
@@ -267,11 +283,11 @@ function createPlayer(x,y,color,name){
     x,y,radius:playerRadiusSetting,color,name,
     points:0,elo:1500,lastChange:0,alive:true,games:0,
     skill,
-    speed:1.5+skill*8,
-    reaction:2+skill*6,        // Frames voraus die AI schaut
-    awareness:60+skill*100,
-    randomness:(1-skill)*4,
-    dodgePower:0.5+skill*3.5,
+    speed: 2 + skill * 10,
+    reaction: 0.2 + skill * 3.5,
+    awareness: 80 + skill * 120,
+    randomness: (1 - skill) * 4,
+    dodgePower: 0.5 + skill * 5,
     targetX:null,targetY:null,
     lastVX:0,lastVY:0,
     // Statistiken
