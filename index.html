@@ -190,36 +190,55 @@ let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // ---------------- PLAYER FACTORY ----------------
-function createPlayer(x,y,color,name,skill=null){
+function createPlayer(x, y, color, name){
 
-skill = Math.random();
+    // 🎯 Skill wird stark segmentiert statt smooth random
+    let tierRoll = Math.random();
 
-const base = skill;
+    let skill;
 
-return {
-    x,
-    y,
-    radius: playerRadiusSetting,
-    color,
-    name,
-    points: 0,
-    elo: 1500,
-    lastChange: 0,
-    alive: true,
-    games: 0,
+    if(tierRoll < 0.25){
+        skill = Math.random() * 0.25;        // ❌ dumme Bots
+    }
+    else if(tierRoll < 0.55){
+        skill = 0.25 + Math.random() * 0.25; // ⚠️ mittel
+    }
+    else if(tierRoll < 0.85){
+        skill = 0.5 + Math.random() * 0.3;   // 🔥 gute Bots
+    }
+    else{
+        skill = 0.8 + Math.random() * 0.2;   // 💀 cracked Bots
+    }
 
-    skill,
+    // 🎲 Chaos-Faktor (macht Unterschiede wirklich spürbar)
+    const chaos = (Math.random() - 0.5) * 0.4;
 
-    // 🔥 stark unterschiedliche Werte pro Bot
-    speed: 3 + base * 6,          // 3–9 (große Unterschiede)
-    reaction: 0.5 + base * 2.5,   // 0.5–3
-    awareness: 120 + base * 500,  // 120–500
-    randomness: base * 2.2,       // 0–2.2
-    dodgePower: 1 + base * 3.5,   // 1–4.5
+    const base = Math.max(0, Math.min(1, skill + chaos));
 
-    targetX: null,
-    targetY: null
-};
+    return {
+        x,
+        y,
+        radius: playerRadiusSetting,
+        color,
+        name,
+        points: 0,
+        elo: 1200 + base * 800,
+        lastChange: 0,
+        alive: true,
+        games: 0,
+
+        skill: base,
+
+        // 🔥 extrem gestreute Werte
+        speed: 2 + base * 10,             // 2 → 12 (riesige Range)
+        reaction: 0.2 + base * 3.5,       // sehr schwache bis super schnelle Reaktion
+        awareness: 60 + base * 600,       // blind → fast wallhack
+        randomness: (1 - base) * 4,       // dumme Bots = chaotisch
+        dodgePower: 0.5 + base * 5,       // massiv Unterschied
+
+        targetX: null,
+        targetY: null
+    };
 }
 // ---------------- UI ----------------
 function openSettings(){
