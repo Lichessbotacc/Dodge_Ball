@@ -212,9 +212,8 @@ let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
 
 // PLAYER FACTORY - SMOOTH RANDOM SKILLS
-function createPlayer(x, y, color, name){
-    // Completely random skill from 0 to 1 (smooth, not tiered)
-    const skill = Math.random();
+function createPlayer(x, y, color, name, forcedSkill = null){
+    const skill = forcedSkill ?? Math.random();
 
     return {
         x,
@@ -584,15 +583,19 @@ function startTournament(){
     );
 
     for(let i=0;i<aiBotCount;i++){
-        participants.push(
-            createPlayer(
-                Math.random()*canvas.width,
-                Math.random()*canvas.height,
-                `hsl(${i*360/aiBotCount},100%,50%)`,
-                "Bot "+(i+1)
-            )
-        );
-    }
+
+    const skill = (i + 1) / aiBotCount;
+
+    participants.push(
+        createPlayer(
+            Math.random()*canvas.width,
+            Math.random()*canvas.height,
+            `hsl(${i*360/aiBotCount},100%,50%)`,
+            "Bot "+(i+1),
+            skill
+        )
+    );
+}
 
     waitingQueue = [...participants];
     seededMatchmaking();
