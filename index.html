@@ -583,23 +583,25 @@ function startTournament(){
     matches = [];
     participants = [];
     waitingQueue = [];
-    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
+participants = [];
+
+participants.push(
+    createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
+);
+
+for(let i=0;i<aiBotCount;i++){
     participants.push(
-        createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
+        createPlayer(
+            Math.random()*canvas.width,
+            Math.random()*canvas.height,
+            `hsl(${i*360/aiBotCount},100%,50%)`,
+            "Bot "+(i+1)
+        )
     );
+}
 
-    for(let i=0;i<aiBotCount;i++){
-        participants.push(
-            createPlayer(
-                Math.random()*canvas.width,
-                Math.random()*canvas.height,
-                `hsl(${i*360/aiBotCount},100%,50%)`,
-                "Bot "+(i+1)
-            )
-        );
-    }
-
-    waitingQueue = [...participants];
+// WICHTIG: erst HIER Queue bauen
+waitingQueue = [...participants].filter(p => p.name !== "DU");
     seededMatchmaking();
 }
 
