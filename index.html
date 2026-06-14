@@ -288,13 +288,15 @@ function createBallForMatch(match){
 
     const baseSpeed = 5 + Math.random() * 6;
 
-    match.balls.push({
-        x,
-        y,
-        radius:r,
-        vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
-        vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
-    });
+    const angle = Math.random() * Math.PI * 2;
+
+match.balls.push({
+    x,
+    y,
+    radius:r,
+    vx: Math.cos(angle) * baseSpeed * ballSpeedMultiplier,
+    vy: Math.sin(angle) * baseSpeed * ballSpeedMultiplier
+});
 }
 // BALLS
 function createBall(){
@@ -329,12 +331,15 @@ function createBall(){
 
     const baseSpeed = 5 + Math.random() * 6;
 
-    balls.push({
-        x,y,
-        radius:r,
-        vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
-        vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
-    });
+    const angle = Math.random() * Math.PI * 2;
+
+balls.push({
+    x,
+    y,
+    radius:r,
+    vx: Math.cos(angle) * baseSpeed * ballSpeedMultiplier,
+    vy: Math.sin(angle) * baseSpeed * ballSpeedMultiplier
+});
 }
 
 function spawnLoop(){
@@ -905,12 +910,8 @@ function finishMatch(match, winner, loser){
         resetAI(winner);
         resetAI(loser);
 
-        if(winner.name !== "DU"){
-            waitingQueue.push(winner);
-        }
-        if(loser.name !== "DU"){
-            waitingQueue.push(loser);
-        }
+        waitingQueue.push(winner);
+        waitingQueue.push(loser);
 
         seededMatchmaking();
     }, nextMatchDelay);
@@ -1121,9 +1122,10 @@ function draw(){
             const myMatch = playerMatchMap.get("DU");
             if(myMatch && myMatch.running){
                 const opponent = myMatch.players.find(p => p.name !== "DU");
-                document.getElementById("spectatorText").innerHTML = 
-                    "Dein Gegner: <b>" + opponent.name + "</b><br>" +
-                    "ELO: " + Math.round(opponent.elo);
+                document.getElementById("spectatorText").innerHTML =
+    "Dein Gegner: <b>" + opponent.name + "</b><br>" +
+    "ELO: " + Math.round(opponent.elo) + "<br>" +
+    "Skill: " + Math.round(opponent.skill * 100) + "%";
             } else if(spectateMatchId){
                 const watchedMatch = matches.find(m => m.id === spectateMatchId);
                 if(watchedMatch){
