@@ -83,7 +83,11 @@ border-radius:10px;
 <b>ELO LIVE</b>
 <div id="eloList"></div>
 </div>
-
+<div style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+    <button onclick="setTVMode('best')">BEST TV</button>
+    <button onclick="setTVMode('random')">RANDOM TV</button>
+    <button onclick="setTVMode('target')">TARGET TV</button>
+</div>
 <div id="spectatorInfo">
 <b>Spectator Mode</b><br>
 <div id="spectatorText"></div>
@@ -206,7 +210,8 @@ const REMATCH_BLOCK = 15000;
 let spectateMatchId = null;
 let keys = {};
 let spectatorMode = false;
-
+let tvMode = "none";
+let spectatingLocked = false;
 // RECORD
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -578,7 +583,7 @@ function startTournament(){
     matches = [];
     participants = [];
     waitingQueue = [];
-
+    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
     participants.push(
         createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
     );
@@ -600,6 +605,9 @@ function startTournament(){
 
 // SEEDED MATCHMAKING - Match by ELO ranking with slight variation
 function seededMatchmaking(){
+    if(spectatingLocked && participants.some(p => p.name === "DU")){
+    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
+}
     const activeCount = matches.length * 2;
     const idle = waitingQueue.length;
     const everyoneIdle = activeCount === 0;
@@ -1182,9 +1190,68 @@ function draw(){
         ctx.fillText(p.name, p.x, p.y - p.radius - 10);
     }
 }
+let tvMode = "none";
+let spectatingLocked = false;
 
+function setTVMode(mode){
+    tvMode = mode;
+
+    if(mode === "target"){
+        const name = prompt("Wen willst du zuschauen?");
+        if(!name) return;
+
+        const match = matches.find(m =>
+            m.players.some(p => p.name.toLowerCase() === name.toLowerCase())
+        );
+
+        if(match){
+            spectateMatchId = match.id;
+            spectatorMode = true;
+            spectatingLocked = true;
+        }
+        return;
+    }
+
+    if(mode === "random"){
+        pickRandomMatch();
+    }
+
+    if(mode === "best"){
+        pickBestMatch();
+    }
+}
+
+function pickRandomMatch(){
+    const live = matches.filter(m => m.running);
+    if(live.length === 0) return;
+
+    const m = live[Math.floor(Math.random() * live.length)];
+    spectateMatchId = m.id;
+    spectatorMode = true;
+    spectatingLocked = true;
+}
+
+function pickBestMatch(){
+    let best = null;
+    let bestAvg = -1;
+
+    for(const m of matches){
+        const avg = (m.players[0].elo + m.players[1].elo) / 2;
+        if(avg > bestAvg){
+            bestAvg = avg;
+            best = m;
+        }
+    }
+
+    if(best){
+        spectateMatchId = best.id;
+        spectatorMode = true;
+        spectatingLocked = true;
+    }
+}
 // SINGLE CONTROL
 function moveSingle(x,y){
+    if(spectatingLocked) return;
     if(mode === "tournament"){
         const match = playerMatchMap.get("DU");
         if(!match) return;
