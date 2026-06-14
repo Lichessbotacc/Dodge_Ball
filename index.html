@@ -615,9 +615,8 @@ waitingQueue = [...participants];
 
 // SEEDED MATCHMAKING - Match by ELO ranking with slight variation
 function seededMatchmaking(){
-    if(spectateModeActive){
-    waitingQueue = waitingQueue.filter(p => p.name !== "DU");
-}
+   // DU DARF NIE AUS QUEUE FALLEN
+waitingQueue = waitingQueue.filter(p => p.alive);
     
     const activeCount = matches.length * 2;
     const idle = waitingQueue.length;
