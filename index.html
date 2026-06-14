@@ -112,7 +112,27 @@ Modus: <span id="mode">-</span>
 
 <canvas id="game"></canvas>
 
-<div id="spectatorInfo">
+<!-- Gegner-Info: immer sichtbar wenn DU im Match ist -->
+<div id="opponentInfo" style="
+    position:absolute;bottom:20px;left:20px;
+    color:white;font-size:18px;
+    background:rgba(0,0,0,0.65);
+    padding:15px 20px;border-radius:12px;
+    display:none;line-height:1.6;
+    border:1px solid rgba(255,255,255,0.15);
+">
+    <div id="opponentText"></div>
+</div>
+
+<!-- Spectator-Overlay: nur sichtbar im TV-Modus -->
+<div id="spectatorInfo" style="
+    position:absolute;bottom:20px;left:20px;
+    color:white;font-size:18px;
+    background:rgba(0,0,0,0.65);
+    padding:15px 20px;border-radius:12px;
+    display:none;line-height:1.6;
+    border:1px solid rgba(255,165,0,0.4);
+">
 <b>👁 Spectator Mode</b><br>
 <div id="spectatorText"></div>
 </div>
@@ -681,14 +701,38 @@ function draw(){
             ctx.fillText(p.name, p.x, p.y-p.radius-10);
         }
 
-        // Spectator-Info
-        const spectDiv=document.getElementById("spectatorInfo");
+        // ── Gegner-Info (nur wenn DU aktiv spielt, nicht im Spectator-Modus) ──
+        const oppDiv  = document.getElementById("opponentInfo");
+        const oppText = document.getElementById("opponentText");
+        const spectDiv= document.getElementById("spectatorInfo");
         const spectText=document.getElementById("spectatorText");
-        if(spectateModeActive){
+
+        if(!spectateModeActive && !humanRemovedFromQueue){
+            const myMatch=playerMatchMap.get("DU");
+            if(myMatch && myMatch.running){
+                const opp=myMatch.players.find(p=>p.name!=="DU");
+                if(opp){
+                    // Platz des Gegners im ELO-Ranking ermitteln
+                    const sorted=[...participants].sort((a,b)=>b.elo-a.elo);
+                    const oppRank=sorted.findIndex(p=>p.name===opp.name)+1;
+                    oppDiv.style.display="block";
+                    oppText.innerHTML=
+                        `Gegner: <b style="color:#ffd700">${opp.name}</b><br>`+
+                        `Platz: <b>#${oppRank}</b> von ${participants.length}<br>`+
+                        `ELO: <b>${Math.round(opp.elo)}</b><br>`+
+                        `Skill: <b>${Math.round(opp.skill*100)}%</b>`;
+                }
+            } else {
+                oppDiv.style.display="none";
+            }
+            spectDiv.style.display="none";
+        } else if(spectateModeActive){
+            oppDiv.style.display="none";
             spectDiv.style.display="block";
             const p1=renderMatch.players[0], p2=renderMatch.players[1];
             spectText.innerHTML=`<b>${p1.name}</b> (${Math.round(p1.elo)}) vs <b>${p2.name}</b> (${Math.round(p2.elo)})`;
         } else {
+            oppDiv.style.display="none";
             spectDiv.style.display="none";
         }
         return;
