@@ -766,28 +766,8 @@ function update(){
     document.getElementById("time").textContent = Math.floor((Date.now()-startTime)/1000);
 
     // MOVEMENT
-   document.addEventListener("keydown", (e) => {
-    if (inputMode !== "keyboard") return;
-
-    const key = e.key.toLowerCase();
-    const speed = 5;
-
-    // SINGLEPLAYER / TOURNAMENT / MULTI PLAYER 1
-    if (players[0]) {
-        if (key === "arrowleft" || key === "a") players[0].x -= speed;
-        if (key === "arrowright" || key === "d") players[0].x += speed;
-        if (key === "arrowup" || key === "w") players[0].y -= speed;
-        if (key === "arrowdown" || key === "s") players[0].y += speed;
-    }
-
-    // MULTI PLAYER 2 (nur wenn vorhanden)
-    if (players[1]) {
-        if (key === "arrowleft") players[1].x -= speed;
-        if (key === "arrowright") players[1].x += speed;
-        if (key === "arrowup") players[1].y -= speed;
-        if (key === "arrowdown") players[1].y += speed;
-    }
-});
+   
+   
 
     if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
         for(const p of players){
@@ -1275,7 +1255,11 @@ document.addEventListener("keyup", (e) => {
 });
 
 canvas.addEventListener("mousemove",(e)=>{
-    if(running && (mode==="single" || mode==="tournament")){
+    if(!running) return;
+
+    if(inputMode !== "mouse") return;
+
+    if(mode==="single" || mode==="tournament"){
         moveSingle(e.clientX,e.clientY);
     }
 });
@@ -1283,6 +1267,26 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("touchmove",(e)=>{
     if(running && (mode==="single" || mode==="tournament")){
         moveSingle(e.touches[0].clientX,e.touches[0].clientY);
+    }
+});
+document.addEventListener("keydown", (e) => {
+    if (inputMode !== "keyboard") return;
+
+    const key = e.key.toLowerCase();
+    const speed = 5;
+
+    if (players[0]) {
+        if (key === "arrowleft" || key === "a") players[0].x -= speed;
+        if (key === "arrowright" || key === "d") players[0].x += speed;
+        if (key === "arrowup" || key === "w") players[0].y -= speed;
+        if (key === "arrowdown" || key === "s") players[0].y += speed;
+    }
+
+    if (players[1]) {
+        if (key === "arrowleft") players[1].x -= speed;
+        if (key === "arrowright") players[1].x += speed;
+        if (key === "arrowup") players[1].y -= speed;
+        if (key === "arrowdown") players[1].y += speed;
     }
 });
 document.getElementById("eloList").addEventListener("click", (e) => {
