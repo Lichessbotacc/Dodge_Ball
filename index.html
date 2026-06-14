@@ -360,10 +360,11 @@ function spawnLoop(){
     }, spawnDelay);
 }
 
-// AI
-function updateAI(p, activeBalls = balls, allOtherPlayers = []){
+// AI - ONLY DODGE BALLS, IGNORE OTHER PLAYERS
+function updateAI(p, activeBalls = balls){
     let danger = false;
 
+    // Only detect danger from balls
     for(const b of activeBalls){
         const dx = p.x - b.x;
         const dy = p.y - b.y;
@@ -372,20 +373,6 @@ function updateAI(p, activeBalls = balls, allOtherPlayers = []){
         if(dist < p.awareness){
             danger = true;
             break;
-        }
-    }
-
-    if(!danger){
-        for(const enemy of allOtherPlayers){
-            if(enemy === p || !enemy.alive) continue;
-            const dx = p.x - enemy.x;
-            const dy = p.y - enemy.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if(dist < p.awareness * 0.3){
-                danger = true;
-                break;
-            }
         }
     }
 
@@ -421,6 +408,7 @@ function updateAI(p, activeBalls = balls, allOtherPlayers = []){
         avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
     }
 
+    // ONLY BALL AVOIDANCE
     for(const b of activeBalls){
         const dx = p.x - b.x;
         const dy = p.y - b.y;
@@ -434,20 +422,6 @@ function updateAI(p, activeBalls = balls, allOtherPlayers = []){
 
             avoidX += (dx / dist) * force;
             avoidY += (dy / dist) * force;
-        }
-    }
-
-    for(const enemy of allOtherPlayers){
-        if(enemy === p || !enemy.alive) continue;
-        const dx = p.x - enemy.x;
-        const dy = p.y - enemy.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-
-        if(dist < p.awareness * 0.5){
-            const strength = (p.awareness * 0.5 - dist) / (p.awareness * 0.5);
-            const force = strength * p.dodgePower;
-            avoidX += (dx / dist) * force * 0.5;
-            avoidY += (dy / dist) * force * 0.5;
         }
     }
 
@@ -730,7 +704,7 @@ function update(){
     if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
         for(const p of players){
             if(p.alive && p.name !== HUMAN_NAME && p.name.startsWith("Bot")){
-                updateAI(p, balls, players);
+                updateAI(p, balls);
             }
         }
     }
@@ -779,11 +753,10 @@ function updateMatch(match){
 
     const players = match.players;
 
-    // AI - Pass enemy players too
+    // AI - ONLY DODGE BALLS
     for(const p of players){
         if(p.alive && p.name.startsWith("Bot")){
-            const enemies = players.filter(x => x !== p);
-            updateAI(p, match.balls, enemies);
+            updateAI(p, match.balls);
         }
     }
 
