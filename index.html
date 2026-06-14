@@ -174,7 +174,8 @@ function resize(){
 
     ctx.setTransform(dpr,0,0,dpr,0,0);
 }
-
+resize();
+window.addEventListener("resize", resize);
 // STATE
 let balls = [];
 let players = [];
