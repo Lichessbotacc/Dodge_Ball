@@ -181,6 +181,8 @@ let waitingQueue = [];
 let playerMatchMap = new Map();
 let recentOpponents = new Map();
 const HUMAN_NAME = "DU";
+let rematchCooldown = new Map(); // name -> timestamp
+const REMATCH_BLOCK = 15000; // 15 Sekunden Sperre
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
