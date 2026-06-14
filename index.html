@@ -773,7 +773,25 @@ function update(){
     document.getElementById("time").textContent = Math.floor((Date.now()-startTime)/1000);
 
     // MOVEMENT
-   
+   const speed = 6;
+
+let p = null;
+
+if (mode === "tournament") {
+    const match = playerMatchMap.get("DU");
+    if (match) {
+        p = match.players.find(x => x.name === "DU");
+    }
+} else {
+    p = players.find(x => x.name === "Spieler") || players[0];
+}
+
+if (p && inputMode === "keyboard") {
+    if (keys["arrowleft"] || keys["a"]) p.x -= speed;
+    if (keys["arrowright"] || keys["d"]) p.x += speed;
+    if (keys["arrowup"] || keys["w"]) p.y -= speed;
+    if (keys["arrowdown"] || keys["s"]) p.y += speed;
+}
    
 
     if((mode==="ai" || mode==="single" || mode==="multi") && mode !== "tournament"){
