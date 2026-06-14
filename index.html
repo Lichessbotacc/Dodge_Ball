@@ -586,7 +586,11 @@ function startTournament(){
     participants = [];
     waitingQueue = [];
 participants = [];
-
+spectateModeActive = false;
+spectatorMode = false;
+spectateMatchId = null;
+followMode = "none";
+targetName = null;
 participants.push(
     createPlayer(canvas.width/2, canvas.height/2, "#00ff88", "DU")
 );
