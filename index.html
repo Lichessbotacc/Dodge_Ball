@@ -920,8 +920,8 @@ loser.lastChange = -change;
         resetAI(winner);
         resetAI(loser);
 
-        waitingQueue.push(winner);
-        waitingQueue.push(loser);
+        if(winner.name !== "DU") waitingQueue.push(winner);
+if(loser.name !== "DU") waitingQueue.push(loser);
 
         seededMatchmaking();
     }, nextMatchDelay);
