@@ -525,41 +525,60 @@ for(let i=0;i<aiBotCount;i++){
 
 // ═══ MATCHMAKING (verbessert: Rang-basiert, kein Rematch) ═══════════════════
 function seededMatchmaking(){
-  if(waitingQueue.length<2)return;
+  if(waitingQueue.length < 2) return;
 
-  // Nach ELO sortieren
-  let sorted=[...waitingQueue].sort((a,b)=>b.elo-a.elo);
-  waitingQueue=[];
+  const paired = [];
+  const used = new Set();
 
-  // Rang-basiertes Pairing: 1vs2, 3vs4, 5vs6 usw. mit kleiner Variation
-  // aber KEIN Rückkampf gegen denselben Gegner wie zuletzt
-  const paired=[];
-  const unpaired=[...sorted];
+  // Hilfsfunktion: finde besten Gegner nach ELO-Differenz
+  function findBestOpponent(p1, list){
+    let best = null;
+    let bestDiff = Infinity;
 
-  while(unpaired.length>=2){
-    const p1=unpaired.shift();
-    // Suche besten Gegner aus den nächsten 3 Plätzen (ähnlicher Rang)
-    // aber nicht den letzten Gegner
-    let bestIdx=0, bestScore=Infinity;
-    const window=Math.min(3,unpaired.length);
-    for(let i=0;i<window;i++){
-      const cand=unpaired[i];
-      const rankDiff=Math.abs(sorted.indexOf(p1)-sorted.indexOf(cand));
-      const wasRecent=(recentOpponents.get(p1.name)===cand.name);
-      const score=rankDiff+(wasRecent?1000:0); // Riesige Strafe für Rematch
-      if(score<bestScore){bestScore=score;bestIdx=i;}
+    for(const p2 of list){
+      if(p1 === p2) continue;
+      if(used.has(p2.name)) continue;
+
+      // Anti-Rematch
+      if(recentOpponents.get(p1.name) === p2.name) continue;
+
+      const diff = Math.abs(p1.elo - p2.elo);
+
+      if(diff < bestDiff){
+        bestDiff = diff;
+        best = p2;
+      }
     }
-    const p2=unpaired.splice(bestIdx,1)[0];
-    recentOpponents.set(p1.name,p2.name);
-    recentOpponents.set(p2.name,p1.name);
-
-    const match=createMatch(p1,p2);
-    setupMatch(match);
-    matches.push(match);
-    playerMatchMap.set(p1.name,match);
-    playerMatchMap.set(p2.name,match);
+    return best;
   }
-  waitingQueue.push(...unpaired);
+
+  const queue = [...waitingQueue];
+  waitingQueue = [];
+
+  for(const p1 of queue){
+    if(used.has(p1.name)) continue;
+
+    const p2 = findBestOpponent(p1, queue);
+
+    if(p2){
+      used.add(p1.name);
+      used.add(p2.name);
+
+      recentOpponents.set(p1.name, p2.name);
+      recentOpponents.set(p2.name, p1.name);
+
+      const match = createMatch(p1, p2);
+      setupMatch(match);
+
+      matches.push(match);
+      playerMatchMap.set(p1.name, match);
+      playerMatchMap.set(p2.name, match);
+
+    } else {
+      // kein Gegner gefunden → zurück in Queue
+      waitingQueue.push(p1);
+    }
+  }
 }
 
 function createMatch(p1,p2){
