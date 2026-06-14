@@ -231,11 +231,11 @@ function createPlayer(x, y, color, name){
         skill: skill,
 
         // Smooth scaling based on skill
-        speed: 2 + skill * 10,             // 2 → 12
-        reaction: 0.2 + skill * 3.5,       // 0.2 → 3.7
-        awareness: 80 + skill * 120,       // 80 → 200 (much more reasonable)
-        randomness: (1 - skill) * 4,       // 4 → 0 (skilled bots are predictable)
-        dodgePower: 0.5 + skill * 5,       // 0.5 → 5.5
+       speed: 1.5 + skill * 8,
+        reaction: 0.3 + skill * 4,
+        awareness: 50 + skill * 95,
+        randomness: (1 - skill) * 5,
+        dodgePower: 0.3 + skill * 4,
 
         targetX: null,
         targetY: null,
@@ -286,11 +286,10 @@ function createBallForMatch(match){
         }
     }
 
-    const baseSpeed = 3 + Math.random() * 4;
+    const baseSpeed = 5 + Math.random() * 6;
 
-    match.balls.push({
-        x,
-        y,
+    balls.push({
+        x,y,
         radius:r,
         vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
         vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
@@ -327,7 +326,7 @@ function createBall(){
         }
     }
 
-    const baseSpeed = 3 + Math.random() * 4;
+    const baseSpeed = 5 + Math.random() * 6;
 
     balls.push({
         x,y,
@@ -335,8 +334,6 @@ function createBall(){
         vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
         vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
     });
-
-    document.getElementById("balls").textContent = balls.length;
 }
 
 function spawnLoop(){
@@ -907,8 +904,12 @@ function finishMatch(match, winner, loser){
         resetAI(winner);
         resetAI(loser);
 
-        waitingQueue.push(winner);
-        waitingQueue.push(loser);
+        if(winner.name !== "DU"){
+            waitingQueue.push(winner);
+        }
+        if(loser.name !== "DU"){
+            waitingQueue.push(loser);
+        }
 
         seededMatchmaking();
     }, nextMatchDelay);
@@ -1117,13 +1118,18 @@ function draw(){
         // Update spectator info
         if(spectatorMode){
             const myMatch = playerMatchMap.get("DU");
-            if(myMatch){
+            if(myMatch && myMatch.running){
                 const opponent = myMatch.players.find(p => p.name !== "DU");
-                const skillPercent = Math.round(opponent.skill * 100);
                 document.getElementById("spectatorText").innerHTML = 
                     "Dein Gegner: <b>" + opponent.name + "</b><br>" +
-                    "Skill: " + skillPercent + "%<br>" +
-                    opponent.name + " ELO: " + Math.round(opponent.elo);
+                    "ELO: " + Math.round(opponent.elo);
+            } else if(spectateMatchId){
+                const watchedMatch = matches.find(m => m.id === spectateMatchId);
+                if(watchedMatch){
+                    document.getElementById("spectatorText").innerHTML = 
+                        "👁 Du guckst zu:<br><b>" + watchedMatch.players[0].name + 
+                        " vs " + watchedMatch.players[1].name + "</b>";
+                }
             }
         }
 
