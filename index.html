@@ -233,7 +233,7 @@ function createPlayer(x, y, color, name){
         // Smooth scaling based on skill
         speed: 2 + skill * 10,             // 2 → 12
         reaction: 0.2 + skill * 3.5,       // 0.2 → 3.7
-        awareness: 60 + skill * 600,       // 60 → 660
+        awareness: 80 + skill * 120,       // 80 → 200 (much more reasonable)
         randomness: (1 - skill) * 4,       // 4 → 0 (skilled bots are predictable)
         dodgePower: 0.5 + skill * 5,       // 0.5 → 5.5
 
@@ -582,20 +582,48 @@ function startTournament(){
     }
 
     waitingQueue = [...participants];
-    tryMatchmaking();
+    seededMatchmaking();
 }
 
-function tryMatchmaking(){
-    while(waitingQueue.length >= 2){
-        const p1 = waitingQueue.shift();
-        const p2 = waitingQueue.shift();
-
+// SEEDED MATCHMAKING - Match by ELO ranking with slight variation
+function seededMatchmaking(){
+    // Sort by ELO
+    let sorted = [...waitingQueue].sort((a,b)=>b.elo-a.elo);
+    
+    let matched = [];
+    let unmatched = [...sorted];
+    
+    while(unmatched.length >= 2){
+        // Take top player
+        const p1 = unmatched.shift();
+        
+        // Find opponent with similar ELO (can vary slightly)
+        let bestIdx = 0;
+        let bestDiff = Math.abs(unmatched[0].elo - p1.elo);
+        
+        // Allow some variation - pick from top 3-4 candidates
+        const variance = 3;
+        for(let i=1; i<Math.min(variance, unmatched.length); i++){
+            const diff = Math.abs(unmatched[i].elo - p1.elo);
+            if(diff < bestDiff){
+                bestDiff = diff;
+                bestIdx = i;
+            }
+        }
+        
+        const p2 = unmatched.splice(bestIdx, 1)[0];
+        
         const match = createMatch(p1, p2);
         setupMatch(match);
         matches.push(match);
-
+        
         playerMatchMap.set(p1.name, match);
         playerMatchMap.set(p2.name, match);
+    }
+    
+    // Handle odd player
+    if(unmatched.length === 1){
+        waitingQueue = unmatched;
     }
 }
 
@@ -871,7 +899,7 @@ function finishMatch(match, winner, loser){
         waitingQueue.push(winner);
         waitingQueue.push(loser);
 
-        tryMatchmaking();
+        seededMatchmaking();
     }, nextMatchDelay);
 }
 
