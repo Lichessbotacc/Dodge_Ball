@@ -286,14 +286,15 @@ function createBallForMatch(match){
         }
     }
 
+    const baseSpeed = 3 + Math.random() * 4;
+
     match.balls.push({
         x,
         y,
         radius:r,
-        vx:(Math.random()*2+0.5) * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
-        vy:(Math.random()*2+0.5) * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
+        vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
+        vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
     });
-}
 
 // BALLS
 function createBall(){
@@ -326,11 +327,13 @@ function createBall(){
         }
     }
 
+    const baseSpeed = 3 + Math.random() * 4;
+
     balls.push({
         x,y,
         radius:r,
-        vx:(Math.random()*2+0.5)*ballSpeedMultiplier*(Math.random()<0.5?-1:1),
-        vy:(Math.random()*2+0.5)*ballSpeedMultiplier*(Math.random()<0.5?-1:1)
+        vx: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1),
+        vy: baseSpeed * ballSpeedMultiplier * (Math.random()<0.5?-1:1)
     });
 
     document.getElementById("balls").textContent = balls.length;
