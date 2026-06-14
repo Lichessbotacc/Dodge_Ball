@@ -664,11 +664,11 @@ function setupMatch(match){
     p2.x = canvas.width * 0.7;
     p2.y = canvas.height * 0.5;
 
-    if(match.players.some(p => p.name === "DU")){
-        spectateMatchId = match.id;
-        spectatorMode = true;
-        document.getElementById("spectatorInfo").style.display = "block";
-    }
+    if(match.players.some(p => p.name === "DU") && spectateModeActive){
+    spectateMatchId = match.id;
+    spectatorMode = true;
+    document.getElementById("spectatorInfo").style.display = "block";
+}
 
     match.balls = [];
     match.lastSpawn = Date.now();
