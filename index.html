@@ -967,112 +967,167 @@ function resumePlay(){
 }
 
 // ═══ DRAW ════════════════════════════════════════════════════════════════════
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if(mode==="tournament"){
-    let renderMatch=null;
-    if(spectateModeActive&&spectateMatchId){
-      renderMatch=matches.find(m=>m.id===spectateMatchId&&m.running);
-    } else if(!humanRemovedFromQueue){
-      const dm=playerMatchMap.get("DU");
-      if(dm&&dm.running)renderMatch=dm;
+  // ===================== TOURNAMENT MODE =====================
+  if (mode === "tournament") {
+    let renderMatch = null;
+
+    if (spectateModeActive && spectateMatchId) {
+      renderMatch = matches.find(m => m.id === spectateMatchId && m.running);
+    } else if (!humanRemovedFromQueue) {
+      const dm = playerMatchMap.get("DU");
+      if (dm && dm.running) renderMatch = dm;
     }
-    if(!renderMatch&&spectateModeActive)renderMatch=matches.find(m=>m.running);
 
-    if(!renderMatch){
-      ctx.fillStyle="white";ctx.font="30px Arial";ctx.textAlign="center";
-      ctx.fillText(humanRemovedFromQueue&&!spectateModeActive?"Du schaust zu – wähle einen TV-Modus":"Warte auf nächstes Match...",canvas.width/2,canvas.height/2);
-      document.getElementById("opponentInfo").style.display="none";
-      document.getElementById("spectatorInfo").style.display="none";
+    if (!renderMatch && spectateModeActive) {
+      renderMatch = matches.find(m => m.running);
+    }
+
+    if (!renderMatch) {
+      ctx.fillStyle = "white";
+      ctx.font = "30px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        humanRemovedFromQueue && !spectateModeActive
+          ? "Du schaust zu – wähle einen TV-Modus"
+          : "Warte auf nächstes Match...",
+        canvas.width / 2,
+        canvas.height / 2
+      );
+
+      document.getElementById("opponentInfo").style.display = "none";
+      document.getElementById("spectatorInfo").style.display = "none";
       return;
     }
 
-    for(const b of renderMatch.balls){
-      ctx.beginPath();ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);ctx.fillStyle="#ff4444";ctx.fill();
-    }
-    for(const p of renderMatch.players){
-      if(!p.alive)continue;
-      ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fillStyle=p.color;ctx.fill();
-      ctx.fillStyle="white";ctx.font="14px Arial";ctx.textAlign="center";
-      ctx.fillText(p.name,p.x,p.y-p.radius-10);
+    // balls
+    for (const b of renderMatch.balls) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#ff4444";
+      ctx.fill();
     }
 
-    // UI-Boxen
-    const oppDiv=document.getElementById("opponentInfo");
-    const oppText=document.getElementById("opponentText");
-    const spectDiv=document.getElementById("spectatorInfo");
-    const spectText=document.getElementById("spectatorText");
+    // players
+    for (const p of renderMatch.players) {
+      if (!p.alive) continue;
 
-    if(!spectateModeActive&&!humanRemovedFromQueue){
-      const myMatch=playerMatchMap.get("DU");
-      if(myMatch&&myMatch.running){
-        const opp=myMatch.players.find(p=>p.name!=="DU");
-        if(opp){
-          const sorted=[...participants].sort((a,b)=>b.elo-a.elo);
-          const oppRank=sorted.findIndex(p=>p.name===opp.name)+1;
-          oppDiv.style.display="block";
-          oppText.innerHTML=
-            `Gegner: <b style="color:#ffd700">${opp.name}</b><br>`+
-            `Platz: <b>#${oppRank}</b> von ${participants.length}<br>`+
-            `ELO: <b>${Math.round(opp.elo)}</b><br>`+
-            `Skill: <b>${Math.round(opp.skill*100)}%</b>`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+
+      ctx.fillStyle = "white";
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+    }
+
+    // opponent info (normal play)
+    const oppDiv = document.getElementById("opponentInfo");
+    const oppText = document.getElementById("opponentText");
+    const spectDiv = document.getElementById("spectatorInfo");
+    const spectText = document.getElementById("spectatorText");
+
+    if (!spectateModeActive && !humanRemovedFromQueue) {
+      const myMatch = playerMatchMap.get("DU");
+
+      if (myMatch && myMatch.running) {
+        const opp = myMatch.players.find(p => p.name !== "DU");
+
+        if (opp) {
+          const sorted = [...participants].sort((a, b) => b.elo - a.elo);
+          const oppRank = sorted.findIndex(p => p.name === opp.name) + 1;
+
+          oppDiv.style.display = "block";
+          oppText.innerHTML =
+            `Gegner: <b style="color:#ffd700">${opp.name}</b><br>` +
+            `Platz: <b>#${oppRank}</b> von ${participants.length}<br>` +
+            `ELO: <b>${Math.round(opp.elo)}</b><br>` +
+            `Skill: <b>${Math.round(opp.skill * 100)}%</b>`;
         }
-      } else { oppDiv.style.display="none"; }
-      spectDiv.style.display="none";} else if(spectateModeActive){
-  oppDiv.style.display="none";
-  spectDiv.style.display="block";
+      } else {
+        oppDiv.style.display = "none";
+      }
 
-  const p1 = renderMatch.players[0];
-  const p2 = renderMatch.players[1];
-
-  spectText.innerHTML = `
-    <div style="text-align:center">
-      <b>${p1.name}</b> (${Math.round(p1.elo)})<br>
-      Skill: <b>${Math.round((p1.skill || 0) * 100)}%</b>
-      <br><br>
-      <b>${p2.name}</b> (${Math.round(p2.elo)})<br>
-      Skill: <b>${Math.round((p2.skill || 0) * 100)}%</b>
-    </div>
-  `;
-}
+      spectDiv.style.display = "none";
     } else {
-      oppDiv.style.display="none";spectDiv.style.display="none";
+      oppDiv.style.display = "none";
+      spectDiv.style.display = "block";
+
+      const p1 = renderMatch.players[0];
+      const p2 = renderMatch.players[1];
+
+      spectText.innerHTML = `
+        <div style="text-align:center">
+          <b>${p1.name}</b> (${Math.round(p1.elo)})<br>
+          Skill: <b>${Math.round((p1.skill || 0) * 100)}%</b>
+          <br><br>
+          <b>${p2.name}</b> (${Math.round(p2.elo)})<br>
+          Skill: <b>${Math.round((p2.skill || 0) * 100)}%</b>
+        </div>
+      `;
     }
+
     return;
   }
 
-  // ── Münzjagd ──
-  if(mode==="coin"){
-    for(const c of coins){
-      const age=(Date.now()-c.born)/1000;
-      ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-      ctx.fillStyle=c.value>1?"#ffd700":"#ffcc44";
-      ctx.shadowColor="#ffaa00";ctx.shadowBlur=c.value>1?18:8;
-      ctx.fill();ctx.shadowBlur=0;
-      if(c.value>1){
-        ctx.fillStyle="#a06000";ctx.font="bold 11px Arial";ctx.textAlign="center";
-        ctx.fillText("x3",c.x,c.y+4);
+  // ===================== COIN MODE =====================
+  if (mode === "coin") {
+    for (const c of coins) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+
+      ctx.fillStyle = c.value > 1 ? "#ffd700" : "#ffcc44";
+      ctx.shadowColor = "#ffaa00";
+      ctx.shadowBlur = c.value > 1 ? 18 : 8;
+
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (c.value > 1) {
+        ctx.fillStyle = "#a06000";
+        ctx.font = "bold 11px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("x3", c.x, c.y + 4);
       }
     }
   }
 
-  // Bälle
-  for(const b of balls){
-    ctx.beginPath();ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);ctx.fillStyle="#ff4444";ctx.fill();
+  // ===================== BALLS =====================
+  for (const b of balls) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fillStyle = "#ff4444";
+    ctx.fill();
   }
 
-  // Spieler
-  for(const p of players){
-    if(!p.alive)continue;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fillStyle=p.color;ctx.fill();
-    // Mirror-Duel: Spiegel-Bot hat gestrichelte Outline
-    if(mode==="mirror"&&p.name==="Spiegel"){
-      ctx.beginPath();ctx.arc(p.x,p.y,p.radius+4,0,Math.PI*2);
-      ctx.strokeStyle="rgba(255,136,170,0.6)";ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.stroke();ctx.setLineDash([]);
+  // ===================== PLAYERS =====================
+  for (const p of players) {
+    if (!p.alive) continue;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+
+    // mirror duel outline
+    if (mode === "mirror" && p.name === "Spiegel") {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,136,170,0.6)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
-    ctx.fillStyle="white";ctx.font="14px Arial";ctx.textAlign="center";
-    ctx.fillText(p.name,p.x,p.y-p.radius-10);
+
+    ctx.fillStyle = "white";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(p.name, p.x, p.y - p.radius - 10);
   }
 }
 
