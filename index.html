@@ -87,6 +87,7 @@ border-radius:10px;
     <button onclick="setTVMode('best')">BEST TV</button>
     <button onclick="setTVMode('random')">RANDOM TV</button>
     <button onclick="setTVMode('target')">TARGET TV</button>
+    <button onclick="resumePlay()">PLAY RESUME</button>
 </div>
 
 </div> <!-- CLOSE eloTable -->
@@ -1248,6 +1249,11 @@ function pickBestMatch(){
         spectatorMode = true;
         spectatingLocked = true;
     }
+}
+function resumePlay(){
+    spectatingLocked = false;
+    waitingQueue.push(participants.find(p => p.name === "DU"));
+    seededMatchmaking();
 }
 // SINGLE CONTROL
 function moveSingle(x,y){
