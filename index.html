@@ -473,12 +473,36 @@ function startTournament(){
   running=true; matches=[]; participants=[]; waitingQueue=[]; humanRemovedFromQueue=false;
   recentOpponents.clear();
   participants.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","DU"));
-  for(let i=0;i<aiBotCount;i++){
-    participants.push(createPlayer(
-      Math.random()*canvas.width,Math.random()*canvas.height,
-      `hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1)
-    ));
-  }
+  let skillList=[];
+
+for(let i=0;i<aiBotCount;i++){
+    skillList.push((i+1)/aiBotCount);
+}
+
+// Zufällig mischen
+for(let i=skillList.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [skillList[i],skillList[j]]=[skillList[j],skillList[i]];
+}
+
+for(let i=0;i<aiBotCount;i++){
+    const bot=createPlayer(
+        Math.random()*canvas.width,
+        Math.random()*canvas.height,
+        `hsl(${i*360/aiBotCount},100%,50%)`,
+        "Bot "+(i+1)
+    );
+
+    bot.skill=skillList[i];
+
+    bot.speed=1.5+bot.skill*8;
+    bot.reaction=2+bot.skill*6;
+    bot.awareness=60+bot.skill*100;
+    bot.dodgePower=0.5+bot.skill*3.5;
+    bot.randomness=(1-bot.skill)*4;
+
+    participants.push(bot);
+}
   waitingQueue=[...participants];
   seededMatchmaking();
 }
