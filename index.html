@@ -186,6 +186,8 @@ const HUMAN_NAME = "DU";
 let rematchCooldown = new Map(); // name -> timestamp
 const REMATCH_BLOCK = 15000; // 15 Sekunden Sperre
 let spectateMatchId = null;
+let keys = {}; // FIX: Missing keys object initialization
+
 // ---------------- RECORD ----------------
 let record = localStorage.getItem("fingerDodgeRecord") || 0;
 document.getElementById("record").textContent = record;
@@ -329,7 +331,7 @@ while(!valid){
 
     const allPlayers =
         mode === "tournament"
-        ? matches[activeMatchIndex]?.alive || []
+        ? matches[activeMatchIndex]?.players || [] // FIX: Changed from .alive to .players
         : players;
 
     for(const p of allPlayers){
@@ -522,7 +524,7 @@ function resetAIState(p){
     p.targetX = null;
     p.targetY = null;
 
-    // wichtig gegen “komisches Verhalten”
+    // wichtig gegen "komisches Verhalten"
     p.deathTime = 0;
     p.alive = true;
 
@@ -1521,6 +1523,16 @@ function moveSingle(x,y){
         players[0].y = y;
     }
 }
+
+// FIX: Add keyboard event listeners
+document.addEventListener("keydown", (e) => {
+    keys[e.key.toLowerCase()] = true;
+});
+
+document.addEventListener("keyup", (e) => {
+    keys[e.key.toLowerCase()] = false;
+});
+
 canvas.addEventListener("mousemove",(e)=>{
     if(running && (mode==="single" || mode==="tournament")){
         moveSingle(e.clientX,e.clientY);
