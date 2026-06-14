@@ -706,8 +706,15 @@ function tryMatchmaking(){
 
     if(waitingQueue.length < 2) return;
 
-    // Nach ELO sortieren
-    waitingQueue.sort((a,b)=>b.elo-a.elo);
+    const now = Date.now();
+
+    // 1) Sortierung wie Lichess: zuerst Score, dann Elo
+    waitingQueue.sort((a,b)=>{
+        if((b.arenaScore ?? 0) !== (a.arenaScore ?? 0)){
+            return (b.arenaScore ?? 0) - (a.arenaScore ?? 0);
+        }
+        return b.elo - a.elo;
+    });
 
     const used = new Set();
     const newQueue = [];
@@ -715,110 +722,73 @@ function tryMatchmaking(){
     for(let i=0;i<waitingQueue.length;i++){
 
         const p1 = waitingQueue[i];
-
         if(used.has(p1.name)) continue;
+
+        const recent = recentOpponents.get(p1.name) || [];
 
         let opponent = null;
 
-        const recent =
-            recentOpponents.get(p1.name) || [];
+        // 2) Lichess-style pairing: gleiche Score-Gruppe bevorzugen
+        const p1Score = p1.arenaScore ?? 0;
 
-        // Erst in Ranking-Nähe suchen
-        for(let offset=1; offset<=10; offset++){
+        const candidates = waitingQueue.filter(p =>
+            !used.has(p.name) &&
+            p.name !== p1.name &&
+            (p.arenaScore ?? 0) === p1Score
+        );
 
-            const idx = i + offset;
+        // 3) fallback: nahe Score-Gruppen
+        const fallback = waitingQueue.filter(p =>
+            !used.has(p.name) &&
+            p.name !== p1.name &&
+            Math.abs((p.arenaScore ?? 0) - p1Score) <= 1
+        );
 
-            if(idx >= waitingQueue.length) break;
+        const pool =
+            candidates.length >= 1 ? candidates :
+            fallback.length >= 1 ? fallback :
+            waitingQueue;
 
-            const p2 = waitingQueue[idx];
+        for(const p2 of pool){
 
             if(used.has(p2.name)) continue;
 
-            // letzte Gegner vermeiden
-            if(recent.includes(p2.name)){
-                continue;
-            }
+            // ❌ Rematch block (Lichess-like)
+            if(recent.includes(p2.name)) continue;
+
+            const last = rematchCooldown.get(p2.name) || 0;
+            if(last + 15000 > now) continue;
 
             opponent = p2;
             break;
         }
 
-        // Falls niemand gefunden wurde:
-        // Suchfenster erweitern
-        if(!opponent){
-
-            for(let offset=11; offset<=30; offset++){
-
-                const idx = i + offset;
-
-                if(idx >= waitingQueue.length) break;
-
-                const p2 = waitingQueue[idx];
-
-                if(used.has(p2.name)) continue;
-
-                if(recent.includes(p2.name)){
-                    continue;
-                }
-
-                opponent = p2;
-                break;
-            }
-
-        }
-
-        // Notfall: irgendeinen freien Gegner
-        if(!opponent){
-
-            for(let j=i+1;j<waitingQueue.length;j++){
-
-                const p2 = waitingQueue[j];
-
-                if(used.has(p2.name)) continue;
-
-                opponent = p2;
-                break;
-            }
-
-        }
-
         if(opponent){
 
-            const match =
-                createMatch(p1, opponent);
-
+            const match = createMatch(p1, opponent);
             setupMatch(match);
 
             matches.push(match);
 
-            playerMatchMap.set(
-                p1.name,
-                match
-            );
-
-            playerMatchMap.set(
-                opponent.name,
-                match
-            );
+            playerMatchMap.set(p1.name, match);
+            playerMatchMap.set(opponent.name, match);
 
             used.add(p1.name);
             used.add(opponent.name);
 
-            rememberMatch(
-                p1,
-                opponent
-            );
+            rememberMatch(p1, opponent);
 
-        }else{
-
+        } else {
             newQueue.push(p1);
-
         }
-
     }
 
     waitingQueue = newQueue;
 
+    // wenn noch Spieler übrig → nochmal versuchen
+    if(waitingQueue.length >= 2){
+        setTimeout(tryMatchmaking, 500);
+    }
 }
 function setupMatch(match){
 for(const p of match.players){
@@ -1088,18 +1058,18 @@ return;
 function finishMatch(match, winner, loser){
 
     clearInterval(match.spawnTimer);
-
     match.running = false;
+
+    const now = Date.now();
+
+    // 🔥 Rematch protection (Lichess style)
+    rematchCooldown.set(winner.name, now);
+    rematchCooldown.set(loser.name, now);
 
     const K = 24;
 
     const expected =
-        1 / (
-            1 + Math.pow(
-                10,
-                (loser.elo - winner.elo) / 400
-            )
-        );
+        1 / (1 + Math.pow(10, (loser.elo - winner.elo) / 400));
 
     const change = K * (1 - expected);
 
@@ -1112,27 +1082,27 @@ function finishMatch(match, winner, loser){
     winner.alive = true;
     loser.alive = true;
 
-    matches = matches.filter(
-        m => m.id !== match.id
-    );
+    // 🔥 Arena points (Lichess-like activity scoring)
+    winner.arenaScore = (winner.arenaScore || 0) + 1;
+
+    matches = matches.filter(m => m.id !== match.id);
 
     playerMatchMap.delete(winner.name);
     playerMatchMap.delete(loser.name);
 
-    const nextMatchDelay =
-        3000 + Math.random() * 2000;
+    const nextMatchDelay = 2500 + Math.random() * 1500;
 
- setTimeout(() => {
+    setTimeout(() => {
 
-    resetAI(winner);
-    resetAI(loser);
+        resetAI(winner);
+        resetAI(loser);
 
-    waitingQueue.push(winner);
-    waitingQueue.push(loser);
+        waitingQueue.push(winner);
+        waitingQueue.push(loser);
 
-    tryMatchmaking();
+        tryMatchmaking();
 
-}, nextMatchDelay);
+    }, nextMatchDelay);
 }
 function finishArena(){
 
