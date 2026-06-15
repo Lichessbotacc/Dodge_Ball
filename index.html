@@ -645,26 +645,20 @@ function startOnlineGame(){
       }
     });
    dbOn("onlineMatches/"+onlineMatchId, (data)=>{
-     const opp = players.find(p => p.name !== onlineAccount.name);
-if(!opp) return;
   if(!data) return;
+
+  const opp = players.find(p => p.name !== onlineAccount.name);
+  if(!opp) return;
 
   const oppRole = onlineRole === "p1" ? "p2" : "p1";
   const d = data[oppRole];
 
-  const opp = players.find(p => p.name !== onlineAccount.name);
-
-  if(opp && d){
+  if(d){
     opp.x = d.x;
     opp.y = d.y;
     opp.alive = d.alive;
-
-    // 🔥 WICHTIG: bessere Sync Stabilität
-    opp.lastVX = d.lastVX || 0;
-    opp.lastVY = d.lastVY || 0;
   }
 });
-  }
 
   // We only control the human player; the opponent is controlled locally as AI
   // (in a real P2P game you'd sync positions – here we simulate opponent as AI)
