@@ -547,44 +547,47 @@ async function startSearchingOnline(){
 }
 
 async function tryMatchmake(){
-  if(onlineMatchId)return; // already matched
-  const queue=await dbGet("queue");
-  if(!queue)return;
-  const others=Object.values(queue).filter(p=>p.name!==onlineAccount.name);
-  if(!others.length)return;
+  if(onlineMatchId) return;
 
-  // Pick closest ELO
-  others.sort((a,b)=>Math.abs(a.elo-onlineAccount.elo)-Math.abs(b.elo-onlineAccount.elo));
-  const opp=others[0];
+  const queue = await dbGet("queue");
+  if(!queue) return;
 
-  // Try to claim the match (first writer wins)
-  const matchId=[onlineAccount.name,opp.name].sort().join("__");
+  const others = Object.values(queue)
+    .filter(p => p.name !== onlineAccount.name);
+
+  if(!others.length) return;
+
+  others.sort((a,b)=>
+    Math.abs(a.elo-onlineAccount.elo) -
+    Math.abs(b.elo-onlineAccount.elo)
+  );
+
+  const opp = others[0];
+  const matchId = [onlineAccount.name, opp.name].sort().join("__");
+
   const existing = await dbGet("onlineMatches/"+matchId);
 
-if(existing && existing.status !== "done"){
-  if(existing.p1 === onlineAccount.name || existing.p2 === onlineAccount.name){
+  if(existing && existing.status !== "done"){
     joinMatch(matchId, opp);
     return;
   }
-}
-    // Match already set up by the other player – join it
-    joinMatch(matchId,opp);
-    return;
-  }
 
-  // Create match
-  const matchData={
-    p1:onlineAccount.name,p2:opp.name,
-    p1elo:onlineAccount.elo,p2elo:opp.elo,
-    status:"waiting",
-    winner:null,
-    createdAt:Date.now()
+  const matchData = {
+    p1: onlineAccount.name,
+    p2: opp.name,
+    p1elo: onlineAccount.elo,
+    p2elo: opp.elo,
+    status: "waiting",
+    winner: null,
+    createdAt: Date.now()
   };
-  await dbSet("onlineMatches/"+matchId,matchData);
-  // Remove both from queue
+
+  await dbSet("onlineMatches/"+matchId, matchData);
+
   await dbRemove("queue/"+onlineAccount.name);
   await dbRemove("queue/"+opp.name);
-  joinMatch(matchId,opp);
+
+  joinMatch(matchId, opp);
 }
 
 function joinMatch(matchId,opp){
