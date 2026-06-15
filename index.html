@@ -24,17 +24,16 @@
     measurementId: "G-J88EX0YX4D"
   };
 
- 
-// 3. Firebase sauber initialisieren
-let app, db, analytics;
-try {
-  app = initializeApp(firebaseConfig);
-  db  = getDatabase(app);
-  analytics = getAnalytics(app);
-  console.log("Firebase erfolgreich verbunden!");
-} catch(e) {
-  console.warn("Firebase init failed – online mode disabled.", e);
-} 
+  // 3. Firebase sauber initialisieren
+  let app, db, analytics;
+  try {
+    app = initializeApp(firebaseConfig);
+    db  = getDatabase(app);
+    analytics = getAnalytics(app);
+    console.log("Firebase erfolgreich verbunden!");
+  } catch(e) {
+    console.warn("Firebase init failed – online mode disabled.", e);
+  }
 
   // 4. Datenbank-Funktionen für den Rest des Spiels global verfügbar machen
   window._firebaseDB  = db;
@@ -52,8 +51,28 @@ try {
 </script>
 
 
+let app, db;
+try {
+  app = initializeApp(firebaseConfig);
+  db  = getDatabase(app);
+} catch(e) {
+  console.warn("Firebase init failed – online mode disabled.", e);
+}
 
-
+// expose db to global scope
+window._firebaseDB  = db;
+window._firebaseRef = ref;
+window._firebaseSet = set;
+window._firebaseGet = get;
+window._firebaseOnValue = onValue;
+window._firebasePush = push;
+window._firebaseRemove = remove;
+window._firebaseUpdate = update;
+window._firebaseServerTimestamp = serverTimestamp;
+window._firebaseOnDisconnect = onDisconnect;
+window._firebaseReady = true;
+window.dispatchEvent(new Event("firebaseReady"));
+</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{overflow-y:auto;overflow-x:hidden;background:#111;font-family:Arial,sans-serif;}
@@ -293,17 +312,8 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
 // ════════════════════════════════════════════════════════════════════════════
 const canvas=document.getElementById("game");
 const ctx=canvas.getContext("2d");
-function resize(){
-  const dpr = window.devicePixelRatio || 1;
-
-  canvas.style.width = window.innerWidth + "px";
-  canvas.style.height = window.innerHeight + "px";
-
-  canvas.width = window.innerWidth * dpr;
-  canvas.height = window.innerHeight * dpr;
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
+function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+resize();window.addEventListener("resize",resize);
 
 // ════════════════════════════════════════════════════════════════════════════
 //  FIREBASE HELPERS (lazy – waits for module to load)
@@ -317,7 +327,21 @@ async function dbSet(path,val){return window._firebaseSet(dbRef(path),val);}
 async function dbUpdate(path,val){return window._firebaseUpdate(dbRef(path),val);}
 function dbOn(path,cb){window._firebaseOnValue(dbRef(path),snap=>cb(snap.val()));}
 async function dbRemove(path){return window._firebaseRemove(dbRef(path));}
+function syncOpponent(data){
+  if(!data || !onlineMatchId) return;
 
+  const opp = players.find(p => p.name !== onlineAccount.name);
+  if(!opp) return;
+
+  const oppRole = onlineRole === "p1" ? "p2" : "p1";
+  const d = data[oppRole];
+
+  if(d){
+    opp.x = d.x;
+    opp.y = d.y;
+    opp.alive = d.alive;
+  }
+}
 // ════════════════════════════════════════════════════════════════════════════
 //  ACCOUNT (stored in localStorage + Firebase)
 // ════════════════════════════════════════════════════════════════════════════
@@ -543,47 +567,38 @@ async function startSearchingOnline(){
 }
 
 async function tryMatchmake(){
-  if(onlineMatchId) return;
+  if(onlineMatchId)return; // already matched
+  const queue=await dbGet("queue");
+  if(!queue)return;
+  const others=Object.values(queue).filter(p=>p.name!==onlineAccount.name);
+  if(!others.length)return;
 
-  const queue = await dbGet("queue");
-  if(!queue) return;
+  // Pick closest ELO
+  others.sort((a,b)=>Math.abs(a.elo-onlineAccount.elo)-Math.abs(b.elo-onlineAccount.elo));
+  const opp=others[0];
 
-  const others = Object.values(queue)
-    .filter(p => p.name !== onlineAccount.name);
-
-  if(!others.length) return;
-
-  others.sort((a,b)=>
-    Math.abs(a.elo-onlineAccount.elo) -
-    Math.abs(b.elo-onlineAccount.elo)
-  );
-
-  const opp = others[0];
-  const matchId = [onlineAccount.name, opp.name].sort().join("__");
-
-  const existing = await dbGet("onlineMatches/"+matchId);
-
-  if(existing && existing.status !== "done"){
-    joinMatch(matchId, opp);
+  // Try to claim the match (first writer wins)
+  const matchId=[onlineAccount.name,opp.name].sort().join("__");
+  const existing=await dbGet("onlineMatches/"+matchId);
+  if(existing&&existing.status!=="done"){
+    // Match already set up by the other player – join it
+    joinMatch(matchId,opp);
     return;
   }
 
-  const matchData = {
-    p1: onlineAccount.name,
-    p2: opp.name,
-    p1elo: onlineAccount.elo,
-    p2elo: opp.elo,
-    status: "waiting",
-    winner: null,
-    createdAt: Date.now()
+  // Create match
+  const matchData={
+    p1:onlineAccount.name,p2:opp.name,
+    p1elo:onlineAccount.elo,p2elo:opp.elo,
+    status:"waiting",
+    winner:null,
+    createdAt:Date.now()
   };
-
-  await dbSet("onlineMatches/"+matchId, matchData);
-
+  await dbSet("onlineMatches/"+matchId,matchData);
+  // Remove both from queue
   await dbRemove("queue/"+onlineAccount.name);
   await dbRemove("queue/"+opp.name);
-
-  joinMatch(matchId, opp);
+  joinMatch(matchId,opp);
 }
 
 function joinMatch(matchId,opp){
@@ -653,22 +668,22 @@ function startOnlineGame(){
         handleOnlineResult(data.winner,data.eloChange||10);
       }
     });
-   dbOn("onlineMatches/"+onlineMatchId, (data)=>{
+    dbOn("onlineMatches/"+onlineMatchId, (data)=>{
   if(!data) return;
-
-  const opp = players.find(p => p.name !== onlineAccount.name);
-  if(!opp) return;
 
   const oppRole = onlineRole === "p1" ? "p2" : "p1";
   const d = data[oppRole];
 
-  if(d){
+  const opp = players.find(p => p.name !== onlineAccount.name);
+
+  if(opp && d){
     opp.x = d.x;
     opp.y = d.y;
     opp.alive = d.alive;
   }
 });
   }
+
   // We only control the human player; the opponent is controlled locally as AI
   // (in a real P2P game you'd sync positions – here we simulate opponent as AI)
 }
