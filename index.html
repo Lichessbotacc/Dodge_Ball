@@ -293,8 +293,17 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
 // ════════════════════════════════════════════════════════════════════════════
 const canvas=document.getElementById("game");
 const ctx=canvas.getContext("2d");
-function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
-resize();window.addEventListener("resize",resize);
+function resize(){
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 //  FIREBASE HELPERS (lazy – waits for module to load)
