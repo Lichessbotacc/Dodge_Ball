@@ -24,16 +24,17 @@
     measurementId: "G-J88EX0YX4D"
   };
 
-  // 3. Firebase sauber initialisieren
-  let app, db, analytics;
-  try {
-    app = initializeApp(firebaseConfig);
-    db  = getDatabase(app);
-    analytics = getAnalytics(app);
-    console.log("Firebase erfolgreich verbunden!");
-  } catch(e) {
-    console.warn("Firebase init failed – online mode disabled.", e);
-  }
+ 
+// 3. Firebase sauber initialisieren
+let app, db, analytics;
+try {
+  app = initializeApp(firebaseConfig);
+  db  = getDatabase(app);
+  analytics = getAnalytics(app);
+  console.log("Firebase erfolgreich verbunden!");
+} catch(e) {
+  console.warn("Firebase init failed – online mode disabled.", e);
+} 
 
   // 4. Datenbank-Funktionen für den Rest des Spiels global verfügbar machen
   window._firebaseDB  = db;
@@ -51,13 +52,6 @@
 </script>
 
 
-let app, db;
-try {
-  app = initializeApp(firebaseConfig);
-  db  = getDatabase(app);
-} catch(e) {
-  console.warn("Firebase init failed – online mode disabled.", e);
-}
 
 // expose db to global scope
 window._firebaseDB  = db;
