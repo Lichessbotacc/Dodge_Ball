@@ -1287,15 +1287,43 @@ function draw() {
 
 // ═══ CONTROLS ════════════════════════════════════════════════════════════════
 function moveSingle(x,y){
-  if(spectateModeActive||humanRemovedFromQueue)return;
+
+  if(spectateModeActive || humanRemovedFromQueue) return;
+
   if(mode==="tournament"){
+
     const match=playerMatchMap.get("DU");
-    if(!match||!match.running)return;
+    if(!match || !match.running) return;
+
     const me=match.players.find(p=>p.name==="DU");
-    if(me){me.x=x;me.y=y;}
+
+    if(me){
+      me.x=Math.max(
+        me.radius,
+        Math.min(canvas.width-me.radius,x)
+      );
+
+      me.y=Math.max(
+        me.radius,
+        Math.min(canvas.height-me.radius,y)
+      );
+    }
+
     return;
   }
-  if(players[0]){players[0].x=x;players[0].y=y;}
+
+  if(players[0]){
+
+    players[0].x=Math.max(
+      players[0].radius,
+      Math.min(canvas.width-players[0].radius,x)
+    );
+
+    players[0].y=Math.max(
+      players[0].radius,
+      Math.min(canvas.height-players[0].radius,y)
+    );
+  }
 }
 
 document.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;});
