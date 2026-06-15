@@ -321,21 +321,7 @@ async function dbSet(path,val){return window._firebaseSet(dbRef(path),val);}
 async function dbUpdate(path,val){return window._firebaseUpdate(dbRef(path),val);}
 function dbOn(path,cb){window._firebaseOnValue(dbRef(path),snap=>cb(snap.val()));}
 async function dbRemove(path){return window._firebaseRemove(dbRef(path));}
-function syncOpponent(data){
-  if(!data || !onlineMatchId) return;
 
-  const opp = players.find(p => p.name !== onlineAccount.name);
-  if(!opp) return;
-
-  const oppRole = onlineRole === "p1" ? "p2" : "p1";
-  const d = data[oppRole];
-
-  if(d){
-    opp.x = d.x;
-    opp.y = d.y;
-    opp.alive = d.alive;
-  }
-}
 // ════════════════════════════════════════════════════════════════════════════
 //  ACCOUNT (stored in localStorage + Firebase)
 // ════════════════════════════════════════════════════════════════════════════
@@ -573,8 +559,14 @@ async function tryMatchmake(){
 
   // Try to claim the match (first writer wins)
   const matchId=[onlineAccount.name,opp.name].sort().join("__");
-  const existing=await dbGet("onlineMatches/"+matchId);
-  if(existing&&existing.status!=="done"){
+  const existing = await dbGet("onlineMatches/"+matchId);
+
+if(existing && existing.status !== "done"){
+  if(existing.p1 === onlineAccount.name || existing.p2 === onlineAccount.name){
+    joinMatch(matchId, opp);
+    return;
+  }
+}
     // Match already set up by the other player – join it
     joinMatch(matchId,opp);
     return;
@@ -662,7 +654,9 @@ function startOnlineGame(){
         handleOnlineResult(data.winner,data.eloChange||10);
       }
     });
-    dbOn("onlineMatches/"+onlineMatchId, (data)=>{
+   dbOn("onlineMatches/"+onlineMatchId, (data)=>{
+     const opp = players.find(p => p.name !== onlineAccount.name);
+if(!opp) return;
   if(!data) return;
 
   const oppRole = onlineRole === "p1" ? "p2" : "p1";
@@ -674,6 +668,10 @@ function startOnlineGame(){
     opp.x = d.x;
     opp.y = d.y;
     opp.alive = d.alive;
+
+    // 🔥 WICHTIG: bessere Sync Stabilität
+    opp.lastVX = d.lastVX || 0;
+    opp.lastVY = d.lastVY || 0;
   }
 });
   }
