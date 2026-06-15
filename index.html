@@ -370,14 +370,7 @@ async function pushAccountToFirebase(){
 //  SCREEN ROUTER
 // ════════════════════════════════════════════════════════════════════════════
 const SCREENS=["menu","settings","accountScreen","leaderboardScreen","onlineWait","vsScreen","winnerOverlay","gameOver"];
-function showScreen(id){
-  SCREENS.forEach(s=>{
-    const el=document.getElementById(s);
-    if(el)el.style.display=(s===id)?"flex":"none";
-  });
-  const homeBtn=document.getElementById("homeBtn");
-  homeBtn.style.display=(id==="none")?"block":"none";
-}
+
 function hideAllScreens(){
   SCREENS.forEach(s=>{
     const el=document.getElementById(s);
@@ -675,6 +668,20 @@ function startOnlineGame(){
         handleOnlineResult(data.winner,data.eloChange||10);
       }
     });
+    dbOn("onlineMatches/"+onlineMatchId, (data)=>{
+  if(!data) return;
+
+  const oppRole = onlineRole === "p1" ? "p2" : "p1";
+  const d = data[oppRole];
+
+  const opp = players.find(p => p.name !== onlineAccount.name);
+
+  if(opp && d){
+    opp.x = d.x;
+    opp.y = d.y;
+    opp.alive = d.alive;
+  }
+});
   }
 
   // We only control the human player; the opponent is controlled locally as AI
@@ -1500,11 +1507,7 @@ function moveSingle(x,y){
     if(me){me.x=Math.max(me.radius,Math.min(canvas.width-me.radius,x));me.y=Math.max(me.radius,Math.min(canvas.height-me.radius,y));}
     return;
   }
-  if(mode==="online"){
-    const me=players.find(p=>p.name===onlineAccount?.name);
-    if(me){me.x=Math.max(me.radius,Math.min(canvas.width-me.radius,x));me.y=Math.max(me.radius,Math.min(canvas.height-me.radius,y));}
-    return;
-  }
+  
   if(players[0]){
     players[0].x=Math.max(players[0].radius,Math.min(canvas.width-players[0].radius,x));
     players[0].y=Math.max(players[0].radius,Math.min(canvas.height-players[0].radius,y));
