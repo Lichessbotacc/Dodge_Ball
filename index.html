@@ -209,22 +209,45 @@ function showEloAnimation(change){
 // ═══ VERBESSERTE AI ══════════════════════════════════════════════════════════
 // Physik-basiertes Ausweichen: berechnet ob ein Ball auf Kollisionskurs ist
 function updateAI(p, activeBalls = balls){
+
+    const skill =
+        ((p.skill?.aim ?? 0.5) +
+         (p.skill?.reaction ?? 0.5) +
+         (p.skill?.movement ?? 0.5) +
+         (p.skill?.awareness ?? 0.5) +
+         (p.skill?.aggression ?? 0.5)) / 5;
+
+    const inaccuracy = 1 - skill;
+
     let danger = false;
 
-    // Only detect danger from balls
     for(const b of activeBalls){
+
         const dx = p.x - b.x;
         const dy = p.y - b.y;
+
         const dist = Math.sqrt(dx*dx + dy*dy);
 
         if(dist < p.awareness){
+
             danger = true;
             break;
         }
     }
 
+    // Schlechte Bots reagieren nicht immer
+    if(Math.random() < inaccuracy * 0.04){
+        return;
+    }
+
     if(!danger){
-        if(p.targetX === null || p.targetY === null || Math.random() < 0.02){
+
+        if(
+            p.targetX === null ||
+            p.targetY === null ||
+            Math.random() < (0.015 + inaccuracy * 0.05)
+        ){
+
             p.targetX = Math.random() * canvas.width;
             p.targetY = Math.random() * canvas.height;
         }
@@ -232,6 +255,11 @@ function updateAI(p, activeBalls = balls){
 
     let moveX = p.targetX - p.x;
     let moveY = p.targetY - p.y;
+
+    // Zielungenauigkeit
+    moveX += (Math.random() - 0.5) * 120 * inaccuracy;
+    moveY += (Math.random() - 0.5) * 120 * inaccuracy;
+
     let moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
 
     moveX /= moveDist;
@@ -245,49 +273,99 @@ function updateAI(p, activeBalls = balls){
     if(p.x < wallMargin){
         avoidX += (wallMargin - p.x) * 0.03;
     }
+
     if(p.x > canvas.width - wallMargin){
         avoidX -= (p.x - (canvas.width - wallMargin)) * 0.03;
     }
+
     if(p.y < wallMargin){
         avoidY += (wallMargin - p.y) * 0.03;
     }
+
     if(p.y > canvas.height - wallMargin){
         avoidY -= (p.y - (canvas.height - wallMargin)) * 0.03;
     }
 
-    // ONLY BALL AVOIDANCE
     for(const b of activeBalls){
+
         const dx = p.x - b.x;
         const dy = p.y - b.y;
+
         const dist = Math.sqrt(dx*dx + dy*dy) || 1;
 
-        const safeRadius = p.awareness;
+        if(dist < p.awareness){
 
-        if(dist < safeRadius){
-            const strength = Math.max(0, (safeRadius - dist) / safeRadius);
-            const force = strength * p.dodgePower * 2;
+            const strength =
+                Math.max(0, (p.awareness - dist) / p.awareness);
+
+            const force =
+                strength *
+                p.dodgePower *
+                (0.7 + skill * 0.6);
 
             avoidX += (dx / dist) * force;
             avoidY += (dy / dist) * force;
         }
     }
 
-    let vx = moveX * 4 + avoidX * 10;
-    let vy = moveY * 4 + avoidY * 10;
+    // Trägheit statt perfekte Richtungswechsel
+    p.aiVX ??= 0;
+    p.aiVY ??= 0;
 
-    vx += (Math.random() - 0.5) * p.randomness;
-    vy += (Math.random() - 0.5) * p.randomness;
+    const steering =
+        0.08 + skill * 0.18;
 
-    let len = Math.sqrt(vx*vx + vy*vy) || 1;
+    p.aiVX +=
+        (moveX * 4 + avoidX * 10 - p.aiVX)
+        * steering;
 
-    p.x += (vx / len) * p.speed;
-    p.y += (vy / len) * p.speed;
+    p.aiVY +=
+        (moveY * 4 + avoidY * 10 - p.aiVY)
+        * steering;
 
-    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
-    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+    // Menschliche Fehler
+    p.aiVX +=
+        (Math.random() - 0.5)
+        * p.randomness
+        * 0.6;
 
-    p.lastVX = vx;
-    p.lastVY = vy;
+    p.aiVY +=
+        (Math.random() - 0.5)
+        * p.randomness
+        * 0.6;
+
+    const len =
+        Math.sqrt(
+            p.aiVX*p.aiVX +
+            p.aiVY*p.aiVY
+        ) || 1;
+
+    p.x += (p.aiVX / len) * p.speed;
+    p.y += (p.aiVY / len) * p.speed;
+
+    // Kleine natürliche Unruhe
+    p.x +=
+        Math.sin(Date.now()*0.002 + p.y*0.01)
+        * inaccuracy
+        * 0.8;
+
+    p.y +=
+        Math.cos(Date.now()*0.002 + p.x*0.01)
+        * inaccuracy
+        * 0.8;
+
+    p.x = Math.max(
+        p.radius,
+        Math.min(canvas.width - p.radius, p.x)
+    );
+
+    p.y = Math.max(
+        p.radius,
+        Math.min(canvas.height - p.radius, p.y)
+    );
+
+    p.lastVX = p.aiVX;
+    p.lastVY = p.aiVY;
 }
 
 // ═══ PLAYER FACTORY ══════════════════════════════════════════════════════════
