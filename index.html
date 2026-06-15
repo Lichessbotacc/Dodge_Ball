@@ -2,88 +2,56 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>DarkOnBalls</title>
-<!-- Firebase -->
 <script type="module">
-  // 1. Lade alle benötigten Firebase-Funktionen aus derselben Version (10.12.0)
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
-    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getAnalytics }     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
 
-  // 2. Deine korrekte Konfiguration (mit der europäischen Database-URL!)
-  const firebaseConfig = {
-    apiKey: "AIzaSyDKwJDGSxRDBf9ihi1-T70pC6UzY6kLYb4",
-    authDomain: "darkonballs.firebaseapp.com",
-    databaseURL: "https://darkonballs-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "darkonballs",
-    storageBucket: "darkonballs.firebasestorage.app",
-    messagingSenderId: "423459139682",
-    appId: "1:423459139682:web:62847c384d1f967a78e13b",
-    measurementId: "G-J88EX0YX4D"
-  };
+const firebaseConfig = {
+  apiKey:            "AIzaSyDKwJDGSxRDBf9ihi1-T70pC6UzY6kLYb4",
+  authDomain:        "darkonballs.firebaseapp.com",
+  databaseURL:       "https://darkonballs-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "darkonballs",
+  storageBucket:     "darkonballs.firebasestorage.app",
+  messagingSenderId: "423459139682",
+  appId:             "1:423459139682:web:62847c384d1f967a78e13b",
+  measurementId:     "G-J88EX0YX4D"
+};
 
-  // 3. Firebase sauber initialisieren
-  let app, db, analytics;
-  try {
-    app = initializeApp(firebaseConfig);
-    db  = getDatabase(app);
-    analytics = getAnalytics(app);
-    console.log("Firebase erfolgreich verbunden!");
-  } catch(e) {
-    console.warn("Firebase init failed – online mode disabled.", e);
-  }
-
-  // 4. Datenbank-Funktionen für den Rest des Spiels global verfügbar machen
-  window._firebaseDB  = db;
-  window._firebaseRef = ref;
-  window._firebaseSet = set;
-  window._firebaseGet = get;
-  window._firebaseOnValue = onValue;
-  window._firebasePush = push;
-  window._firebaseRemove = remove;
-  window._firebaseUpdate = update;
-  window._firebaseServerTimestamp = serverTimestamp;
-  window._firebaseOnDisconnect = onDisconnect;
-  window._firebaseReady = true;
-  window.dispatchEvent(new Event("firebaseReady"));
-</script>
-
-
-let app, db;
 try {
-  app = initializeApp(firebaseConfig);
-  db  = getDatabase(app);
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+  try { getAnalytics(app); } catch(e) {}
+  window._firebaseDB              = db;
+  window._firebaseRef             = ref;
+  window._firebaseSet             = set;
+  window._firebaseGet             = get;
+  window._firebaseOnValue         = onValue;
+  window._firebasePush            = push;
+  window._firebaseRemove          = remove;
+  window._firebaseUpdate          = update;
+  window._firebaseServerTimestamp = serverTimestamp;
+  window._firebaseOnDisconnect    = onDisconnect;
+  window._firebaseReady           = true;
+  window.dispatchEvent(new Event("firebaseReady"));
+  console.log("Firebase connected!");
 } catch(e) {
-  console.warn("Firebase init failed – online mode disabled.", e);
+  console.warn("Firebase init failed", e);
 }
-
-// expose db to global scope
-window._firebaseDB  = db;
-window._firebaseRef = ref;
-window._firebaseSet = set;
-window._firebaseGet = get;
-window._firebaseOnValue = onValue;
-window._firebasePush = push;
-window._firebaseRemove = remove;
-window._firebaseUpdate = update;
-window._firebaseServerTimestamp = serverTimestamp;
-window._firebaseOnDisconnect = onDisconnect;
-window._firebaseReady = true;
-window.dispatchEvent(new Event("firebaseReady"));
 </script>
+
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-body{overflow-y:auto;overflow-x:hidden;background:#111;font-family:Arial,sans-serif;}
-canvas{display:block;touch-action:none;}
+body{overflow:hidden;background:#111;font-family:Arial,sans-serif;}
+canvas{display:block;touch-action:none;-webkit-user-select:none;user-select:none;}
 
-/* ─── UI overlay ─── */
-#ui{position:absolute;top:20px;left:20px;color:white;font-size:20px;font-weight:bold;}
+#ui{position:absolute;top:20px;left:20px;color:white;font-size:20px;font-weight:bold;pointer-events:none;z-index:10;}
 button{padding:15px 35px;font-size:22px;border:none;border-radius:12px;cursor:pointer;margin:10px;background:#333;color:#fff;transition:background .2s;}
 button:hover{background:#555;}
 
-/* ─── Home button ─── */
 #homeBtn{
   position:absolute;top:14px;left:50%;transform:translateX(-50%);
   background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);
@@ -92,52 +60,48 @@ button:hover{background:#555;}
 }
 #homeBtn:hover{background:rgba(255,255,255,0.18);color:#fff;}
 
-/* ─── Screens ─── */
-#menu,#settings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult{
+#menu,#settings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
   position:absolute;inset:0;display:none;flex-direction:column;
-  justify-content:center;align-items:center;background:#111;color:white;
+  justify-content:center;align-items:center;background:#111;color:white;z-index:30;
 }
 #menu{display:flex;}
 h1{font-size:50px;margin-bottom:20px;}
 h2{font-size:30px;margin-bottom:20px;}
+#gameOver{background:rgba(0,0,0,0.85);z-index:40;}
 
-/* ─── Game Over ─── */
-#gameOver{position:absolute;inset:0;background:rgba(0,0,0,0.85);display:none;flex-direction:column;justify-content:center;align-items:center;color:white;z-index:40;}
-
-/* ─── ELO anim ─── */
-#eloResult{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);font-size:80px;font-weight:bold;text-align:center;pointer-events:none;opacity:0;text-shadow:0 0 30px currentColor;z-index:100;}
+#eloResult{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(0);
+  font-size:80px;font-weight:bold;text-align:center;
+  pointer-events:none;opacity:0;
+  text-shadow:0 0 30px currentColor;z-index:100;
+}
 @keyframes eloPopIn{
-  0%{transform:translate(-50%,-50%) scale(0);opacity:0;}
-  30%{transform:translate(-50%,-50%) scale(1.3);opacity:1;}
-  60%{transform:translate(-50%,-50%) scale(1);opacity:1;}
-  80%{transform:translate(-50%,-60%) scale(1);opacity:1;}
+  0%  {transform:translate(-50%,-50%) scale(0);opacity:0;}
+  30% {transform:translate(-50%,-50%) scale(1.3);opacity:1;}
+  60% {transform:translate(-50%,-50%) scale(1);opacity:1;}
+  80% {transform:translate(-50%,-60%) scale(1);opacity:1;}
   100%{transform:translate(-50%,-80%) scale(0.8);opacity:0;}
 }
 
-/* ─── VS animation ─── */
-#vsScreen{
-  position:absolute;inset:0;display:none;flex-direction:column;
-  justify-content:center;align-items:center;background:#0a0a0a;color:white;z-index:60;
-}
+#vsScreen{background:#0a0a0a;z-index:60;}
 .vs-name{font-size:44px;font-weight:bold;text-align:center;}
 .vs-elo{font-size:22px;color:#aaa;margin-top:6px;}
 .vs-divider{font-size:60px;font-weight:900;color:#ff4444;margin:0 30px;text-shadow:0 0 30px #ff4444;}
 #vsCountdown{font-size:36px;margin-top:40px;color:#ffd700;}
 #vsContainer{display:flex;align-items:center;justify-content:center;}
 
-/* ─── Winner overlay ─── */
-#winnerOverlay{
-  position:absolute;inset:0;display:none;flex-direction:column;
-  justify-content:center;align-items:center;background:rgba(0,0,0,0.88);
-  color:white;z-index:55;
-}
+#winnerOverlay{background:rgba(0,0,0,0.88);z-index:55;}
 #winnerOverlay h2{font-size:52px;font-weight:900;text-shadow:0 0 40px gold;}
 #winnerOverlay p{font-size:26px;color:#aaa;margin-top:10px;}
 
-/* ─── ELO table ─── */
-#eloTable{position:absolute;top:20px;right:20px;background:rgba(0,0,0,0.55);padding:6px 8px;color:white;width:170px;max-height:60vh;overflow-y:auto;border-radius:8px;display:none;font-size:12px;line-height:1.2;}
+#eloTable{
+  position:absolute;top:20px;right:20px;
+  background:rgba(0,0,0,0.55);padding:6px 8px;
+  color:white;width:180px;max-height:60vh;overflow-y:auto;
+  border-radius:8px;display:none;font-size:12px;line-height:1.2;z-index:20;
+}
 
-/* ─── Bot profile modal ─── */
 #profileModal{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.85);z-index:200;justify-content:center;align-items:center;}
 #profileCard{background:#1a1a2e;border:1px solid rgba(255,255,255,0.2);border-radius:16px;padding:28px 36px;color:white;min-width:300px;max-width:380px;position:relative;}
 #profileCard h2{margin-bottom:16px;font-size:26px;}
@@ -146,34 +110,53 @@ h2{font-size:30px;margin-bottom:20px;}
 .prof-val{font-size:15px;font-weight:bold;}
 #profileClose{position:absolute;top:12px;right:16px;cursor:pointer;font-size:22px;color:#aaa;}
 
-/* ─── Coin HUD ─── */
-#coinHUD{display:none;position:absolute;top:20px;left:50%;transform:translateX(-50%);color:white;font-size:28px;font-weight:bold;background:rgba(0,0,0,0.6);padding:10px 24px;border-radius:12px;text-align:center;}
+#coinHUD{
+  display:none;position:absolute;top:20px;left:50%;transform:translateX(-50%);
+  color:white;font-size:28px;font-weight:bold;
+  background:rgba(0,0,0,0.6);padding:10px 24px;border-radius:12px;
+  text-align:center;z-index:20;pointer-events:none;
+}
 
-/* ─── Online queue / result ─── */
-#onlineWait h2{margin-bottom:16px;}
 #onlineStatus{font-size:18px;color:#aaa;margin-bottom:20px;}
 
-/* ─── Leaderboard table ─── */
 #lbTable{width:400px;max-height:60vh;overflow-y:auto;margin-top:14px;}
 .lb-row{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.08);font-size:16px;}
 .lb-row:first-child{font-weight:bold;color:#ffd700;}
 .lb-me{background:rgba(0,255,136,0.1);}
 
-/* ─── Account ─── */
-input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px solid #555;background:#222;color:white;width:260px;margin:8px 0;}
+input[type=text],input[type=number]{
+  padding:12px 18px;font-size:18px;border-radius:10px;
+  border:1px solid #555;background:#222;color:white;
+  width:260px;margin:8px 0;
+}
 #accountInfo{font-size:16px;color:#aaa;margin-top:8px;}
 
-/* ─── Spectator / Opponent info ─── */
-#opponentInfo,#spectatorInfo{position:absolute;bottom:20px;left:20px;color:white;font-size:18px;background:rgba(0,0,0,0.65);padding:15px 20px;border-radius:12px;display:none;line-height:1.6;border:1px solid rgba(255,255,255,0.15);}
-#spectatorInfo{border-color:rgba(255,165,0,0.4);}
+#opponentInfo,#spectatorInfo{
+  position:absolute;bottom:20px;left:20px;color:white;font-size:18px;
+  background:rgba(0,0,0,0.65);padding:15px 20px;border-radius:12px;
+  display:none;line-height:1.6;border:1px solid rgba(255,255,255,0.15);z-index:20;
+}
+
+#pingDisplay{
+  position:absolute;top:20px;right:210px;color:#aaa;font-size:13px;
+  background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:8px;
+  display:none;z-index:20;pointer-events:none;
+}
+
+#onlineHUD{
+  position:absolute;top:20px;left:50%;transform:translateX(-50%);
+  display:none;flex-direction:column;align-items:center;
+  background:rgba(0,0,0,0.7);padding:8px 20px;border-radius:12px;
+  color:white;font-size:16px;z-index:20;pointer-events:none;
+  border:1px solid rgba(255,255,255,0.15);
+}
+.online-names{display:flex;gap:20px;font-size:20px;font-weight:bold;}
 </style>
 </head>
 <body>
 
-<!-- ══════════════════ HOME BUTTON ══════════════════ -->
 <button id="homeBtn" onclick="confirmHome()">🏠 Home</button>
 
-<!-- ══════════════════ UI ══════════════════ -->
 <div id="ui">
   Time: <span id="time">0</span>s<br>
   Record: <span id="record">0</span>s<br>
@@ -181,19 +164,17 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
   Mode: <span id="mode">-</span>
 </div>
 
-<!-- ══════════════════ ELO TABLE ══════════════════ -->
 <div id="eloTable">
   <b>ELO LIVE</b>
   <div id="eloList"></div>
   <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
-    <button onclick="setTVMode('best')">BEST TV</button>
-    <button onclick="setTVMode('random')">RANDOM TV</button>
-    <button onclick="setTVMode('target')">TARGET TV</button>
-    <button onclick="resumePlay()">▶ PLAY RESUME</button>
+    <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('best')">BEST TV</button>
+    <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('random')">RANDOM TV</button>
+    <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('target')">TARGET TV</button>
+    <button style="font-size:13px;padding:6px 10px;" onclick="resumePlay()">▶ RESUME</button>
   </div>
 </div>
 
-<!-- ══════════════════ MENU ══════════════════ -->
 <div id="menu">
   <h1>DarkOnBalls</h1>
   <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
@@ -204,11 +185,10 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
   <button onclick="startGame('coin')">🪙 Coin Hunt</button>
   <button onclick="startGame('survival')">💀 Survival Gauntlet</button>
   <button onclick="startGame('mirror')">🪞 Mirror Duel</button>
-  <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Online Leaderboard</button>
+  <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
   <button onclick="openSettings()">Settings</button>
 </div>
 
-<!-- ══════════════════ SETTINGS ══════════════════ -->
 <div id="settings">
   <h2>Settings</h2>
   <label>Start Balls</label>
@@ -230,22 +210,22 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
     <option value="elo">ELO</option>
   </select><br><br>
   <button onclick="saveSettings()">Save</button>
+  <button onclick="showScreen('menu')">← Back</button>
 </div>
 
-<!-- ══════════════════ ACCOUNT SCREEN ══════════════════ -->
 <div id="accountScreen">
   <h2>🌐 Online Account</h2>
   <div id="accountContent"></div>
 </div>
 
-<!-- ══════════════════ LEADERBOARD ══════════════════ -->
 <div id="leaderboardScreen">
   <h2>🏆 Online Leaderboard</h2>
-  <div id="lbTable"><div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div></div>
+  <div id="lbTable">
+    <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
+  </div>
   <br><button onclick="showScreen('menu')">← Back</button>
 </div>
 
-<!-- ══════════════════ ONLINE WAIT ══════════════════ -->
 <div id="onlineWait">
   <h2>🌐 Online 1v1</h2>
   <div id="onlineStatus">Searching for opponent…</div>
@@ -253,253 +233,312 @@ input[type=text]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px 
   <button onclick="cancelOnline()">Cancel</button>
 </div>
 
-<!-- ══════════════════ VS SCREEN ══════════════════ -->
 <div id="vsScreen">
   <div id="vsContainer">
-    <div>
+    <div style="text-align:center;">
       <div class="vs-name" id="vsName1">-</div>
-      <div class="vs-elo" id="vsElo1">ELO -</div>
+      <div class="vs-elo"  id="vsElo1">ELO -</div>
     </div>
     <div class="vs-divider">VS</div>
-    <div>
+    <div style="text-align:center;">
       <div class="vs-name" id="vsName2">-</div>
-      <div class="vs-elo" id="vsElo2">ELO -</div>
+      <div class="vs-elo"  id="vsElo2">ELO -</div>
     </div>
   </div>
   <div id="vsCountdown">Starting in 3…</div>
 </div>
 
-<!-- ══════════════════ WINNER OVERLAY ══════════════════ -->
 <div id="winnerOverlay">
   <h2 id="winnerText">🏆 Winner!</h2>
-  <p id="winnerEloChange"></p>
+  <p  id="winnerEloChange"></p>
   <div style="display:flex;gap:16px;margin-top:30px;" id="winnerButtons"></div>
 </div>
 
-<!-- ══════════════════ GAME OVER (local) ══════════════════ -->
 <div id="gameOver">
   <h2>GAME OVER</h2>
   <p>Survived: <span id="finalTime">0</span>s</p>
   <button onclick="restartGame()">Play Again</button>
+  <button onclick="exitToMenu()">🏠 Home</button>
   <div id="ranking" style="position:absolute;top:20px;right:20px;color:white;font-size:18px;text-align:left;max-height:90vh;overflow:auto;"></div>
 </div>
 
-<!-- ══════════════════ ELO ANIM ══════════════════ -->
 <div id="eloResult"></div>
-
-<!-- ══════════════════ CANVAS ══════════════════ -->
 <canvas id="game"></canvas>
-
-<!-- ══════════════════ COIN HUD ══════════════════ -->
 <div id="coinHUD">🪙 <span id="coinScore">0</span> &nbsp;|&nbsp; ⏱ <span id="coinTime">60</span>s</div>
-
-<!-- ══════════════════ INFO BOXES ══════════════════ -->
+<div id="pingDisplay">📶 -- ms</div>
+<div id="onlineHUD">
+  <div class="online-names">
+    <span id="onlineNameMe" style="color:#00ff88">Me</span>
+    <span style="color:#aaa">VS</span>
+    <span id="onlineNameOpp" style="color:#ff8844">Opp</span>
+  </div>
+  <div id="onlineStatusHUD" style="color:#aaa;font-size:13px;margin-top:4px;">Connecting…</div>
+</div>
 <div id="opponentInfo"><div id="opponentText"></div></div>
 <div id="spectatorInfo"><b>👁 Spectator Mode</b><br><div id="spectatorText"></div></div>
 
-<!-- ══════════════════ PROFILE MODAL ══════════════════ -->
 <div id="profileModal">
   <div id="profileCard">
     <span id="profileClose" onclick="closeProfile()">✕</span>
-    <h2 id="profileName"></h2>
+    <h2  id="profileName"></h2>
     <div id="profileStats"></div>
   </div>
 </div>
 
 <script>
-// ════════════════════════════════════════════════════════════════════════════
-//  CANVAS & RESIZE
-// ════════════════════════════════════════════════════════════════════════════
-const canvas=document.getElementById("game");
-const ctx=canvas.getContext("2d");
-function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
-resize();window.addEventListener("resize",resize);
+// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  CANVAS & RESIZE (Feste Höhe, variable Breite)
+// ═══════════════════════════════════════════════
+const canvas = document.getElementById("game"); // Korrigiert von gameCanvas auf game
+const ctx    = canvas.getContext("2d");
 
-// ════════════════════════════════════════════════════════════════════════════
-//  FIREBASE HELPERS (lazy – waits for module to load)
-// ════════════════════════════════════════════════════════════════════════════
-let fbReady=false;
-window.addEventListener("firebaseReady",()=>{fbReady=true;});
+const V_H = 768;  // Feste iPad-Referenzhöhe im Querformat
+let V_W   = 1024; // Virtuelle Breite (wird dynamisch angepasst)
+let scale = 1;
 
-function dbRef(path){return window._firebaseRef(window._firebaseDB,path);}
-async function dbGet(path){return (await window._firebaseGet(dbRef(path))).val();}
-async function dbSet(path,val){return window._firebaseSet(dbRef(path),val);}
-async function dbUpdate(path,val){return window._firebaseUpdate(dbRef(path),val);}
-function dbOn(path,cb){window._firebaseOnValue(dbRef(path),snap=>cb(snap.val()));}
-async function dbRemove(path){return window._firebaseRemove(dbRef(path));}
-function syncOpponent(data){
-  if(!data || !onlineMatchId) return;
+function W() { return V_W; }
+function H() { return V_H; }
 
-  const opp = players.find(p => p.name !== onlineAccount.name);
-  if(!opp) return;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const screenW = window.innerWidth;
+  const screenH = window.innerHeight;
 
-  const oppRole = onlineRole === "p1" ? "p2" : "p1";
-  const d = data[oppRole];
+  // Skaliere alles basierend auf der tatsächlichen Bildschirmhöhe
+  scale = screenH / V_H;
+  V_W   = screenW / scale; // Die Breite passt sich dynamisch an (keine schwarzen Balken)
 
-  if(d){
-    opp.x = d.x;
-    opp.y = d.y;
-    opp.alive = d.alive;
+  canvas.style.width  = screenW + "px";
+  canvas.style.height = screenH + "px";
+  canvas.width  = Math.round(screenW * dpr);
+  canvas.height = Math.round(screenH * dpr);
+
+  // Transformation zurücksetzen, DPR anwenden und Skalierung der Welt vornehmen
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.scale(scale, scale);
+}
+
+function screenToVirtual(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (clientX - rect.left) / scale,
+    y: (clientY - rect.top) / scale
+  };
+}
+
+window.addEventListener("resize", resize);
+resize();
+
+
+// ═══════════════════════════════════════════════
+//  ROUNDRECT POLYFILL
+// ═══════════════════════════════════════════════
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    this.beginPath();
+    this.moveTo(x + r, y);
+    this.lineTo(x + w - r, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r);
+    this.lineTo(x + w, y + h - r);
+    this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    this.lineTo(x + r, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r);
+    this.lineTo(x, y + r);
+    this.quadraticCurveTo(x, y, x + r, y);
+    this.closePath();
+  };
+}
+
+// ═══════════════════════════════════════════════
+//  FIREBASE HELPERS
+// ═══════════════════════════════════════════════
+let fbReady = false;
+window.addEventListener("firebaseReady", async () => {
+  fbReady = true;
+
+  if (onlineAccount) {
+    await pushAccountToFirebase();
   }
+});
+function dbRef(path)           { return window._firebaseRef(window._firebaseDB, path); }
+async function dbGet(path)     { return (await window._firebaseGet(dbRef(path))).val(); }
+async function dbSet(path, v)  { return window._firebaseSet(dbRef(path), v); }
+async function dbUpdate(path,v){ return window._firebaseUpdate(dbRef(path), v); }
+function dbOn(path, cb) {
+  return window._firebaseOnValue(dbRef(path), snap => cb(snap.val()));
 }
-// ════════════════════════════════════════════════════════════════════════════
-//  ACCOUNT (stored in localStorage + Firebase)
-// ════════════════════════════════════════════════════════════════════════════
-let onlineAccount=null; // {name, elo, wins, losses}
-(function loadAccount(){
-  const raw=localStorage.getItem("dobAccount");
-  if(raw){try{onlineAccount=JSON.parse(raw);}catch(e){}}
-})();
+async function dbRemove(path)  { return window._firebaseRemove(dbRef(path)); }
 
-function saveAccountLocal(){
-  if(onlineAccount)localStorage.setItem("dobAccount",JSON.stringify(onlineAccount));
+// ═══════════════════════════════════════════════
+//  ACCOUNT
+// ═══════════════════════════════════════════════
+let onlineAccount = null;
+try { onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null"); } catch(e) {}
+
+function saveAccountLocal() {
+  if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
 }
-
-async function pushAccountToFirebase(){
-  if(!fbReady||!onlineAccount)return;
-  await dbSet("players/"+onlineAccount.name,{
-    name:onlineAccount.name,
-    elo:onlineAccount.elo,
-    wins:onlineAccount.wins,
-    losses:onlineAccount.losses,
-    updatedAt:Date.now()
+async function pushAccountToFirebase() {
+  if (!fbReady || !onlineAccount) return;
+  await dbSet("players/" + onlineAccount.name, {
+    name: onlineAccount.name, elo: onlineAccount.elo,
+    wins: onlineAccount.wins, losses: onlineAccount.losses, updatedAt: Date.now()
   });
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  SCREEN ROUTER
-// ════════════════════════════════════════════════════════════════════════════
-const SCREENS=["menu","settings","accountScreen","leaderboardScreen","onlineWait","vsScreen","winnerOverlay","gameOver"];
-
-function hideAllScreens(){
-  SCREENS.forEach(s=>{
-    const el=document.getElementById(s);
-    if(el)el.style.display="none";
-  });
-  document.getElementById("homeBtn").style.display="block";
-}
-
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  SETTINGS
-// ════════════════════════════════════════════════════════════════════════════
-let startBallCount=3,spawnDelay=5000,ballSpeedMultiplier=0.5;
-let playerRadiusSetting=18,aiBotCount=10,rankingMode="points";
+// ═══════════════════════════════════════════════
+let startBallCount      = 3;
+let spawnDelay          = 5000;
+let ballSpeedMultiplier = 0.5;
+let playerRadiusSetting = 18;
+let aiBotCount          = 10;
+let rankingMode         = "points";
 
-function openSettings(){showScreen("settings");}
-function saveSettings(){
-  startBallCount=Number(document.getElementById("startBalls").value);
-  spawnDelay=Number(document.getElementById("spawnTime").value)*1000;
-  ballSpeedMultiplier=Number(document.getElementById("ballSpeed").value);
-  playerRadiusSetting=18; // fixed
-  aiBotCount=Number(document.getElementById("botCount").value);
-  rankingMode=document.getElementById("rankingMode").value;
+function openSettings() { showScreen("settings"); }
+function saveSettings() {
+  startBallCount      = Number(document.getElementById("startBalls").value);
+  spawnDelay          = Number(document.getElementById("spawnTime").value) * 1000;
+  ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
+  aiBotCount          = Number(document.getElementById("botCount").value);
+  rankingMode         = document.getElementById("rankingMode").value;
   showScreen("menu");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  STATE
-// ════════════════════════════════════════════════════════════════════════════
-let balls=[],players=[],ranking=[],eliminated=[];
-let running=false,startTime=0,spawnTimer=null;
-let mode="single";
-let tournamentRounds=100,currentRound=1;
-let participants=[],matches=[],waitingQueue=[];
-let playerMatchMap=new Map(),recentOpponents=new Map();
-const HUMAN_NAME="DU";
-let keys={};
+// ═══════════════════════════════════════════════
+let balls = [], players = [], ranking = [], eliminated = [];
+let running = false, startTime = 0;
+let spawnTimeoutId = null, survivalIntervalId = null, coinIntervalId = null;
+let mode = "single";
+let tournamentRounds = 100, currentRound = 1;
+let participants = [], matches = [], waitingQueue = [];
+let playerMatchMap = new Map(), recentOpponents = new Map();
+let keys = {};
 
-// Spectator
-let spectateModeActive=false,spectateMatchId=null,followMode="none",targetName=null,humanRemovedFromQueue=false;
+let spectateModeActive = false, spectateMatchId = null;
+let followMode = "none", targetName = null, humanRemovedFromQueue = false;
 
-// Coin
-let coins=[],coinScorePlayer=0,coinTimeLeft=60,coinInterval=null;
+let coins = [], coinScorePlayer = 0, coinTimeLeft = 60;
+let mirrorBot = null;
+let survivalWave = 1;
 
-// Mirror
-let mirrorBot=null;
-let survivalWave=1;
+// ═══════════════════════════════════════════════
+//  ONLINE STATE — completely rewritten
+// ═══════════════════════════════════════════════
+let onlineMatchId        = null;
+let onlineRole           = null;   // "p1" or "p2"
+let onlineOpponent       = null;
+let onlineUnsubscribes   = [];
+let onlineSearchInterval = null;
+let onlineResultHandled  = false;
+let onlineIsHost         = false;  // p1 is host: controls ball physics & spawning
 
-// Online
-let onlineMatchId=null,onlineRole=null,onlineOpponent=null;
-let onlineMatchRef=null,onlineUnsubscribe=null;
-let onlineSearchInterval=null;
+// Balls are owned by host (p1). p2 reads ball state from Firebase.
+let onlineBallPushTimer  = 0;
+let onlinePosPushTimer   = 0;
 
-let record=localStorage.getItem("fingerDodgeRecord")||0;
-document.getElementById("record").textContent=record;
+let record = parseInt(localStorage.getItem("fingerDodgeRecord") || "0");
+document.getElementById("record").textContent = record;
 
-// ════════════════════════════════════════════════════════════════════════════
-//  HOME BUTTON
-// ════════════════════════════════════════════════════════════════════════════
-function confirmHome(){
-  if(confirm("Return to main menu?")){
-    exitToMenu();
-  }
+let matchBanner = null;
+
+// ═══════════════════════════════════════════════
+//  HOME / EXIT
+// ═══════════════════════════════════════════════
+function confirmHome() {
+  if (confirm("Return to main menu?")) exitToMenu();
 }
-function exitToMenu(){
-  running=false;
-  if(spawnTimer)clearTimeout(spawnTimer);
-  if(spawnTimer&&typeof spawnTimer==="number")clearInterval(spawnTimer);
-  if(coinInterval)clearInterval(coinInterval);
+
+function exitToMenu() {
+  running = false;
+  clearAllTimers();
   cleanupOnline();
-  balls=[];players=[];eliminated=[];matches=[];
-  document.getElementById("eloTable").style.display="none";
-  document.getElementById("coinHUD").style.display="none";
-  document.getElementById("opponentInfo").style.display="none";
-  document.getElementById("spectatorInfo").style.display="none";
-  document.getElementById("winnerOverlay").style.display="none";
+  balls = []; players = []; eliminated = []; matches = []; coins = [];
+  document.getElementById("eloTable").style.display      = "none";
+  document.getElementById("coinHUD").style.display       = "none";
+  document.getElementById("opponentInfo").style.display  = "none";
+  document.getElementById("spectatorInfo").style.display = "none";
+  document.getElementById("winnerOverlay").style.display = "none";
+  document.getElementById("pingDisplay").style.display   = "none";
+  document.getElementById("onlineHUD").style.display     = "none";
   showScreen("menu");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  ELO ANIMATION
-// ════════════════════════════════════════════════════════════════════════════
-function showEloAnimation(change){
-  const el=document.getElementById("eloResult");
-  const won=change>0;
-  el.style.animation="none";el.offsetHeight;
-  el.style.color=won?"#00ff88":"#ff4444";
-  el.style.textShadow=`0 0 40px ${won?"#00ff88":"#ff4444"}`;
-  el.innerHTML=(won?"✓ +":"✗ ")+Math.round(Math.abs(change))+" ELO<br>"
-    +(won?'<span style="font-size:40px">WIN</span>':'<span style="font-size:40px">LOST</span>');
-  el.style.animation="eloPopIn 2.5s ease forwards";
+function clearAllTimers() {
+  if (spawnTimeoutId)     { clearTimeout(spawnTimeoutId);      spawnTimeoutId     = null; }
+  if (survivalIntervalId) { clearInterval(survivalIntervalId); survivalIntervalId = null; }
+  if (coinIntervalId)     { clearInterval(coinIntervalId);     coinIntervalId     = null; }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  SCREEN ROUTER
+// ═══════════════════════════════════════════════
+const ALL_SCREENS = [
+  "menu","settings","accountScreen","leaderboardScreen",
+  "onlineWait","vsScreen","winnerOverlay","gameOver"
+];
+
+window.showScreen = function(id) {
+  if (id === "onlineFlow") { showScreen_onlineFlow(); return; }
+  ALL_SCREENS.forEach(s => {
+    const el = document.getElementById(s);
+    if (el) el.style.display = (s === id) ? "flex" : "none";
+  });
+  const hideHome = ["menu","settings","accountScreen","leaderboardScreen"].includes(id);
+  document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
+};
+
+// ═══════════════════════════════════════════════
+//  ELO ANIMATION
+// ═══════════════════════════════════════════════
+function showEloAnimation(change) {
+  const el  = document.getElementById("eloResult");
+  const won = change > 0;
+  el.style.animation = "none";
+  el.offsetHeight;
+  el.style.color      = won ? "#00ff88" : "#ff4444";
+  el.style.textShadow = `0 0 40px ${won ? "#00ff88" : "#ff4444"}`;
+  el.innerHTML = (won ? "✓ +" : "✗ ") + Math.round(Math.abs(change)) + " ELO<br>"
+    + (won ? '<span style="font-size:40px">WIN</span>' : '<span style="font-size:40px">LOST</span>');
+  el.style.animation = "eloPopIn 2.5s ease forwards";
+}
+
+// ═══════════════════════════════════════════════
 //  LEADERBOARD
-// ════════════════════════════════════════════════════════════════════════════
-async function loadLeaderboard(){
-  const lbTable=document.getElementById("lbTable");
-  lbTable.innerHTML='<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
-  if(!fbReady){lbTable.innerHTML+='<div class="lb-row"><span colspan="4">Firebase not connected</span></div>';return;}
-  try{
-    const data=await dbGet("players");
-    if(!data){lbTable.innerHTML+='<div class="lb-row"><span>No players yet</span></div>';return;}
-    const sorted=Object.values(data).sort((a,b)=>b.elo-a.elo);
-    sorted.forEach((p,i)=>{
-      const isMe=onlineAccount&&p.name===onlineAccount.name;
-      lbTable.innerHTML+=`<div class="lb-row${isMe?" lb-me":""}">
-        <span>#${i+1}</span><span>${p.name}</span><span>${Math.round(p.elo)}</span>
+// ═══════════════════════════════════════════════
+async function loadLeaderboard() {
+  const lbTable = document.getElementById("lbTable");
+  lbTable.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
+  if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const data = await dbGet("players");
+    if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>No players yet</span></div>'; return; }
+    Object.values(data).sort((a,b) => b.elo - a.elo).forEach((p, i) => {
+      const isMe = onlineAccount && p.name === onlineAccount.name;
+      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}">
+        <span>#${i+1}</span><span>${p.name}</span>
+        <span>${Math.round(p.elo)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
-  }catch(e){lbTable.innerHTML+='<div class="lb-row"><span>Error loading</span></div>';}
+  } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Error loading</span></div>'; }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  ONLINE FLOW
-// ════════════════════════════════════════════════════════════════════════════
-function showScreen_onlineFlow(){
-  // If no account → create one first
-  if(!onlineAccount){
-    showCreateAccount();
-  } else {
-    enterOnlineQueue();
-  }
+// ═══════════════════════════════════════════════
+function showScreen_onlineFlow() {
+  if (!onlineAccount) showCreateAccount();
+  else enterOnlineQueue();
 }
 
-function showCreateAccount(){
+function showCreateAccount() {
   showScreen("accountScreen");
-  const el=document.getElementById("accountContent");
-  el.innerHTML=`
-    <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Choose your username (cannot be changed later)</p>
+  document.getElementById("accountContent").innerHTML = `
+    <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Choose your username</p>
     <input type="text" id="newUsername" placeholder="Username" maxlength="20">
     <br>
     <div id="accountInfo"></div>
@@ -509,653 +548,1012 @@ function showCreateAccount(){
   `;
 }
 
-async function createAccount(){
-  const name=document.getElementById("newUsername").value.trim();
-  const info=document.getElementById("accountInfo");
-  if(!name||name.length<2){info.textContent="Name must be at least 2 characters.";info.style.color="#f44";return;}
-  if(!/^[a-zA-Z0-9_-]+$/.test(name)){info.textContent="Only letters, numbers, _ and - allowed.";info.style.color="#f44";return;}
-  if(fbReady){
-    const existing=await dbGet("players/"+name);
-    if(existing){info.textContent="Name already taken. Choose another.";info.style.color="#f44";return;}
+async function createAccount() {
+  const name = document.getElementById("newUsername").value.trim();
+  const info = document.getElementById("accountInfo");
+  if (!name || name.length < 2)           { info.textContent = "Name must be at least 2 characters."; info.style.color="#f44"; return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(name))     { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
+  if (fbReady) {
+    const existing = await dbGet("players/" + name);
+    if (existing)                          { info.textContent = "Name already taken."; info.style.color="#f44"; return; }
   }
-  onlineAccount={name,elo:1500,wins:0,losses:0};
+  onlineAccount = { name, elo: 1500, wins: 0, losses: 0 };
   saveAccountLocal();
-  if(fbReady) await pushAccountToFirebase();
+  if (fbReady) await pushAccountToFirebase();
   enterOnlineQueue();
 }
 
-function enterOnlineQueue(){
-  if(!onlineAccount){showCreateAccount();return;}
+function enterOnlineQueue() {
+  if (!onlineAccount) { showCreateAccount(); return; }
   showScreen("onlineWait");
-  document.getElementById("onlineStatus").textContent="Searching for opponent…";
+  document.getElementById("onlineStatus").textContent = "Searching for opponent…";
   startSearchingOnline();
 }
 
-function cancelOnline(){
+function cancelOnline() {
   cleanupOnline();
   showScreen("menu");
 }
 
-function cleanupOnline(){
-  if(onlineSearchInterval){clearInterval(onlineSearchInterval);onlineSearchInterval=null;}
-  if(onlineUnsubscribe){onlineUnsubscribe();onlineUnsubscribe=null;}
-  if(onlineMatchId&&fbReady){
-    // Remove our queue entry
-    dbRemove("queue/"+onlineAccount?.name).catch(()=>{});
+function cleanupOnline() {
+  if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
+  const unsubs = [...onlineUnsubscribes];
+  onlineUnsubscribes = [];
+  unsubs.forEach(fn => { try { fn(); } catch(e) {} });
+
+  if (fbReady && onlineAccount) {
+    dbRemove("queue/" + onlineAccount.name).catch(() => {});
   }
-  onlineMatchId=null;onlineRole=null;onlineOpponent=null;
+  if (fbReady && onlineMatchId) {
+    dbUpdate("onlineMatches/" + onlineMatchId, { status: "abandoned" }).catch(() => {});
+  }
+  onlineMatchId       = null;
+  onlineRole          = null;
+  onlineOpponent      = null;
+  onlineResultHandled = false;
+  onlineIsHost        = false;
+  document.getElementById("pingDisplay").style.display   = "none";
+  document.getElementById("onlineHUD").style.display     = "none";
 }
 
-async function startSearchingOnline(){
-  if(!fbReady){
-    document.getElementById("onlineStatus").textContent="Firebase not connected. Cannot play online.";
+async function cleanStaleMatches() {
+  if (!fbReady) return;
+  try {
+    const allMatches = await dbGet("onlineMatches");
+    if (!allMatches) return;
+    const now = Date.now();
+    for (const [id, m] of Object.entries(allMatches)) {
+      if (m.status !== "done" && m.status !== "abandoned" && (now - m.createdAt) > 90000) {
+        await dbRemove("onlineMatches/" + id);
+      }
+    }
+  } catch(e) {}
+}
+async function acceptInvite(data) {
+  if (onlineMatchId) return;
+  
+  const matchData = await dbGet("onlineMatches/" + data.matchId);
+  if (!matchData) return;
+
+  if (onlineSearchInterval) {
+    clearInterval(onlineSearchInterval);
+    onlineSearchInterval = null;
+  }
+
+  const opp = { name: data.opp, elo: data.oppElo };
+
+  // Eigene Queue- und Einladungsdaten aus der DB löschen
+  await dbRemove("queue/" + onlineAccount.name + "_invite");
+  await dbRemove("queue/" + onlineAccount.name);
+
+  joinMatch(data.matchId, opp, matchData);
+}
+
+async function startSearchingOnline() {
+  if (!fbReady) {
+    document.getElementById("onlineStatus").textContent = "Firebase not connected. Cannot play online.";
     return;
   }
+  await cleanStaleMatches();
   // Write ourselves to queue
-  await dbSet("queue/"+onlineAccount.name,{
-    name:onlineAccount.name,
-    elo:onlineAccount.elo,
-    ts:Date.now()
+  await dbSet("queue/" + onlineAccount.name, {
+    name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now()
   });
 
-  // Poll queue every 2s to find a match
-  onlineSearchInterval=setInterval(async()=>{
-    try{await tryMatchmake();}catch(e){console.warn(e);}
-  },2000);
-  // Also try immediately
-  setTimeout(()=>tryMatchmake(),500);
+  // Also listen to queue so we react immediately if someone creates a match for us
+  const queueUnsub = dbOn("queue/" + onlineAccount.name + "_invite", (data) => {
+    if (data && data.matchId && !onlineMatchId) {
+      // We were invited — join the match
+      const unsub = onlineUnsubscribes.find(x => x === queueUnsub);
+      acceptInvite(data);
+    }
+  });
+  onlineUnsubscribes.push(queueUnsub);
+
+  const anim = ["⏳","⌛"];
+  let ai = 0;
+  onlineSearchInterval = setInterval(async () => {
+    document.getElementById("onlineSearchAnim").textContent = anim[ai++ % 2];
+    try { await tryMatchmake(); } catch(e) { console.warn("matchmake error:", e); }
+  }, 2000);
+  setTimeout(() => tryMatchmake(), 600);
 }
 
-async function tryMatchmake(){
-  if(onlineMatchId)return; // already matched
-  const queue=await dbGet("queue");
-  if(!queue)return;
-  const others=Object.values(queue).filter(p=>p.name!==onlineAccount.name);
-  if(!others.length)return;
+async function tryMatchmake() {
+  if (onlineMatchId) return;
+  const queue = await dbGet("queue");
+  if (!queue) return;
+  const others = Object.values(queue).filter(p =>
+    p.name && p.name !== onlineAccount.name && p.ts && (Date.now() - p.ts < 60000)
+  );
+  if (!others.length) return;
 
-  // Pick closest ELO
-  others.sort((a,b)=>Math.abs(a.elo-onlineAccount.elo)-Math.abs(b.elo-onlineAccount.elo));
-  const opp=others[0];
+  others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
+  const opp     = others[0];
+  const matchId = [onlineAccount.name, opp.name].sort().join("__VS__");
 
-  // Try to claim the match (first writer wins)
-  const matchId=[onlineAccount.name,opp.name].sort().join("__");
-  const existing=await dbGet("onlineMatches/"+matchId);
-  if(existing&&existing.status!=="done"){
-    // Match already set up by the other player – join it
-    joinMatch(matchId,opp);
+  const existing = await dbGet("onlineMatches/" + matchId);
+  if (existing && existing.status === "waiting") {
+    if (onlineMatchId) return;
+    await dbRemove("queue/" + onlineAccount.name);
+    joinMatch(matchId, opp, existing);
     return;
   }
+  if (existing && existing.status !== "done" && existing.status !== "abandoned") return;
 
-  // Create match
-  const matchData={
-    p1:onlineAccount.name,p2:opp.name,
-    p1elo:onlineAccount.elo,p2elo:opp.elo,
-    status:"waiting",
-    winner:null,
-    createdAt:Date.now()
+  const p1Name = onlineAccount.name < opp.name ? onlineAccount.name : opp.name;
+  const p2Name = onlineAccount.name < opp.name ? opp.name : onlineAccount.name;
+  const isP1   = onlineAccount.name === p1Name;
+
+  const matchData = {
+    p1: p1Name, p2: p2Name,
+    p1elo: isP1 ? onlineAccount.elo : opp.elo,
+    p2elo: isP1 ? opp.elo : onlineAccount.elo,
+    status: "waiting",
+    winner: null,
+    createdAt: Date.now(),
+    seed: Math.floor(Math.random() * 1000000),
+    ballSpeedMult: ballSpeedMultiplier,
+    startBalls: startBallCount
   };
-  await dbSet("onlineMatches/"+matchId,matchData);
-  // Remove both from queue
-  await dbRemove("queue/"+onlineAccount.name);
-  await dbRemove("queue/"+opp.name);
-  joinMatch(matchId,opp);
+  try {
+    const existingCheck = await dbGet("onlineMatches/" + matchId);
+
+    // KORREKTUR: Überschreiben erlauben, wenn das alte Spiel vorbei ist
+    if (!existingCheck || existingCheck.status === "done" || existingCheck.status === "abandoned") {
+      await dbSet("onlineMatches/" + matchId, matchData);
+    } else {
+      return; 
+    }
+
+    // Einladung für den Gegner hinterlegen
+    await dbSet("queue/" + opp.name + "_invite", {
+      matchId: matchId,
+      opp: onlineAccount.name,
+      oppElo: onlineAccount.elo
+    });
+
+    await dbRemove("queue/" + onlineAccount.name);
+    await dbRemove("queue/" + opp.name);
+    
+ joinMatch(matchId, opp, matchData);
+  } catch(e) {
+    console.warn("No response or match creation race:", e);
+  }
 }
 
-function joinMatch(matchId,opp){
-  if(onlineMatchId)return;
-  if(onlineSearchInterval){clearInterval(onlineSearchInterval);onlineSearchInterval=null;}
-  onlineMatchId=matchId;
-  onlineOpponent=opp;
-  onlineRole=(onlineAccount.name<opp.name)?"p1":"p2";
 
-  showVSScreen(onlineAccount.name,onlineAccount.elo,opp.name,opp.elo,()=>{
-    startOnlineGame();
+
+function joinMatch(matchId, opp, matchData) {
+  if (onlineMatchId) return;
+  if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
+  onlineMatchId       = matchId;
+  onlineOpponent      = opp;
+  onlineResultHandled = false;
+
+  const p1Name = matchData.p1;
+  onlineRole   = (onlineAccount.name === p1Name) ? "p1" : "p2";
+  onlineIsHost = (onlineRole === "p1");
+
+  showVSScreen(onlineAccount.name, onlineAccount.elo, opp.name, opp.elo, () => {
+    startOnlineGame(matchData);
   });
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  VS SCREEN
-// ════════════════════════════════════════════════════════════════════════════
-function showVSScreen(n1,e1,n2,e2,callback){
-  document.getElementById("vsName1").textContent=n1;
-  document.getElementById("vsElo1").textContent="ELO "+Math.round(e1);
-  document.getElementById("vsName2").textContent=n2;
-  document.getElementById("vsElo2").textContent="ELO "+Math.round(e2);
+// ═══════════════════════════════════════════════
+function showVSScreen(n1, e1, n2, e2, callback) {
+  document.getElementById("vsName1").textContent = n1;
+  document.getElementById("vsElo1").textContent  = "ELO " + Math.round(e1);
+  document.getElementById("vsName2").textContent = n2;
+  document.getElementById("vsElo2").textContent  = "ELO " + Math.round(e2);
   showScreen("vsScreen");
-  let cd=3;
-  document.getElementById("vsCountdown").textContent="Starting in "+cd+"…";
-  const iv=setInterval(()=>{
+  let cd = 3;
+  document.getElementById("vsCountdown").textContent = "Starting in " + cd + "…";
+  const iv = setInterval(() => {
     cd--;
-    if(cd<=0){
+    if (cd <= 0) {
       clearInterval(iv);
-      document.getElementById("vsScreen").style.display="none";
+      document.getElementById("vsScreen").style.display = "none";
       callback();
     } else {
-      document.getElementById("vsCountdown").textContent="Starting in "+cd+"…";
+      document.getElementById("vsCountdown").textContent = "Starting in " + cd + "…";
     }
-  },1000);
+  }, 1000);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  ONLINE GAME
-// ════════════════════════════════════════════════════════════════════════════
-function startOnlineGame(){
-  hideAllScreens();
-  // Online 1v1 uses fixed settings: 0 start balls, spawn every 1s, normal speed, 0 ai bots
-  const savedStart=startBallCount,savedSpawn=spawnDelay,savedSpeed=ballSpeedMultiplier,savedBots=aiBotCount;
-  startBallCount=0; spawnDelay=1000; ballSpeedMultiplier=0.5; aiBotCount=0;
+// ═══════════════════════════════════════════════
+//  SEEDED RNG (so both clients make identical balls)
+// ═══════════════════════════════════════════════
+function makeLCG(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
 
-  mode="online";
-  document.getElementById("mode").textContent="Online 1v1";
-  balls=[];players=[];eliminated=[];
-  running=true;startTime=Date.now();
+// ═══════════════════════════════════════════════
+//  ONLINE GAME — fully synchronized
+// ═══════════════════════════════════════════════
+let onlineRng = null;
+let onlineBallSpawnTimer = 0;
+let onlineSpawnInterval  = 5000;
 
-  const me=createPlayer(canvas.width*0.3,canvas.height/2,"#00ff88",onlineAccount.name);
-  const opp=createPlayer(canvas.width*0.7,canvas.height/2,"#ff8844",onlineOpponent.name);
-  players.push(me,opp);
-  spawnLoop();
+function startOnlineGame(matchData) {
+  hideAllScreensForGame();
+  mode    = "online";
+  balls   = [];
+  players = [];
+  eliminated = [];
+  running = true;
+  startTime = Date.now();
+  onlineResultHandled = false;
 
-  // Restore original settings after
-  const restore=()=>{startBallCount=savedStart;spawnDelay=savedSpawn;ballSpeedMultiplier=savedSpeed;aiBotCount=savedBots;};
+  // Both clients use the same seed → identical balls
+  onlineRng           = makeLCG(matchData.seed || 42);
+  onlineSpawnInterval = (matchData.startBalls ? 5000 : spawnDelay);
+  const speedMult     = matchData.ballSpeedMult || ballSpeedMultiplier;
+  const startN        = matchData.startBalls    || startBallCount;
 
-  // Listen for match updates (winner declared by Firebase)
-  if(fbReady){
-    onlineUnsubscribe=window._firebaseOnValue(dbRef("onlineMatches/"+onlineMatchId),(snap)=>{
-      const data=snap.val();
-      if(!data)return;
-      if(data.status==="done"&&data.winner){
-        restore();
-        handleOnlineResult(data.winner,data.eloChange||10);
+  document.getElementById("mode").textContent = "Online 1v1";
+
+  const myColor  = onlineRole === "p1" ? "#00ff88" : "#ff8844";
+  const oppColor = onlineRole === "p1" ? "#ff8844" : "#00ff88";
+  const myName   = onlineAccount.name;
+  const oppName  = onlineOpponent.name;
+
+  // p1 always left, p2 always right — consistent for both clients
+  const p1x = W() * 0.3, p2x = W() * 0.7, py = H() / 2;
+  const meX  = onlineRole === "p1" ? p1x : p2x;
+  const oppX = onlineRole === "p1" ? p2x : p1x;
+
+  const mePlayer  = createPlayer(meX,  py, myColor,  myName);
+  const oppPlayer = createPlayer(oppX, py, oppColor, oppName);
+  players.push(mePlayer, oppPlayer);
+
+  // Generate initial balls deterministically (same on both clients)
+  if (onlineIsHost) {
+  for (let i = 0; i < startN; i++) {
+    balls.push(makeOnlineBall(speedMult));
+  }
+    
+}
+  if (!onlineIsHost) {
+  balls = []; // Client wartet auf Host-State
+}
+  onlineBallSpawnTimer = Date.now();
+
+  // Show HUD
+  document.getElementById("onlineNameMe").textContent  = myName;
+  document.getElementById("onlineNameOpp").textContent = oppName;
+  document.getElementById("onlineHUD").style.display   = "flex";
+  document.getElementById("pingDisplay").style.display = "block";
+  document.getElementById("onlineHUD").style.display   = "flex";
+  document.getElementById("pingDisplay").style.display = "block";
+
+  if (onlineIsHost) {
+    setInterval(pushBallState, 80);
+  }
+  // ── Firebase listener: opponent position + result ──
+  const matchUnsub = dbOn("onlineMatches/" + onlineMatchId, (data) => {
+    if (!data) return;
+
+    // Read opponent's position
+    const oppRole = onlineRole === "p1" ? "p2" : "p1";
+    const oppState = data[oppRole + "State"];
+    if (oppState) {
+      const op = players.find(p => p.name !== myName);
+      if (op) {
+        // Interpolate towards received position
+        op.tx    = oppState.x;
+        op.ty    = oppState.y;
+        op.alive = oppState.alive !== false;
       }
-    });
-    dbOn("onlineMatches/"+onlineMatchId, (data)=>{
-  if(!data) return;
+    }
 
-  const oppRole = onlineRole === "p1" ? "p2" : "p1";
-  const d = data[oppRole];
+    // Read ball state (only if we're not host — host owns balls)
+    if (!onlineIsHost && data.ballState) {
+      try {
+        const bs = JSON.parse(data.ballState);
+        balls = bs.map(b => ({ ...b }));
+      } catch(e) {}
+    }
 
-  const opp = players.find(p => p.name !== onlineAccount.name);
+    // Handle game result
+    if (data.status === "done" && data.winner && !onlineResultHandled) {
+      handleOnlineResult(data.winner, data.eloChange || 10);
+    }
+    if (data.status === "abandoned" && !onlineResultHandled) {
+      onlineResultHandled = true;
+      running = false;
+      handleOnlineResult(myName, 5);
+    }
+    if (data.status === "waiting") {
+      document.getElementById("onlineStatusHUD").textContent = "Waiting for opponent…";
+    } else {
+      document.getElementById("onlineStatusHUD").textContent = "";
+    }
+  });
+  onlineUnsubscribes.push(matchUnsub);
 
-  if(opp && d){
-    opp.x = d.x;
-    opp.y = d.y;
-    opp.alive = d.alive;
-  }
-});
-  }
+  // Mark match as active once both are ready
+  dbUpdate("onlineMatches/" + onlineMatchId, {
+    [onlineRole + "Ready"]: true
+  }).catch(() => {});
 
-  // We only control the human player; the opponent is controlled locally as AI
-  // (in a real P2P game you'd sync positions – here we simulate opponent as AI)
+  // Ping interval
+  const pingIv = setInterval(async () => {
+    if (!running || mode !== "online") { clearInterval(pingIv); return; }
+    const t0 = Date.now();
+    try {
+      await dbSet("onlineMatches/" + onlineMatchId + "/ping_" + onlineRole, Date.now());
+      document.getElementById("pingDisplay").textContent = "📶 " + (Date.now() - t0) + " ms";
+    } catch(e) {}
+  }, 3000);
 }
 
-function handleOnlineResult(winnerName,change){
-  if(!running)return;
-  running=false;
-  const won=winnerName===onlineAccount.name;
+// Make a ball using shared deterministic RNG
+function makeOnlineBall(speedMult) {
+  speedMult = speedMult || ballSpeedMultiplier;
+  const rng = onlineRng || Math.random;
+  const r   = 15 + rng() * 20;
+  let x = r + rng() * (W() - r * 2);
+  let y = r + rng() * (H() - r * 2);
+  const spd = 5 + rng() * 6;
+  const ang = rng() * Math.PI * 2;
+  return {
+    x, y, radius: r,
+    vx: Math.cos(ang) * spd * speedMult,
+    vy: Math.sin(ang) * spd * speedMult
+  };
+}
 
-  if(won){
-    onlineAccount.elo+=change;
-    onlineAccount.wins++;
-  } else {
-    onlineAccount.elo=Math.max(100,onlineAccount.elo-change);
-    onlineAccount.losses++;
-  }
+// Push my position (only position, not physics)
+let lastPosPush = 0;
+function pushMyPosition() {
+  if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
+  const now = Date.now();
+  if (now - lastPosPush < 50) return;
+  lastPosPush = now;
+  const me = players.find(p => p.name === onlineAccount.name);
+  if (!me) return;
+  dbUpdate("onlineMatches/" + onlineMatchId, {
+    [onlineRole + "State"]: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
+  }).catch(() => {});
+}
+
+// Host pushes ball state so both clients are in sync
+let lastBallPush = 0;
+function pushBallState() {
+  if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
+  const now = Date.now();
+  if (now - lastBallPush < 80) return; // ~12fps for balls is fine
+  lastBallPush = now;
+  const bs = JSON.stringify(balls.map(b => ({
+    x: Math.round(b.x), y: Math.round(b.y),
+    vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)),
+    radius: b.radius
+  })));
+  dbUpdate("onlineMatches/" + onlineMatchId, { ballState: bs }).catch(() => {});
+}
+
+function handleOnlineResult(winnerName, change) {
+  if (onlineResultHandled) return;
+  onlineResultHandled = true;
+  running = false;
+  clearAllTimers();
+  document.getElementById("onlineHUD").style.display = "none";
+
+  const won       = winnerName === onlineAccount.name;
+  const eloChange = Math.round(change);
+  if (won) { onlineAccount.elo += eloChange; onlineAccount.wins++;   }
+  else     { onlineAccount.elo  = Math.max(100, onlineAccount.elo - eloChange); onlineAccount.losses++; }
   saveAccountLocal();
-  if(fbReady)pushAccountToFirebase();
+  if (fbReady) pushAccountToFirebase();
 
-  showEloAnimation(won?change:-change);
-
-  setTimeout(()=>{
-    showWinnerOverlay(winnerName,won?change:-change);
-  },2600);
+  showEloAnimation(won ? eloChange : -eloChange);
+  setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
 }
 
-function showWinnerOverlay(winnerName,eloChange){
-  const el=document.getElementById("winnerOverlay");
-  document.getElementById("winnerText").innerHTML=`🏆 Winner: <span style="color:gold">${winnerName}</span>`;
-  document.getElementById("winnerEloChange").textContent=
-    `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange>=0?"+":""}${Math.round(eloChange)})`;
-  const btns=document.getElementById("winnerButtons");
-  btns.innerHTML="";
-  const rematch=document.createElement("button");
-  rematch.textContent="🔄 Rematch";
-  rematch.onclick=()=>{
-    el.style.display="none";
-    enterOnlineQueue();
-  };
-  const newOpp=document.createElement("button");
-  newOpp.textContent="🔍 New Opponent";
-  newOpp.onclick=()=>{
-    el.style.display="none";
-    enterOnlineQueue();
-  };
-  const home=document.createElement("button");
-  home.textContent="🏠 Home";
-  home.onclick=()=>{
-    el.style.display="none";
+function showWinnerOverlay(winnerName, eloChange) {
+  document.getElementById("winnerText").innerHTML =
+    `🏆 Winner: <span style="color:gold">${winnerName}</span>`;
+  document.getElementById("winnerEloChange").textContent =
+    `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
+
+  const btns = document.getElementById("winnerButtons");
+  btns.innerHTML = "";
+  ["🔄 Rematch", "🔍 New Opponent"].forEach(label => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => {
+      document.getElementById("winnerOverlay").style.display = "none";
+      cleanupOnline();
+      enterOnlineQueue();
+    };
+    btns.appendChild(b);
+  });
+  const home = document.createElement("button");
+  home.textContent = "🏠 Home";
+  home.onclick = () => {
+    document.getElementById("winnerOverlay").style.display = "none";
     exitToMenu();
   };
-  btns.appendChild(rematch);
-  btns.appendChild(newOpp);
   btns.appendChild(home);
-  el.style.display="flex";
+  document.getElementById("winnerOverlay").style.display = "flex";
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  AI
-// ════════════════════════════════════════════════════════════════════════════
-function updateAI(p,activeBalls=balls){
-  const skill=((p.skill?.aim??0.5)+(p.skill?.reaction??0.5)+(p.skill?.movement??0.5)+(p.skill?.awareness??0.5)+(p.skill?.aggression??0.5))/5;
-  const inaccuracy=1-skill;
-  let danger=false;
-  for(const b of activeBalls){
-    const dx=p.x-b.x,dy=p.y-b.y;
-    if(Math.sqrt(dx*dx+dy*dy)<p.awareness){danger=true;break;}
-  }
-  if(Math.random()<inaccuracy*0.04)return;
-  if(!danger){
-    if(p.targetX===null||p.targetY===null||Math.random()<(0.015+inaccuracy*0.05)){
-      p.targetX=Math.random()*canvas.width;
-      p.targetY=Math.random()*canvas.height;
-    }
-  }
-  let moveX=p.targetX-p.x,moveY=p.targetY-p.y;
-  moveX+=(Math.random()-0.5)*120*inaccuracy;
-  moveY+=(Math.random()-0.5)*120*inaccuracy;
-  let moveDist=Math.sqrt(moveX*moveX+moveY*moveY)||1;
-  moveX/=moveDist;moveY/=moveDist;
-  let avoidX=0,avoidY=0;
-  const wallMargin=140;
-  if(p.x<wallMargin)avoidX+=(wallMargin-p.x)*0.03;
-  if(p.x>canvas.width-wallMargin)avoidX-=(p.x-(canvas.width-wallMargin))*0.03;
-  if(p.y<wallMargin)avoidY+=(wallMargin-p.y)*0.03;
-  if(p.y>canvas.height-wallMargin)avoidY-=(p.y-(canvas.height-wallMargin))*0.03;
-  for(const b of activeBalls){
-    const dx=p.x-b.x,dy=p.y-b.y;
-    const dist=Math.sqrt(dx*dx+dy*dy)||1;
-    if(dist<p.awareness){
-      const strength=Math.max(0,(p.awareness-dist)/p.awareness);
-      const force=strength*p.dodgePower*(0.7+skill*0.6);
-      avoidX+=(dx/dist)*force;
-      avoidY+=(dy/dist)*force;
-    }
-  }
-  p.aiVX??=0;p.aiVY??=0;
-  const steering=0.08+skill*0.18;
-  p.aiVX+=(moveX*4+avoidX*10-p.aiVX)*steering;
-  p.aiVY+=(moveY*4+avoidY*10-p.aiVY)*steering;
-  p.aiVX+=(Math.random()-0.5)*p.randomness*0.6;
-  p.aiVY+=(Math.random()-0.5)*p.randomness*0.6;
-  const len=Math.sqrt(p.aiVX*p.aiVX+p.aiVY*p.aiVY)||1;
-  p.x+=(p.aiVX/len)*p.speed;
-  p.y+=(p.aiVY/len)*p.speed;
-  p.x+=Math.sin(Date.now()*0.002+p.y*0.01)*inaccuracy*0.8;
-  p.y+=Math.cos(Date.now()*0.002+p.x*0.01)*inaccuracy*0.8;
-  p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
-  p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
-  p.lastVX=p.aiVX;p.lastVY=p.aiVY;
+// ═══════════════════════════════════════════════
+function getSkillValue(p) {
+  if (typeof p.skill === "number") return p.skill;
+  const s = p.skill || {};
+  return ((s.aim||0.5)+(s.reaction||0.5)+(s.movement||0.5)+(s.awareness||0.5)+(s.aggression||0.5)) / 5;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+function updateAI(p, activeBalls) {
+  if (!p.alive) return;
+  let danger = false;
+  for (const b of activeBalls) {
+    const dx = p.x - b.x, dy = p.y - b.y;
+    if (Math.sqrt(dx*dx + dy*dy) < p.awareness) { danger = true; break; }
+  }
+  if (!danger) {
+    if (p.targetX === null || p.targetY === null || Math.random() < 0.02) {
+      p.targetX = Math.random() * W();
+      p.targetY = Math.random() * H();
+    }
+  }
+  let moveX = (p.targetX || W()/2) - p.x;
+  let moveY = (p.targetY || H()/2) - p.y;
+  const moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+  moveX /= moveDist; moveY /= moveDist;
+  let avoidX = 0, avoidY = 0;
+  const wallMargin = 140;
+  if (p.x < wallMargin)     avoidX += (wallMargin - p.x) * 0.03;
+  if (p.x > W()-wallMargin) avoidX -= (p.x - (W()-wallMargin)) * 0.03;
+  if (p.y < wallMargin)     avoidY += (wallMargin - p.y) * 0.03;
+  if (p.y > H()-wallMargin) avoidY -= (p.y - (H()-wallMargin)) * 0.03;
+  for (const b of activeBalls) {
+    const dx = p.x - b.x, dy = p.y - b.y;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    if (dist < p.awareness) {
+      const strength = Math.max(0, (p.awareness - dist) / p.awareness);
+      const force = strength * p.dodgePower * 2;
+      avoidX += (dx / dist) * force;
+      avoidY += (dy / dist) * force;
+    }
+  }
+  let vx = moveX * 4 + avoidX * 10;
+  let vy = moveY * 4 + avoidY * 10;
+  vx += (Math.random() - 0.5) * p.randomness;
+  vy += (Math.random() - 0.5) * p.randomness;
+  const len = Math.sqrt(vx*vx + vy*vy) || 1;
+  p.x += (vx / len) * p.speed;
+  p.y += (vy / len) * p.speed;
+  p.x = Math.max(p.radius, Math.min(W()-p.radius, p.x));
+  p.y = Math.max(p.radius, Math.min(H()-p.radius, p.y));
+  p.lastVX = vx; p.lastVY = vy;
+}
+
+// ═══════════════════════════════════════════════
 //  PLAYER FACTORY
-// ════════════════════════════════════════════════════════════════════════════
-function createPlayer(x,y,color,name){
-  const skill={aim:Math.random(),reaction:Math.random(),movement:Math.random(),awareness:Math.random(),aggression:Math.random()};
-  const humanSkill=(skill.aim+skill.reaction+skill.movement+skill.awareness+skill.aggression)/5;
-  const balancedSkill=0.5+(humanSkill-0.5)*0.9;
+// ═══════════════════════════════════════════════
+function createPlayer(x, y, color, name) {
+  const skill = {
+    aim:        Math.random(),
+    reaction:   Math.random(),
+    movement:   Math.random(),
+    awareness:  Math.random(),
+    aggression: Math.random()
+  };
   return {
-    x,y,radius:playerRadiusSetting,color,name,skill,
-    points:0,elo:1500,lastChange:0,alive:true,games:0,
-    speed:1.0+balancedSkill*1.2,
-    reaction:0.25+balancedSkill*1.0,
-    awareness:70+balancedSkill*90,
-    randomness:(1-balancedSkill)*4.0,
-    dodgePower:0.4+balancedSkill*1.6,
-    targetX:null,targetY:null,
-    lastVX:0,lastVY:0,
-    stats:{wins:0,losses:0,totalEloGain:0,totalEloLoss:0,matchesPlayed:0,bestStreak:0,currentStreak:0}
+    x, y,
+    tx: x, ty: y,  // target position for interpolation
+    radius: playerRadiusSetting, color, name,
+    points: 0, elo: 1500, lastChange: 0, alive: true, games: 0,
+    skill,
+    speed:      2 + skill.movement * 8 + skill.aggression * 2,
+    reaction:   0.3 + skill.reaction * 4,
+    awareness:  60  + skill.awareness * 140,
+    randomness: (1 - skill.movement) * 5,
+    dodgePower: 0.5 + skill.aim * 3 + skill.reaction * 1.5,
+    targetX: null, targetY: null,
+    lastVX: 0, lastVY: 0,
+    aiVX: 0, aiVY: 0,
+    arenaScore: 0, deathTime: 0,
+    stats: { wins:0, losses:0, totalEloGain:0, totalEloLoss:0, matchesPlayed:0, bestStreak:0, currentStreak:0 }
   };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  BALLS
-// ════════════════════════════════════════════════════════════════════════════
-function createBall(){
-  const r=15+Math.random()*20;
-  let x,y,valid=false;
-  while(!valid){
-    x=Math.random()*(canvas.width-r*2)+r;
-    y=Math.random()*(canvas.height-r*2)+r;
-    valid=true;
-    for(const p of players){
-      const dx=p.x-x,dy=p.y-y;
-      if(Math.sqrt(dx*dx+dy*dy)<p.radius+r+80){valid=false;break;}
+// ═══════════════════════════════════════════════
+//  BALLS (non-online)
+// ═══════════════════════════════════════════════
+function makeBallAt(playersArr) {
+  const r = 15 + Math.random() * 20;
+  let x, y, valid = false, tries = 0;
+  while (!valid && tries++ < 50) {
+    x = r + Math.random() * (W() - r * 2);
+    y = r + Math.random() * (H() - r * 2);
+    valid = true;
+    for (const p of playersArr) {
+      if (!p.alive) continue;
+      const dx = p.x - x, dy = p.y - y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.radius + r + 80) { valid = false; break; }
     }
   }
-  const spd=5+Math.random()*6,ang=Math.random()*Math.PI*2;
-  balls.push({x,y,radius:r,vx:Math.cos(ang)*spd*ballSpeedMultiplier,vy:Math.sin(ang)*spd*ballSpeedMultiplier});
-}
-function createBallForMatch(match){
-  const r=15+Math.random()*20;
-  let x,y,valid=false;
-  while(!valid){
-    x=Math.random()*(canvas.width-r*2)+r;
-    y=Math.random()*(canvas.height-r*2)+r;
-    valid=true;
-    for(const p of match.players){
-      if(!p.alive)continue;
-      const dx=p.x-x,dy=p.y-y;
-      if(Math.sqrt(dx*dx+dy*dy)<p.radius+r+80){valid=false;break;}
-    }
-  }
-  const spd=5+Math.random()*6,ang=Math.random()*Math.PI*2;
-  match.balls.push({x,y,radius:r,vx:Math.cos(ang)*spd*ballSpeedMultiplier,vy:Math.sin(ang)*spd*ballSpeedMultiplier});
-}
-function spawnLoop(){
-  spawnTimer=setTimeout(()=>{if(running){createBall();spawnLoop();}},spawnDelay);
+  const spd = 5 + Math.random() * 6;
+  const ang = Math.random() * Math.PI * 2;
+  return { x, y, radius: r,
+    vx: Math.cos(ang) * spd * ballSpeedMultiplier,
+    vy: Math.sin(ang) * spd * ballSpeedMultiplier };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+function createBall()              { balls.push(makeBallAt(players)); }
+function createBallForMatch(match) { match.balls.push(makeBallAt(match.players)); }
+
+function spawnLoop() {
+  if (!running) return;
+  spawnTimeoutId = setTimeout(() => {
+    if (running) { createBall(); spawnLoop(); }
+  }, spawnDelay);
+}
+
+// ═══════════════════════════════════════════════
 //  COIN MODE
-// ════════════════════════════════════════════════════════════════════════════
-function spawnCoin(){
-  const r=14;
-  coins.push({x:r+Math.random()*(canvas.width-r*2),y:r+Math.random()*(canvas.height-r*2),r,value:Math.random()<0.15?3:1,born:Date.now()});
+// ═══════════════════════════════════════════════
+function spawnCoin() {
+  const r = 14;
+  coins.push({
+    x: r + Math.random() * (W() - r * 2),
+    y: r + Math.random() * (H() - r * 2),
+    r, value: Math.random() < 0.15 ? 3 : 1
+  });
 }
-function startCoinMode(){
-  mode="coin";coins=[];coinScorePlayer=0;coinTimeLeft=60;
-  document.getElementById("coinHUD").style.display="block";
-  document.getElementById("coinScore").textContent=0;
-  document.getElementById("coinTime").textContent=60;
-  players=[];
-  players.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","Player"));
-  for(let i=0;i<aiBotCount;i++)
-    players.push(createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,`hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1)));
-  for(let i=0;i<8;i++)spawnCoin();
-  for(let i=0;i<startBallCount;i++)createBall();
+
+function startCoinMode() {
+  mode = "coin"; coins = []; coinScorePlayer = 0; coinTimeLeft = 60;
+  document.getElementById("coinHUD").style.display = "block";
+  document.getElementById("coinScore").textContent = 0;
+  document.getElementById("coinTime").textContent  = 60;
+  players = [];
+  players.push(createPlayer(W()/2, H()/2, "#00ff88", "Player"));
+  for (let i = 0; i < aiBotCount; i++)
+    players.push(createPlayer(Math.random()*W(), Math.random()*H(),
+      `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
+  for (let i = 0; i < 8; i++) spawnCoin();
+  for (let i = 0; i < startBallCount; i++) createBall();
   spawnLoop();
-  coinInterval=setInterval(()=>{
-    if(!running){clearInterval(coinInterval);return;}
+  coinIntervalId = setInterval(() => {
+    if (!running) { clearInterval(coinIntervalId); coinIntervalId = null; return; }
     coinTimeLeft--;
-    document.getElementById("coinTime").textContent=coinTimeLeft;
-    if(coinTimeLeft<=0){
-      clearInterval(coinInterval);running=false;
-      document.getElementById("coinHUD").style.display="none";
+    document.getElementById("coinTime").textContent = coinTimeLeft;
+    if (coinTimeLeft <= 0) {
+      clearInterval(coinIntervalId); coinIntervalId = null;
+      running = false;
+      document.getElementById("coinHUD").style.display = "none";
+      document.getElementById("finalTime").textContent  = coinScorePlayer + " Coins";
       showScreen("gameOver");
-      document.getElementById("finalTime").textContent=coinScorePlayer+" Coins";
-    }
-    if(Math.random()<0.4)spawnCoin();
-  },1000);
+    } else if (Math.random() < 0.4) spawnCoin();
+  }, 1000);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  SURVIVAL
-// ════════════════════════════════════════════════════════════════════════════
-function startSurvivalMode(){
-  mode="survival";survivalWave=1;
-  players=[];
-  players.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","Player"));
-  for(let i=0;i<aiBotCount;i++)
-    players.push(createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,`hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1)));
-  for(let i=0;i<startBallCount;i++)createBall();
-  spawnTimer=setInterval(()=>{
-    if(!running){clearInterval(spawnTimer);return;}
+// ═══════════════════════════════════════════════
+function startSurvivalMode() {
+  mode = "survival"; survivalWave = 1;
+  players = [];
+  players.push(createPlayer(W()/2, H()/2, "#00ff88", "Player"));
+  for (let i = 0; i < aiBotCount; i++)
+    players.push(createPlayer(Math.random()*W(), Math.random()*H(),
+      `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
+  for (let i = 0; i < startBallCount; i++) createBall();
+  survivalIntervalId = setInterval(() => {
+    if (!running) { clearInterval(survivalIntervalId); survivalIntervalId = null; return; }
     survivalWave++;
-    const count=Math.floor(survivalWave/2)+1;
-    for(let i=0;i<count;i++)createBall();
-  },10000);
+    const count = Math.floor(survivalWave / 2) + 1;
+    for (let i = 0; i < count; i++) createBall();
+  }, 10000);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  MIRROR DUEL
-// ════════════════════════════════════════════════════════════════════════════
-function startMirrorMode(){
-  mode="mirror";players=[];
-  const me=createPlayer(canvas.width*0.3,canvas.height/2,"#00ff88","YOU");
-  mirrorBot=createPlayer(canvas.width*0.7,canvas.height/2,"#ff88aa","Mirror");
-  mirrorBot.skill=Math.random();
-  players.push(me,mirrorBot);
-  for(let i=0;i<startBallCount;i++)createBall();
+// ═══════════════════════════════════════════════
+function startMirrorMode() {
+  mode = "mirror"; players = []; mirrorBot = null;
+  const me = createPlayer(W() * 0.3, H() / 2, "#00ff88", "YOU");
+  mirrorBot = createPlayer(W() * 0.7, H() / 2, "#ff88aa", "Mirror");
+  const s = 0.5 + Math.random() * 0.4;
+  mirrorBot.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
+  mirrorBot.speed      = 1.0 + s * 1.2;
+  mirrorBot.awareness  = 70  + s * 90;
+  mirrorBot.dodgePower = 0.4 + s * 1.6;
+  mirrorBot.randomness = (1-s) * 4;
+  players.push(me, mirrorBot);
+  for (let i = 0; i < startBallCount; i++) createBall();
   spawnLoop();
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  START GAME (local modes)
-// ════════════════════════════════════════════════════════════════════════════
-function startGame(selectedMode){
-  waitingQueue=[];matches=[];playerMatchMap.clear();
-  spectateModeActive=false;spectateMatchId=null;
-  followMode="none";targetName=null;humanRemovedFromQueue=false;
-  coins=[];if(coinInterval){clearInterval(coinInterval);coinInterval=null;}
-  document.getElementById("coinHUD").style.display="none";
-  document.getElementById("opponentInfo").style.display="none";
-  document.getElementById("spectatorInfo").style.display="none";
-  document.getElementById("profileModal").style.display="none";
-  document.getElementById("winnerOverlay").style.display="none";
+// ═══════════════════════════════════════════════
+//  START GAME
+// ═══════════════════════════════════════════════
+function startGame(selectedMode) {
+  clearAllTimers();
+  waitingQueue = []; matches = []; playerMatchMap.clear();
+  spectateModeActive = false; spectateMatchId = null;
+  followMode = "none"; targetName = null; humanRemovedFromQueue = false;
+  coins = []; mirrorBot = null;
 
-  mode=selectedMode;
-  document.getElementById("eloTable").style.display=(mode==="tournament")?"block":"none";
-  document.getElementById("mode").textContent=mode;
+  document.getElementById("coinHUD").style.display       = "none";
+  document.getElementById("opponentInfo").style.display  = "none";
+  document.getElementById("spectatorInfo").style.display = "none";
+  document.getElementById("profileModal").style.display  = "none";
+  document.getElementById("winnerOverlay").style.display = "none";
+  document.getElementById("onlineHUD").style.display     = "none";
 
-  if(mode==="tournament"){
-    document.getElementById("time").parentNode.innerHTML=
-      `ELO: <span id="time">1500</span><br>Rank: <span id="record">1</span><br>Players: <span id="balls">0</span>`;
+  mode = selectedMode;
+  document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
+
+  if (mode === "tournament") {
+    document.getElementById("ui").innerHTML =
+      `ELO: <span id="time">1500</span><br>Rank: <span id="record">1</span><br>Players: <span id="balls">0</span><br>Mode: <span id="mode">tournament</span>`;
+  } else {
+    document.getElementById("ui").innerHTML =
+      `Time: <span id="time">0</span>s<br>Record: <span id="record">${record}</span>s<br>Balls: <span id="balls">0</span><br>Mode: <span id="mode">${mode}</span>`;
   }
 
-  hideAllScreens();
-  balls=[];players=[];eliminated=[];
-  running=true;startTime=Date.now();
+  hideAllScreensForGame();
+  balls = []; players = []; eliminated = [];
+  running = true; startTime = Date.now();
 
-  if(mode!=="multi"&&ranking.length===0){
-    for(let i=0;i<aiBotCount;i++)
-      ranking.push(createPlayer(0,0,`hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1)));
+  if (mode !== "multi" && mode !== "tournament") {
+    if (ranking.length === 0) {
+      for (let i = 0; i < aiBotCount; i++)
+        ranking.push(createPlayer(0, 0, `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
+    }
   }
 
-  if(mode==="single"){
-    if(!ranking.find(x=>x.name==="Player"))
-      ranking.push({name:"Player",color:"#00ff88",points:0,elo:1500,lastChange:0});
-    players.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","Player"));
-    for(const bot of ranking){
-      if(bot.name==="Player")continue;
-      const nb=createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,bot.color,bot.name);
-      nb.elo=bot.elo;nb.points=bot.points;nb.lastChange=bot.lastChange;
+  if (mode === "single") {
+    if (!ranking.find(x => x.name === "Player"))
+      ranking.push({ name:"Player", color:"#00ff88", points:0, elo:1500, lastChange:0 });
+    players.push(createPlayer(W()/2, H()/2, "#00ff88", "Player"));
+    for (const bot of ranking) {
+      if (bot.name === "Player") continue;
+      const nb = createPlayer(Math.random()*W(), Math.random()*H(), bot.color, bot.name);
+      nb.elo = bot.elo; nb.points = bot.points; nb.lastChange = bot.lastChange;
       players.push(nb);
     }
-    for(let i=0;i<startBallCount;i++)createBall();
+    for (let i = 0; i < startBallCount; i++) createBall();
     spawnLoop();
-  } else if(mode==="multi"){
-    players.push(createPlayer(200,200,"#00ff88","Player 1"),createPlayer(400,200,"#4488ff","Player 2"));
-    for(let i=0;i<aiBotCount;i++)
-      players.push(createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,`hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1)));
-    for(let i=0;i<startBallCount;i++)createBall();
+
+  } else if (mode === "multi") {
+    players.push(
+      createPlayer(200, 200, "#00ff88", "Player 1"),
+      createPlayer(400, 200, "#4488ff", "Player 2")
+    );
+    for (let i = 0; i < aiBotCount; i++)
+      players.push(createPlayer(Math.random()*W(), Math.random()*H(),
+        `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
+    for (let i = 0; i < startBallCount; i++) createBall();
     spawnLoop();
-  } else if(mode==="tournament"){
-    startTournament();return;
-  } else if(mode==="ai"){
-    for(const bot of ranking){
-      const nb=createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,bot.color,bot.name);
-      nb.elo=bot.elo;nb.points=bot.points;nb.lastChange=bot.lastChange;
+
+  } else if (mode === "tournament") {
+    startTournament(); return;
+
+  } else if (mode === "ai") {
+    for (const bot of ranking) {
+      const nb = createPlayer(Math.random()*W(), Math.random()*H(), bot.color, bot.name);
+      nb.elo = bot.elo; nb.points = bot.points; nb.lastChange = bot.lastChange;
       players.push(nb);
     }
-    for(let i=0;i<startBallCount;i++)createBall();
+    for (let i = 0; i < startBallCount; i++) createBall();
     spawnLoop();
-  } else if(mode==="coin"){
-    startCoinMode();return;
-  } else if(mode==="survival"){
-    startSurvivalMode();return;
-  } else if(mode==="mirror"){
-    startMirrorMode();return;
+
+  } else if (mode === "coin")     { startCoinMode();     return;
+  } else if (mode === "survival") { startSurvivalMode(); return;
+  } else if (mode === "mirror")   { startMirrorMode();   return;
   }
 
-  updateRanking();
+  if (["single","ai","multi"].includes(mode)) updateRanking();
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+function hideAllScreensForGame() {
+  ALL_SCREENS.forEach(s => {
+    const el = document.getElementById(s);
+    if (el) el.style.display = "none";
+  });
+  document.getElementById("homeBtn").style.display = "block";
+}
+
+// ═══════════════════════════════════════════════
 //  TOURNAMENT
-// ════════════════════════════════════════════════════════════════════════════
-function startTournament(){
-  running=true;matches=[];participants=[];waitingQueue=[];humanRemovedFromQueue=false;
-  recentOpponents.clear();
-  participants.push(createPlayer(canvas.width/2,canvas.height/2,"#00ff88","YOU"));
-  let skillList=[];
-  for(let i=0;i<aiBotCount;i++)skillList.push((i+1)/aiBotCount);
-  for(let i=skillList.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[skillList[i],skillList[j]]=[skillList[j],skillList[i]];}
-  for(let i=0;i<aiBotCount;i++){
-    const bot=createPlayer(Math.random()*canvas.width,Math.random()*canvas.height,`hsl(${i*360/aiBotCount},100%,50%)`,"Bot "+(i+1));
-    bot.skill=skillList[i];
-    bot.speed=1.5+bot.skill*8;bot.reaction=2+bot.skill*6;
-    bot.awareness=60+bot.skill*100;bot.dodgePower=0.5+bot.skill*3.5;bot.randomness=(1-bot.skill)*4;
+// ═══════════════════════════════════════════════
+function startTournament() {
+  running = true; matches = []; participants = []; waitingQueue = [];
+  humanRemovedFromQueue = false; recentOpponents.clear();
+
+  const me = createPlayer(W()/2, H()/2, "#00ff88", "YOU");
+  participants.push(me);
+
+  const skillList = Array.from({length: aiBotCount}, (_, i) => (i+1)/aiBotCount);
+  for (let i = skillList.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i+1));
+    [skillList[i], skillList[j]] = [skillList[j], skillList[i]];
+  }
+  for (let i = 0; i < aiBotCount; i++) {
+    const s   = skillList[i];
+    const bot = createPlayer(Math.random()*W(), Math.random()*H(),
+      `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1));
+    bot.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
+    bot.speed      = 1.5  + s * 8;
+    bot.reaction   = 2    + s * 6;
+    bot.awareness  = 60   + s * 100;
+    bot.dodgePower = 0.5  + s * 3.5;
+    bot.randomness = (1-s) * 4;
     participants.push(bot);
   }
-  waitingQueue=[...participants];
+  waitingQueue = [...participants];
   seededMatchmaking();
 }
 
-function seededMatchmaking(){
-  if(waitingQueue.length<2)return;
-  const used=new Set();
-  function findBestOpponent(p1,list){
-    let best=null,bestDiff=Infinity;
-    for(const p2 of list){
-      if(p1===p2||used.has(p2.name))continue;
-      if(recentOpponents.get(p1.name)===p2.name)continue;
-      const diff=Math.abs(p1.elo-p2.elo);
-      if(diff<bestDiff){bestDiff=diff;best=p2;}
+function seededMatchmaking() {
+  if (waitingQueue.length < 2) return;
+  const used = new Set();
+  function findBestOpponent(p1, list) {
+    let best = null, bestDiff = Infinity;
+    for (const p2 of list) {
+      if (p1 === p2 || used.has(p2.name)) continue;
+      if (recentOpponents.get(p1.name) === p2.name) continue;
+      const diff = Math.abs(p1.elo - p2.elo);
+      if (diff < bestDiff) { bestDiff = diff; best = p2; }
     }
     return best;
   }
-  const queue=[...waitingQueue];
-  waitingQueue=[];
-  for(const p1 of queue){
-    if(used.has(p1.name))continue;
-    const p2=findBestOpponent(p1,queue);
-    if(p2){
-      used.add(p1.name);used.add(p2.name);
-      recentOpponents.set(p1.name,p2.name);recentOpponents.set(p2.name,p1.name);
-      const match=createMatch(p1,p2);
+  const queue = [...waitingQueue];
+  waitingQueue = [];
+  for (const p1 of queue) {
+    if (used.has(p1.name)) continue;
+    const p2 = findBestOpponent(p1, queue);
+    if (p2) {
+      used.add(p1.name); used.add(p2.name);
+      recentOpponents.set(p1.name, p2.name);
+      recentOpponents.set(p2.name, p1.name);
+      const match = createMatch(p1, p2);
       setupMatch(match);
       matches.push(match);
-      playerMatchMap.set(p1.name,match);playerMatchMap.set(p2.name,match);
+      playerMatchMap.set(p1.name, match);
+      playerMatchMap.set(p2.name, match);
     } else {
       waitingQueue.push(p1);
     }
   }
 }
 
-function createMatch(p1,p2){
-  return{id:crypto.randomUUID(),players:[p1,p2],balls:[],running:true,startTime:Date.now(),lastSpawn:Date.now(),spawnDelay};
-}
-function resetAI(p){p.targetX=null;p.targetY=null;}
-function resetAIState(p){p.targetX=null;p.targetY=null;p.deathTime=0;p.alive=true;p.lastVX=0;p.lastVY=0;}
-function setupMatch(match){
-  const[p1,p2]=match.players;
-  for(const p of match.players){resetAIState(p);p.alive=true;}
-  p1.x=canvas.width/2-canvas.width*0.25;p1.y=canvas.height*0.5;
-  p2.x=canvas.width/2+canvas.width*0.25;p2.y=canvas.height*0.5;
-  match.balls=[];match.lastSpawn=Date.now();match.spawnDelay=spawnDelay;
-  for(let i=0;i<startBallCount;i++)createBallForMatch(match);
-  if(!spectateModeActive){const humanHere=match.players.some(p=>p.name==="YOU");if(humanHere)spectateMatchId=match.id;}
+function createMatch(p1, p2) {
+  return { id: crypto.randomUUID(), players:[p1,p2], balls:[], running:true, startTime:Date.now(), lastSpawn:Date.now(), spawnDelay };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+function resetAIState(p) {
+  p.targetX = null; p.targetY = null;
+  p.deathTime = 0;  p.alive = true;
+  p.lastVX = 0; p.lastVY = 0;
+  p.aiVX = 0;   p.aiVY = 0;
+}
+
+function setupMatch(match) {
+  const [p1, p2] = match.players;
+  for (const p of match.players) { resetAIState(p); p.alive = true; }
+  p1.x = W()/2 - W()*0.25; p1.y = H()*0.5;
+  p2.x = W()/2 + W()*0.25; p2.y = H()*0.5;
+  match.balls = []; match.lastSpawn = Date.now(); match.spawnDelay = spawnDelay;
+  for (let i = 0; i < startBallCount; i++) createBallForMatch(match);
+  if (!spectateModeActive) {
+    if (match.players.some(p => p.name === "YOU")) spectateMatchId = match.id;
+  }
+}
+
+// ═══════════════════════════════════════════════
 //  GAME LOOP
-// ════════════════════════════════════════════════════════════════════════════
-function loop(){update();draw();requestAnimationFrame(loop);}
+// ═══════════════════════════════════════════════
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 
-function restartGame(){
-  if(spawnTimer)clearTimeout(spawnTimer);
-  const kr=currentRound;startGame(mode);currentRound=kr;
+function restartGame() {
+  clearAllTimers();
+  const kr = currentRound;
+  startGame(mode);
+  currentRound = kr;
 }
 
-function gameOver(){
-  running=false;
-  let survived=Math.floor((Date.now()-startTime)/1000);
-  if(survived>record){record=survived;localStorage.setItem("fingerDodgeRecord",record);document.getElementById("record").textContent=record;}
-  document.getElementById("finalTime").textContent=survived;
+function gameOver() {
+  running = false;
+  clearAllTimers();
+  const survived = Math.floor((Date.now() - startTime) / 1000);
+  if (survived > record) {
+    record = survived;
+    localStorage.setItem("fingerDodgeRecord", record);
+  }
+  document.getElementById("finalTime").textContent = survived;
+  const recEl = document.getElementById("record");
+  if (recEl) recEl.textContent = record;
   showScreen("gameOver");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  UPDATE
-// ════════════════════════════════════════════════════════════════════════════
-function update(){
-  if(!running)return;
-  if(mode==="tournament"){updateTournament();return;}
+// ═══════════════════════════════════════════════
+function update() {
+  if (!running) return;
+  if (mode === "tournament") { updateTournament(); return; }
 
-  document.getElementById("time").textContent=Math.floor((Date.now()-startTime)/1000);
+  const el = document.getElementById("time");
+  if (el) el.textContent = Math.floor((Date.now() - startTime) / 1000);
+  const bel = document.getElementById("balls");
+  if (bel) bel.textContent = balls.length;
 
-  if(mode==="multi"){
-    if(keys["w"])players[0].y-=5;if(keys["s"])players[0].y+=5;
-    if(keys["a"])players[0].x-=5;if(keys["d"])players[0].x+=5;
-    if(keys["arrowup"])players[1].y-=5;if(keys["arrowdown"])players[1].y+=5;
-    if(keys["arrowleft"])players[1].x-=5;if(keys["arrowright"])players[1].x+=5;
+  // ── Online mode ──
+  if (mode === "online") {
+    pushMyPosition();
+
+    // Host: advance ball physics and push state
+    if (onlineIsHost) {
+      // Spawn new ball periodically
+      if (Date.now() - onlineBallSpawnTimer > onlineSpawnInterval) {
+        onlineBallSpawnTimer = Date.now();
+        balls.push(makeOnlineBall(ballSpeedMultiplier));
+      }
+      // Move balls (host owns physics)
+      for (const b of balls) {
+        b.x += b.vx; b.y += b.vy;
+        if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+        if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
+        if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+        if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+      }
+      pushBallState();
+    }
+    // p2: balls come from Firebase (updated in listener), just clamp to screen
+    else {
+      for (const b of balls) {
+        b.x = Math.max(b.radius, Math.min(W() - b.radius, b.x));
+        b.y = Math.max(b.radius, Math.min(H() - b.radius, b.y));
+      }
+    }
+
+    // Interpolate opponent position smoothly
+    for (const p of players) {
+      if (p.name !== onlineAccount.name && p.tx !== undefined) {
+        p.x += (p.tx - p.x) * 0.3;
+        p.y += (p.ty - p.y) * 0.3;
+      }
+    }
+
+    // Clamp me
+    const me = players.find(p => p.name === onlineAccount.name);
+    if (me) {
+      me.x = Math.max(me.radius, Math.min(W()-me.radius, me.x));
+      me.y = Math.max(me.radius, Math.min(H()-me.radius, me.y));
+    }
+
+    // Collision check only for me
+    if (me && me.alive) checkOnlineCollision(me);
+    return;
   }
 
-  if(mode==="mirror"&&mirrorBot&&mirrorBot.alive)updateAI(mirrorBot,balls);
-
-  for(const p of players)
-    if(p.alive&&!["Player","Player 1","Player 2","YOU","Mirror"].includes(p.name)&&p.name.startsWith("Bot"))
-      updateAI(p,balls);
-
-  
-
-  for(const p of players){
-    p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
-    p.y=Math.max(p.radius,Math.min(canvas.height-p.radius,p.y));
+  // ── Multi ──
+  if (mode === "multi") {
+    const p1 = players[0], p2 = players[1];
+    if (p1 && p1.alive) {
+      if (keys["w"]) p1.y -= 5; if (keys["s"]) p1.y += 5;
+      if (keys["a"]) p1.x -= 5; if (keys["d"]) p1.x += 5;
+    }
+    if (p2 && p2.alive) {
+      if (keys["arrowup"])    p2.y -= 5; if (keys["arrowdown"])  p2.y += 5;
+      if (keys["arrowleft"])  p2.x -= 5; if (keys["arrowright"]) p2.x += 5;
+    }
   }
 
-  for(const b of balls){
-    b.x+=b.vx;b.y+=b.vy;
-    if(b.x-b.radius<0||b.x+b.radius>canvas.width){b.vx*=-1;b.x=Math.max(b.radius,Math.min(canvas.width-b.radius,b.x));}
-    if(b.y-b.radius<0||b.y+b.radius>canvas.height){b.vy*=-1;b.y=Math.max(b.radius,Math.min(canvas.height-b.radius,b.y));}
+  // AI
+  for (const p of players) {
+    if (!p.alive) continue;
+    const humanNames = ["Player","Player 1","Player 2","YOU"];
+    if (!humanNames.includes(p.name)) updateAI(p, balls);
   }
 
-  if(mode==="coin"){
-    for(const p of players){
-      if(!p.alive)continue;
-      for(let i=coins.length-1;i>=0;i--){
-        const c=coins[i];
-        const dx=p.x-c.x,dy=p.y-c.y;
-        if(Math.sqrt(dx*dx+dy*dy)<p.radius+c.r){
-          if(p.name==="Player"){coinScorePlayer+=c.value;document.getElementById("coinScore").textContent=coinScorePlayer;}
-          coins.splice(i,1);
-          if(Math.random()<0.4)spawnCoin();
+  // Clamp
+  for (const p of players) {
+    p.x = Math.max(p.radius, Math.min(W()-p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(H()-p.radius, p.y));
+  }
+
+  // Move balls
+  for (const b of balls) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+    if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
+    if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+    if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+  }
+
+  // Coin collection
+  if (mode === "coin") {
+    for (const p of players) {
+      if (!p.alive) continue;
+      for (let i = coins.length-1; i >= 0; i--) {
+        const c = coins[i];
+        const dx = p.x - c.x, dy = p.y - c.y;
+        if (Math.sqrt(dx*dx + dy*dy) < p.radius + c.r) {
+          if (p.name === "Player") {
+            coinScorePlayer += c.value;
+            document.getElementById("coinScore").textContent = coinScorePlayer;
+          }
+          coins.splice(i, 1);
+          if (Math.random() < 0.4) spawnCoin();
         }
       }
     }
   }
 
-  for(const p of players)checkCollision(p);
+  for (const p of players) checkCollision(p);
 }
 
-function updateTournament(){
-  for(const match of[...matches])if(match.running)updateMatch(match);
-  matches=matches.filter(m=>m.running);
+// ── Online collision: only check local player, report result ──
+function checkOnlineCollision(me) {
+  for (const b of balls) {
+    const dx = me.x - b.x, dy = me.y - b.y;
+    if (Math.sqrt(dx*dx + dy*dy) < me.radius + b.radius) {
+      me.alive = false;
+      // Report: the other player wins
+      const opp = players.find(p => p.name !== me.name);
+      reportOnlineResult(opp ? opp.name : "", me.name);
+      return;
+    }
+  }
+}
+
+function updateTournament() {
+  for (const match of [...matches]) {
+    if (match.running) updateMatch(match);
+  }
+  matches = matches.filter(m => m.running);
   updateEloTable();
   autoFollowSpectate();
 }
 
-function updateMatch(match){
-  if(!match.running)return;
-  for(const p of match.players)
-    if(p.alive&&p.name.startsWith("Bot"))updateAI(p,match.balls);
-  for(const b of match.balls){
-    b.x+=b.vx;b.y+=b.vy;
-    if(b.x-b.radius<0||b.x+b.radius>canvas.width)b.vx*=-1;
-    if(b.y-b.radius<0||b.y+b.radius>canvas.height)b.vy*=-1;
+function updateMatch(match) {
+  if (!match.running) return;
+  for (const p of match.players) {
+    if (p.alive && p.name !== "YOU") updateAI(p, match.balls);
   }
-  const now=Date.now();
-  if(now-match.lastSpawn>=match.spawnDelay){createBallForMatch(match);match.lastSpawn=now;}
-  for(const p of match.players){
-    if(!p.alive)continue;
-    for(const b of match.balls){
-      const dx=p.x-b.x,dy=p.y-b.y;
-      if(Math.sqrt(dx*dx+dy*dy)<p.radius+b.radius){
-        p.alive=false;
-        const alive=match.players.filter(x=>x.alive);
-        if(alive.length<=1){
-          match.running=false;
-          finishMatch(match,alive[0]||match.players.find(x=>x!==p),p);
+  for (const b of match.balls) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+    if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
+    if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+    if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+  }
+  const now = Date.now();
+  if (now - match.lastSpawn >= match.spawnDelay) {
+    createBallForMatch(match); match.lastSpawn = now;
+  }
+  for (const p of match.players) {
+    if (!p.alive) continue;
+    for (const b of match.balls) {
+      const dx = p.x - b.x, dy = p.y - b.y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+        p.alive = false;
+        const alive = match.players.filter(x => x.alive);
+        if (alive.length <= 1) {
+          match.running = false;
+          finishMatch(match, alive[0] || match.players.find(x => x !== p), p);
           return;
         }
       }
@@ -1163,24 +1561,20 @@ function updateMatch(match){
   }
 }
 
-function checkCollision(p){
-  if(!p.alive)return;
-  for(const b of balls){
-    const dx=p.x-b.x,dy=p.y-b.y;
-    if(Math.sqrt(dx*dx+dy*dy)<p.radius+b.radius){
-      p.alive=false;p.deathTime=Date.now();eliminated.push(p);
-      const alive=players.filter(x=>x.alive);
-
-      // Online mode: report result
-      if(mode==="online"){
-        const loserName=p.name;
-        const winnerName=alive.find(x=>x.alive)?.name||players.find(x=>x!==p)?.name;
-        reportOnlineResult(winnerName,loserName);
-        return;
-      }
-
-      if(alive.length<=1){
-        if(alive.length===1){alive[0].deathTime=Infinity;eliminated.push(alive[0]);}
+function checkCollision(p) {
+  if (!p.alive) return;
+  for (const b of balls) {
+    const dx = p.x - b.x, dy = p.y - b.y;
+    if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+      p.alive = false;
+      p.deathTime = Date.now();
+      eliminated.push(p);
+      const alive = players.filter(x => x.alive);
+      if (alive.length <= 1) {
+        if (alive.length === 1 && !eliminated.includes(alive[0])) {
+          alive[0].deathTime = Infinity;
+          eliminated.push(alive[0]);
+        }
         finishArena();
       }
       return;
@@ -1188,352 +1582,464 @@ function checkCollision(p){
   }
 }
 
-async function reportOnlineResult(winnerName,loserName){
-  if(!running)return;
-  running=false;
-  const diff=Math.abs(onlineAccount.elo-(onlineOpponent?.elo||1500));
-  const change=Math.max(1,Math.min(15,5+diff/100));
-  if(fbReady&&onlineMatchId){
-    try{
-      await dbUpdate("onlineMatches/"+onlineMatchId,{
-        status:"done",winner:winnerName,eloChange:Math.round(change)
+async function reportOnlineResult(winnerName, loserName) {
+  if (onlineResultHandled) return;
+  // KORREKTUR: onlineResultHandled hier NICHT vorab auf true setzen!
+
+  const diff   = Math.abs(onlineAccount.elo - (onlineOpponent?.elo || 1500));
+  const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
+
+  if (fbReady && onlineMatchId) {
+    try {
+      await dbUpdate("onlineMatches/" + onlineMatchId, {
+        status: "done", winner: winnerName, eloChange: change
       });
-    }catch(e){
-      // Fallback: handle locally
-      handleOnlineResult(winnerName,Math.round(change));
+    } catch(e) {
+      // Fallback, falls die Datenbankverbindung fehlschlägt
+      handleOnlineResult(winnerName, change);
     }
   } else {
-    handleOnlineResult(winnerName,Math.round(change));
+    handleOnlineResult(winnerName, change);
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  TOURNAMENT MATCH FINISH
-// ════════════════════════════════════════════════════════════════════════════
-function finishMatch(match,winner,loser){
-  match.running=false;
-  const diff=loser.elo-winner.elo;
-  let change=Math.max(1,Math.min(15,5+diff/100));
-  winner.elo+=change;loser.elo-=change;
-  winner.lastChange=change;loser.lastChange=-change;
-  winner.alive=true;loser.alive=true;
-  winner.arenaScore=(winner.arenaScore||0)+1;
-  if(winner.stats){winner.stats.wins++;winner.stats.matchesPlayed++;winner.stats.totalEloGain+=change;winner.stats.currentStreak++;if(winner.stats.currentStreak>winner.stats.bestStreak)winner.stats.bestStreak=winner.stats.currentStreak;}
-  if(loser.stats){loser.stats.losses++;loser.stats.matchesPlayed++;loser.stats.totalEloLoss+=change;loser.stats.currentStreak=0;}
-  matches=matches.filter(m=>m.id!==match.id);
-  playerMatchMap.delete(winner.name);playerMatchMap.delete(loser.name);
-  if(spectateMatchId===match.id&&!spectateModeActive)spectateMatchId=null;
-  if(winner.name==="YOU")showEloAnimation(change);
-  if(loser.name==="YOU")showEloAnimation(-change);
 
-  // Spectator winner overlay for this match
-  showMatchWinnerBanner(winner.name,match);
+// ═══════════════════════════════════════════════
+//  TOURNAMENT FINISH
+// ═══════════════════════════════════════════════
+function finishMatch(match, winner, loser) {
+  match.running = false;
+  const diff   = loser.elo - winner.elo;
+  const change = Math.max(1, Math.min(15, 5 + diff / 100));
+  winner.elo += change; loser.elo -= change;
+  winner.lastChange = change; loser.lastChange = -change;
+  winner.alive = true; loser.alive = true;
+  winner.arenaScore = (winner.arenaScore || 0) + 1;
 
-  setTimeout(()=>{
-    resetAI(winner);resetAI(loser);
-    if(humanRemovedFromQueue){
-      if(winner.name!=="YOU")waitingQueue.push(winner);
-      if(loser.name!=="YOU")waitingQueue.push(loser);
+  if (winner.stats) {
+    winner.stats.wins++; winner.stats.matchesPlayed++;
+    winner.stats.totalEloGain += change;
+    winner.stats.currentStreak++;
+    if (winner.stats.currentStreak > winner.stats.bestStreak)
+      winner.stats.bestStreak = winner.stats.currentStreak;
+  }
+  if (loser.stats) {
+    loser.stats.losses++; loser.stats.matchesPlayed++;
+    loser.stats.totalEloLoss += change;
+    loser.stats.currentStreak = 0;
+  }
+
+  matches = matches.filter(m => m.id !== match.id);
+  playerMatchMap.delete(winner.name);
+  playerMatchMap.delete(loser.name);
+  if (spectateMatchId === match.id && !spectateModeActive) spectateMatchId = null;
+
+  if (winner.name === "YOU") showEloAnimation(change);
+  if (loser.name  === "YOU") showEloAnimation(-change);
+
+  matchBanner = { text: "🏆 Winner: " + winner.name, ts: Date.now(), duration: 2500 };
+
+  setTimeout(() => {
+    if (humanRemovedFromQueue) {
+      if (winner.name !== "YOU") waitingQueue.push(winner);
+      if (loser.name  !== "YOU") waitingQueue.push(loser);
     } else {
-      waitingQueue.push(winner);waitingQueue.push(loser);
+      waitingQueue.push(winner);
+      waitingQueue.push(loser);
     }
     seededMatchmaking();
-  },2500+Math.random()*1500);
+  }, 2500 + Math.random() * 1500);
 }
 
-// Banner shown on canvas briefly
-let matchBanner=null;
-function showMatchWinnerBanner(name,match){
-  matchBanner={text:"🏆 Winner: "+name,ts:Date.now(),duration:2500};
-}
+function finishArena() {
+  if (mode !== "tournament") running = false;
+  clearAllTimers();
+  eliminated.sort((a, b) => {
+    const da = isFinite(a.deathTime) ? a.deathTime : Number.MAX_SAFE_INTEGER;
+    const db = isFinite(b.deathTime) ? b.deathTime : Number.MAX_SAFE_INTEGER;
+    return db - da;
+  });
 
-function finishArena(){
-  if(mode!=="tournament")running=false;
-  if(spawnTimer)clearTimeout(spawnTimer);
-  eliminated.sort((a,b)=>b.deathTime-a.deathTime);
-  if(rankingMode==="points"){
-    const total=eliminated.length;
-    for(let i=0;i<eliminated.length;i++){
-      const p=eliminated[i];let r=ranking.find(x=>x.name===p.name);
-      const pts=total-i;
-      if(r)r.points+=pts;
-      else ranking.push({name:p.name,color:p.color,points:pts,elo:1500,lastChange:0});
+  if (rankingMode === "points") {
+    const total = eliminated.length;
+    for (let i = 0; i < eliminated.length; i++) {
+      const p   = eliminated[i];
+      const pts = total - i;
+      let r = ranking.find(x => x.name === p.name);
+      if (r) r.points += pts;
+      else ranking.push({ name:p.name, color:p.color, points:pts, elo:1500, lastChange:0 });
     }
   } else {
-    const K=24;
-    for(const b of ranking)b.lastChange=0;
-    for(let i=0;i<eliminated.length;i++)for(let j=i+1;j<eliminated.length;j++){
-      let a=ranking.find(x=>x.name===eliminated[i].name);
-      if(!a){a={name:eliminated[i].name,color:eliminated[i].color,points:0,elo:1500,lastChange:0};ranking.push(a);}
-      let b=ranking.find(x=>x.name===eliminated[j].name);
-      if(!b){b={name:eliminated[j].name,color:eliminated[j].color,points:0,elo:1500,lastChange:0};ranking.push(b);}
-      const eA=1/(1+Math.pow(10,(b.elo-a.elo)/400));
-      const cA=K*(1-eA),cB=K*(0-(1-eA));
-      a.elo+=cA;b.elo+=cB;a.lastChange+=cA;b.lastChange+=cB;
+    const K = 24;
+    for (const b of ranking) b.lastChange = 0;
+    for (let i = 0; i < eliminated.length; i++) {
+      for (let j = i+1; j < eliminated.length; j++) {
+        let a = ranking.find(x => x.name === eliminated[i].name);
+        if (!a) { a = { name:eliminated[i].name, color:eliminated[i].color, points:0, elo:1500, lastChange:0 }; ranking.push(a); }
+        let b = ranking.find(x => x.name === eliminated[j].name);
+        if (!b) { b = { name:eliminated[j].name, color:eliminated[j].color, points:0, elo:1500, lastChange:0 }; ranking.push(b); }
+        const eA = 1 / (1 + Math.pow(10, (b.elo - a.elo) / 400));
+        const cA = K * (1 - eA), cB = K * (0 - (1-eA));
+        a.elo += cA; b.elo += cB; a.lastChange += cA; b.lastChange += cB;
+      }
     }
   }
+
   updateRanking();
-  const win=eliminated[0];
+  const win = eliminated[0];
   showScreen("gameOver");
-  document.getElementById("finalTime").innerHTML="Round "+currentRound+"/"+tournamentRounds+"<br>Winner: "+win.name;
-  if(currentRound<tournamentRounds){
+  document.getElementById("finalTime").innerHTML =
+    `Round ${currentRound}/${tournamentRounds}<br>Winner: ${win?.name || "?"}`;
+  if (currentRound < tournamentRounds) {
     currentRound++;
-    setTimeout(()=>{document.getElementById("gameOver").style.display="none";startGame(mode);},15000);
+    setTimeout(() => {
+      document.getElementById("gameOver").style.display = "none";
+      startGame(mode);
+    }, 15000);
   } else {
-    document.getElementById("finalTime").innerHTML+="<br><br><b>TOURNAMENT OVER</b>";
+    document.getElementById("finalTime").innerHTML += "<br><br><b>TOURNAMENT OVER</b>";
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  RANKING / ELO TABLE
-// ════════════════════════════════════════════════════════════════════════════
-function updateRanking(){
-  let sorted=rankingMode==="elo"?[...ranking].sort((a,b)=>b.elo-a.elo):[...ranking].sort((a,b)=>b.points-a.points);
-  let html="<b>TOURNAMENT RANKING</b><br><br>";
-  for(let i=0;i<sorted.length;i++)
-    html+=rankingMode==="elo"
-      ?(i+1)+". "+sorted[i].name+" | "+Math.round(sorted[i].elo)+" ELO ("+(sorted[i].lastChange>=0?"+":"")+Math.round(sorted[i].lastChange)+")<br>"
-      :(i+1)+". "+sorted[i].name+" | "+sorted[i].points+" Points<br>";
-  document.getElementById("ranking").innerHTML=html;
+// ═══════════════════════════════════════════════
+function updateRanking() {
+  if (!ranking.length) return;
+  const sorted = rankingMode === "elo"
+    ? [...ranking].sort((a,b) => b.elo    - a.elo)
+    : [...ranking].sort((a,b) => b.points - a.points);
+  let html = "<b>TOURNAMENT RANKING</b><br><br>";
+  for (let i = 0; i < sorted.length; i++) {
+    html += rankingMode === "elo"
+      ? `${i+1}. ${sorted[i].name} | ${Math.round(sorted[i].elo)} ELO (${sorted[i].lastChange>=0?"+":""}${Math.round(sorted[i].lastChange)})<br>`
+      : `${i+1}. ${sorted[i].name} | ${sorted[i].points} Points<br>`;
+  }
+  document.getElementById("ranking").innerHTML = html;
 }
 
-let lastEloRender=0;
-function updateEloTable(){
-  if(Date.now()-lastEloRender<400)return;
-  lastEloRender=Date.now();
-  let sorted=[...participants].sort((a,b)=>b.elo-a.elo);
-  let html="";
-  for(let i=0;i<sorted.length;i++){
-    const p=sorted[i];
-    const active=matches.some(m=>m.running&&m.players.includes(p));
-    const isSpec=p.name==="YOU"&&humanRemovedFromQueue;
-    html+=`<div data-pname="${p.name}" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;padding:3px;border-radius:6px;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background=''" onclick="openProfile('${p.name}')">
+let lastEloRender = 0;
+function updateEloTable() {
+  if (Date.now() - lastEloRender < 400) return;
+  lastEloRender = Date.now();
+  const sorted = [...participants].sort((a,b) => b.elo - a.elo);
+  let html = "";
+  for (let i = 0; i < sorted.length; i++) {
+    const p      = sorted[i];
+    const active = matches.some(m => m.running && m.players.includes(p));
+    const isSpec = p.name === "YOU" && humanRemovedFromQueue;
+    html += `<div data-pname="${p.name}"
+      style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;padding:3px;border-radius:6px;"
+      onmouseover="this.style.background='rgba(255,255,255,0.1)'"
+      onmouseout="this.style.background=''"
+      onclick="openProfile('${p.name}')">
       <div style="width:12px;height:12px;border-radius:50%;background:${isSpec?"#aaa":active?"lime":"red"};flex-shrink:0;"></div>
-      <div>${i+1}. <b style="color:${p.color||'white'}">${p.name}</b>${isSpec?" 👁":""}<br>${Math.round(p.elo)}
-        <span style="color:${p.lastChange>=0?"lime":"red"}">(${p.lastChange>=0?"+":""}${Math.round(p.lastChange)})</span>
+      <div>${i+1}. <b style="color:${p.color||"white"}">${p.name}</b>${isSpec?" 👁":""}<br>
+        ${Math.round(p.elo)} <span style="color:${p.lastChange>=0?"lime":"red"}">(${p.lastChange>=0?"+":""}${Math.round(p.lastChange)})</span>
       </div></div>`;
   }
-  const me=participants.find(p=>p.name==="YOU");
-  if(me){
-    const myRank=sorted.findIndex(p=>p.name==="YOU")+1;
-    const timeEl=document.getElementById("time");
-    const recEl=document.getElementById("record");
-    const ballsEl=document.getElementById("balls");
-    if(timeEl)timeEl.textContent=Math.round(me.elo);
-    if(recEl)recEl.textContent=myRank;
-    if(ballsEl)ballsEl.textContent=participants.length;
+  const me = participants.find(p => p.name === "YOU");
+  if (me) {
+    const myRank = sorted.findIndex(p => p.name === "YOU") + 1;
+    const t = document.getElementById("time"), r = document.getElementById("record"), b = document.getElementById("balls");
+    if (t) t.textContent = Math.round(me.elo);
+    if (r) r.textContent = myRank;
+    if (b) b.textContent = participants.length;
   }
-  document.getElementById("eloList").innerHTML=html;
+  document.getElementById("eloList").innerHTML = html;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  BOT PROFILE
-// ════════════════════════════════════════════════════════════════════════════
-function openProfile(name){
-  const p=participants.find(x=>x.name===name);if(!p)return;
-  const sorted=[...participants].sort((a,b)=>b.elo-a.elo);
-  const rank=sorted.findIndex(x=>x.name===name)+1;
-  const winrate=p.stats.matchesPlayed>0?Math.round(p.stats.wins/p.stats.matchesPlayed*100):0;
-  const inMatch=matches.some(m=>m.running&&m.players.includes(p));
-  const opponent=inMatch?matches.find(m=>m.running&&m.players.includes(p))?.players.find(x=>x.name!==name):null;
-  document.getElementById("profileName").innerHTML=`<span style="color:${p.color}">${p.name}</span>`;
-  document.getElementById("profileStats").innerHTML=`
+// ═══════════════════════════════════════════════
+//  PROFILE MODAL
+// ═══════════════════════════════════════════════
+function openProfile(name) {
+  const p = participants.find(x => x.name === name);
+  if (!p) return;
+  const sorted  = [...participants].sort((a,b) => b.elo - a.elo);
+  const rank    = sorted.findIndex(x => x.name === name) + 1;
+  const winrate = p.stats.matchesPlayed > 0
+    ? Math.round(p.stats.wins / p.stats.matchesPlayed * 100) : 0;
+  const inMatch = matches.some(m => m.running && m.players.includes(p));
+  const opp     = inMatch
+    ? matches.find(m => m.running && m.players.includes(p))?.players.find(x => x.name !== name)
+    : null;
+  const skillVal = Math.round(getSkillValue(p) * 100);
+
+  document.getElementById("profileName").innerHTML  = `<span style="color:${p.color}">${p.name}</span>`;
+  document.getElementById("profileStats").innerHTML = `
     <div class="prof-row"><span class="prof-label">Rank</span><span class="prof-val">#${rank} / ${participants.length}</span></div>
     <div class="prof-row"><span class="prof-label">ELO</span><span class="prof-val">${Math.round(p.elo)}</span></div>
-    <div class="prof-row"><span class="prof-label">Skill Level</span><span class="prof-val">${Math.round(p.skill*100)}%</span></div>
+    <div class="prof-row"><span class="prof-label">Skill</span><span class="prof-val">${skillVal}%</span></div>
     <div class="prof-row"><span class="prof-label">Matches</span><span class="prof-val">${p.stats.matchesPlayed}</span></div>
     <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:lime">${p.stats.wins}</span></div>
     <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${p.stats.losses}</span></div>
     <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
-    <div class="prof-row"><span class="prof-label">Best Streak</span><span class="prof-val">${p.stats.bestStreak} Wins</span></div>
+    <div class="prof-row"><span class="prof-label">Best Streak</span><span class="prof-val">${p.stats.bestStreak}</span></div>
     <div class="prof-row"><span class="prof-label">ELO Gained</span><span class="prof-val" style="color:lime">+${Math.round(p.stats.totalEloGain)}</span></div>
     <div class="prof-row"><span class="prof-label">ELO Lost</span><span class="prof-val" style="color:#ff4444">-${Math.round(p.stats.totalEloLoss)}</span></div>
-    <div class="prof-row"><span class="prof-label">Status</span><span class="prof-val">${inMatch?"⚔️ Fighting "+opponent?.name:"⏳ Waiting"}</span></div>
+    <div class="prof-row"><span class="prof-label">Status</span><span class="prof-val">${inMatch?"⚔️ vs "+opp?.name:"⏳ Waiting"}</span></div>
     <div class="prof-row"><span class="prof-label">Speed</span><span class="prof-val">${p.speed.toFixed(1)}</span></div>
     <div class="prof-row"><span class="prof-label">Awareness</span><span class="prof-val">${Math.round(p.awareness)}px</span></div>
   `;
-  document.getElementById("profileModal").style.display="flex";
+  document.getElementById("profileModal").style.display = "flex";
 }
-function closeProfile(){document.getElementById("profileModal").style.display="none";}
+function closeProfile() { document.getElementById("profileModal").style.display = "none"; }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  SPECTATOR
-// ════════════════════════════════════════════════════════════════════════════
-function autoFollowSpectate(){
-  if(!spectateModeActive)return;
-  if(followMode==="best"){const cur=matches.find(m=>m.id===spectateMatchId&&m.running);if(!cur)pickBestMatch();}
-  else if(followMode==="random"){const cur=matches.find(m=>m.id===spectateMatchId&&m.running);if(!cur)pickRandomMatch();}
-  else if(followMode==="target"&&targetName){const m=matches.find(m=>m.running&&m.players.some(p=>p.name.toLowerCase()===targetName));if(m)spectateMatchId=m.id;}
+// ═══════════════════════════════════════════════
+function autoFollowSpectate() {
+  if (!spectateModeActive) return;
+  if (followMode === "best") {
+    const cur = matches.find(m => m.id === spectateMatchId && m.running);
+    if (!cur) pickBestMatch();
+  } else if (followMode === "random") {
+    const cur = matches.find(m => m.id === spectateMatchId && m.running);
+    if (!cur) pickRandomMatch();
+  } else if (followMode === "target" && targetName) {
+    const m = matches.find(m => m.running && m.players.some(p => p.name.toLowerCase() === targetName));
+    if (m) spectateMatchId = m.id;
+  }
 }
-function pickRandomMatch(){const live=matches.filter(m=>m.running);if(!live.length)return;spectateMatchId=live[Math.floor(Math.random()*live.length)].id;}
-function pickBestMatch(){let best=null,bestAvg=-1;for(const m of matches){if(!m.running)continue;const avg=(m.players[0].elo+m.players[1].elo)/2;if(avg>bestAvg){bestAvg=avg;best=m;}}if(best)spectateMatchId=best.id;}
-function setTVMode(m){
-  followMode=m;
-  if(m==="target"){const name=prompt("Enter bot name:");if(!name)return;targetName=name.toLowerCase();}
-  if(!humanRemovedFromQueue){humanRemovedFromQueue=true;waitingQueue=waitingQueue.filter(p=>p.name!=="YOU");}
-  spectateModeActive=true;spectateMatchId=null;autoFollowSpectate();
-  document.getElementById("spectatorInfo").style.display="block";
+function pickRandomMatch() {
+  const live = matches.filter(m => m.running);
+  if (live.length) spectateMatchId = live[Math.floor(Math.random()*live.length)].id;
 }
-function resumePlay(){
-  spectateModeActive=false;followMode="none";spectateMatchId=null;
-  document.getElementById("spectatorInfo").style.display="none";
-  if(humanRemovedFromQueue){
-    humanRemovedFromQueue=false;
-    const me=participants.find(p=>p.name==="YOU");
-    if(me&&!playerMatchMap.has("YOU")){waitingQueue.push(me);seededMatchmaking();}
+function pickBestMatch() {
+  let best = null, bestAvg = -1;
+  for (const m of matches) {
+    if (!m.running) continue;
+    const avg = (m.players[0].elo + m.players[1].elo) / 2;
+    if (avg > bestAvg) { bestAvg = avg; best = m; }
+  }
+  if (best) spectateMatchId = best.id;
+}
+
+function setTVMode(m) {
+  followMode = m;
+  if (m === "target") {
+    const n = prompt("Enter bot name:");
+    if (!n) return;
+    targetName = n.toLowerCase();
+  }
+  if (!humanRemovedFromQueue) {
+    humanRemovedFromQueue = true;
+    waitingQueue = waitingQueue.filter(p => p.name !== "YOU");
+  }
+  spectateModeActive = true; spectateMatchId = null;
+  autoFollowSpectate();
+  document.getElementById("spectatorInfo").style.display = "block";
+}
+function resumePlay() {
+  spectateModeActive = false; followMode = "none"; spectateMatchId = null;
+  document.getElementById("spectatorInfo").style.display = "none";
+  if (humanRemovedFromQueue) {
+    humanRemovedFromQueue = false;
+    const me = participants.find(p => p.name === "YOU");
+    if (me && !playerMatchMap.has("YOU")) { waitingQueue.push(me); seededMatchmaking(); }
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  DRAW
-// ════════════════════════════════════════════════════════════════════════════
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+// ═══════════════════════════════════════════════
+function draw() {
+  ctx.clearRect(0, 0, W(), H());
 
   // ── TOURNAMENT ──
-  if(mode==="tournament"){
-    let renderMatch=null;
-    if(spectateModeActive&&spectateMatchId)renderMatch=matches.find(m=>m.id===spectateMatchId&&m.running);
-    else if(!humanRemovedFromQueue){const dm=playerMatchMap.get("YOU");if(dm&&dm.running)renderMatch=dm;}
-    if(!renderMatch&&spectateModeActive)renderMatch=matches.find(m=>m.running);
+  if (mode === "tournament") {
+    let renderMatch = null;
+    if (spectateModeActive && spectateMatchId)
+      renderMatch = matches.find(m => m.id === spectateMatchId && m.running);
+    else if (!humanRemovedFromQueue) {
+      const dm = playerMatchMap.get("YOU");
+      if (dm && dm.running) renderMatch = dm;
+    }
+    if (!renderMatch && spectateModeActive) renderMatch = matches.find(m => m.running);
 
-    if(!renderMatch){
-      ctx.fillStyle="white";ctx.font="30px Arial";ctx.textAlign="center";
-      ctx.fillText(humanRemovedFromQueue&&!spectateModeActive?"You are watching – choose a TV mode":"Waiting for next match…",canvas.width/2,canvas.height/2);
-      document.getElementById("opponentInfo").style.display="none";
-      document.getElementById("spectatorInfo").style.display="none";
+    if (!renderMatch) {
+      ctx.fillStyle = "white"; ctx.font = "30px Arial"; ctx.textAlign = "center";
+      ctx.fillText(
+        humanRemovedFromQueue && !spectateModeActive
+          ? "You are watching – choose a TV mode"
+          : "Waiting for next match…",
+        W()/2, H()/2
+      );
+      document.getElementById("opponentInfo").style.display  = "none";
+      document.getElementById("spectatorInfo").style.display = "none";
       return;
     }
 
-    for(const b of renderMatch.balls){ctx.beginPath();ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);ctx.fillStyle="#ff4444";ctx.fill();}
-    for(const p of renderMatch.players){
-      if(!p.alive)continue;
-      ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fillStyle=p.color;ctx.fill();
-      ctx.fillStyle="white";ctx.font="14px Arial";ctx.textAlign="center";
-      ctx.fillText(p.name,p.x,p.y-p.radius-10);
+    for (const b of renderMatch.balls) {
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+      ctx.fillStyle = "#ff4444"; ctx.fill();
+    }
+    for (const p of renderMatch.players) {
+      if (!p.alive) continue;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+      ctx.fillStyle = p.color; ctx.fill();
+      ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
+      ctx.fillText(p.name, p.x, p.y - p.radius - 10);
     }
 
-    // Match winner banner
-    if(matchBanner&&Date.now()-matchBanner.ts<matchBanner.duration){
-      const alpha=1-Math.max(0,(Date.now()-matchBanner.ts-1800)/(matchBanner.duration-1800));
-      ctx.save();
-      ctx.globalAlpha=alpha;
-      ctx.fillStyle="rgba(0,0,0,0.7)";
-      ctx.beginPath();ctx.roundRect(canvas.width/2-220,canvas.height/2-50,440,90,16);ctx.fill();
-      ctx.fillStyle="#ffd700";ctx.font="bold 38px Arial";ctx.textAlign="center";
-      ctx.fillText(matchBanner.text,canvas.width/2,canvas.height/2+14);
+    if (matchBanner && Date.now() - matchBanner.ts < matchBanner.duration) {
+      const alpha = 1 - Math.max(0, (Date.now() - matchBanner.ts - 1800) / (matchBanner.duration - 1800));
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.beginPath(); ctx.roundRect(W()/2-220, H()/2-50, 440, 90, 16); ctx.fill();
+      ctx.fillStyle = "#ffd700"; ctx.font = "bold 38px Arial"; ctx.textAlign = "center";
+      ctx.fillText(matchBanner.text, W()/2, H()/2+14);
       ctx.restore();
-    } else if(matchBanner&&Date.now()-matchBanner.ts>=matchBanner.duration){matchBanner=null;}
+    } else if (matchBanner && Date.now() - matchBanner.ts >= matchBanner.duration) {
+      matchBanner = null;
+    }
 
-    // Opponent info
-    const oppDiv=document.getElementById("opponentInfo");
-    const spectDiv=document.getElementById("spectatorInfo");
-    if(!spectateModeActive&&!humanRemovedFromQueue){
-      const myMatch=playerMatchMap.get("YOU");
-      if(myMatch&&myMatch.running){
-        const opp=myMatch.players.find(p=>p.name!=="YOU");
-        if(opp){
-          const sorted=[...participants].sort((a,b)=>b.elo-a.elo);
-          const oppRank=sorted.findIndex(p=>p.name===opp.name)+1;
-          oppDiv.style.display="block";
-          document.getElementById("opponentText").innerHTML=
-            `Opponent: <b style="color:#ffd700">${opp.name}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(opp.skill*100)}%</b>`;
+    const oppDiv  = document.getElementById("opponentInfo");
+    const specDiv = document.getElementById("spectatorInfo");
+    if (!spectateModeActive && !humanRemovedFromQueue) {
+      const myMatch = playerMatchMap.get("YOU");
+      if (myMatch && myMatch.running) {
+        const opp = myMatch.players.find(p => p.name !== "YOU");
+        if (opp) {
+          const sorted  = [...participants].sort((a,b) => b.elo - a.elo);
+          const oppRank = sorted.findIndex(p => p.name === opp.name) + 1;
+          oppDiv.style.display = "block";
+          document.getElementById("opponentText").innerHTML =
+            `Opponent: <b style="color:#ffd700">${opp.name}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(getSkillValue(opp)*100)}%</b>`;
         }
-      } else {oppDiv.style.display="none";}
-      spectDiv.style.display="none";
+      } else { oppDiv.style.display = "none"; }
+      specDiv.style.display = "none";
     } else {
-      oppDiv.style.display="none";
-      spectDiv.style.display="block";
-      const p1=renderMatch.players[0],p2=renderMatch.players[1];
-      document.getElementById("spectatorText").innerHTML=`
+      oppDiv.style.display  = "none";
+      specDiv.style.display = "block";
+      const [p1, p2] = renderMatch.players;
+      document.getElementById("spectatorText").innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;gap:14px;font-size:14px;line-height:1.2;">
-          <div style="text-align:center;min-width:90px;"><b>${p1.name}</b><br>${Math.round(p1.elo)} ELO<br>${Math.round((p1.skill||0)*100)}%</div>
-          <div style="font-weight:bold;font-size:16px;opacity:0.8;padding:0 6px;">VS</div>
-          <div style="text-align:center;min-width:90px;"><b>${p2.name}</b><br>${Math.round(p2.elo)} ELO<br>${Math.round((p2.skill||0)*100)}%</div>
+          <div style="text-align:center;min-width:90px;"><b>${p1.name}</b><br>${Math.round(p1.elo)} ELO<br>${Math.round(getSkillValue(p1)*100)}%</div>
+          <div style="font-weight:bold;font-size:16px;opacity:0.8;">VS</div>
+          <div style="text-align:center;min-width:90px;"><b>${p2.name}</b><br>${Math.round(p2.elo)} ELO<br>${Math.round(getSkillValue(p2)*100)}%</div>
         </div>`;
     }
     return;
   }
 
   // ── COIN MODE ──
-  if(mode==="coin"){
-    for(const c of coins){
-      ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-      ctx.fillStyle=c.value>1?"#ffd700":"#ffcc44";
-      ctx.shadowColor="#ffaa00";ctx.shadowBlur=c.value>1?18:8;ctx.fill();ctx.shadowBlur=0;
-      if(c.value>1){ctx.fillStyle="#a06000";ctx.font="bold 11px Arial";ctx.textAlign="center";ctx.fillText("x3",c.x,c.y+4);}
+  if (mode === "coin") {
+    for (const c of coins) {
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
+      ctx.fillStyle   = c.value > 1 ? "#ffd700" : "#ffcc44";
+      ctx.shadowColor = "#ffaa00"; ctx.shadowBlur = c.value > 1 ? 18 : 8;
+      ctx.fill(); ctx.shadowBlur = 0;
+      if (c.value > 1) {
+        ctx.fillStyle = "#a06000"; ctx.font = "bold 11px Arial"; ctx.textAlign = "center";
+        ctx.fillText("x3", c.x, c.y + 4);
+      }
     }
   }
 
   // ── BALLS ──
-  for(const b of balls){ctx.beginPath();ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);ctx.fillStyle="#ff4444";ctx.fill();}
+  for (const b of balls) {
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+    ctx.fillStyle = "#ff4444"; ctx.fill();
+  }
 
   // ── PLAYERS ──
-  for(const p of players){
-    if(!p.alive)continue;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fillStyle=p.color;ctx.fill();
-    if(mode==="mirror"&&p.name==="Mirror"){
-      ctx.beginPath();ctx.arc(p.x,p.y,p.radius+4,0,Math.PI*2);
-      ctx.strokeStyle="rgba(255,136,170,0.6)";ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.stroke();ctx.setLineDash([]);
+  for (const p of players) {
+    if (!p.alive) continue;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+    ctx.fillStyle = p.color; ctx.fill();
+
+    if (mode === "mirror" && p.name === "Mirror") {
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.radius+4, 0, Math.PI*2);
+      ctx.strokeStyle = "rgba(255,136,170,0.6)"; ctx.lineWidth = 2;
+      ctx.setLineDash([5,5]); ctx.stroke(); ctx.setLineDash([]);
     }
-    ctx.fillStyle="white";ctx.font="14px Arial";ctx.textAlign="center";
-    ctx.fillText(p.name,p.x,p.y-p.radius-10);
+
+    ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
+    ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+  }
+
+  // ── ONLINE: draw death overlay ──
+  if (mode === "online") {
+    const me = players.find(p => p.name === onlineAccount?.name);
+    if (me && !me.alive) {
+      ctx.fillStyle = "rgba(255,0,0,0.18)";
+      ctx.fillRect(0, 0, W(), H());
+      ctx.fillStyle = "white"; ctx.font = "bold 48px Arial"; ctx.textAlign = "center";
+      ctx.fillText("💀 You died! Waiting for result…", W()/2, H()/2);
+    }
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-//  CONTROLS
-// ════════════════════════════════════════════════════════════════════════════
-function moveSingle(x,y){
-  if(spectateModeActive||humanRemovedFromQueue)return;
- if(mode==="online"){
-  const me = players.find(p => p.name === onlineAccount.name);
-  if(!me) return;
+// ═══════════════════════════════════════════════
+//  CONTROLS — fixed touch offset for iPhone
+// ═══════════════════════════════════════════════
+function moveSingle(x, y) {
+  if (spectateModeActive || humanRemovedFromQueue) return;
 
-  me.x = x;
-  me.y = y;
-
-  dbUpdate(`onlineMatches/${onlineMatchId}/${onlineRole}`, {
-    x: me.x,
-    y: me.y,
-    alive: true
-  });
-
-  return;
-}
-  if(mode==="tournament"){
-    const match=playerMatchMap.get("YOU");if(!match||!match.running)return;
-    const me=match.players.find(p=>p.name==="YOU");
-    if(me){me.x=Math.max(me.radius,Math.min(canvas.width-me.radius,x));me.y=Math.max(me.radius,Math.min(canvas.height-me.radius,y));}
+  if (mode === "tournament") {
+    const match = playerMatchMap.get("YOU");
+    if (!match || !match.running) return;
+    const me = match.players.find(p => p.name === "YOU");
+    if (me && me.alive) {
+      me.x = Math.max(me.radius, Math.min(W()-me.radius, x));
+      me.y = Math.max(me.radius, Math.min(H()-me.radius, y));
+    }
     return;
   }
-  
-  if(players[0]){
-    players[0].x=Math.max(players[0].radius,Math.min(canvas.width-players[0].radius,x));
-    players[0].y=Math.max(players[0].radius,Math.min(canvas.height-players[0].radius,y));
+
+  if (mode === "online") {
+    const me = players.find(p => p.name === onlineAccount?.name);
+    if (me && me.alive) {
+      me.x = Math.max(me.radius, Math.min(W()-me.radius, x));
+      me.y = Math.max(me.radius, Math.min(H()-me.radius, y));
+    }
+    return;
+  }
+
+  if (players[0] && players[0].alive) {
+    players[0].x = Math.max(players[0].radius, Math.min(W()-players[0].radius, x));
+    players[0].y = Math.max(players[0].radius, Math.min(H()-players[0].radius, y));
   }
 }
 
-document.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;});
-document.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false;});
-canvas.addEventListener("mousemove",e=>{if(running&&(mode==="single"||mode==="tournament"||mode==="coin"||mode==="mirror"||mode==="online"))moveSingle(e.clientX,e.clientY);});
-canvas.addEventListener("touchmove",e=>{if(running&&(mode==="single"||mode==="tournament"||mode==="coin"||mode==="mirror"||mode==="online"))moveSingle(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
-canvas.addEventListener("click",()=>closeProfile());
+document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
+document.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
 
-setInterval(()=>{if(mode==="tournament"&&running&&waitingQueue.length>=2)seededMatchmaking();},1000);
+canvas.addEventListener("mousemove", e => {
+  if (running && ["single","tournament","coin","mirror","online","survival"].includes(mode))
+    moveSingle(e.clientX, e.clientY);
+});
 
-// Online flow entry
-document.querySelector('button[onclick="showScreen(\'onlineFlow\')"]')?.addEventListener("click",showScreen_onlineFlow);
+// Fix: use getBoundingClientRect for correct coordinates on all devices including iPhone
+// ═══════════════════════════════════════════════
+//  CONTROLS — Event-Listener angepasst auf Skalierung
+// ═══════════════════════════════════════════════
+canvas.addEventListener("mousemove", e => {
+  if (running && ["single","tournament","coin","mirror","online","survival"].includes(mode)) {
+    const pos = screenToVirtual(e.clientX, e.clientY);
+    moveSingle(pos.x, pos.y);
+  }
+});
 
-// Fix the inline onclick
-window.showScreen=function(id){
-  if(id==="onlineFlow"){showScreen_onlineFlow();return;}
-  const SCREENS=["menu","settings","accountScreen","leaderboardScreen","onlineWait","vsScreen","winnerOverlay","gameOver"];
-  SCREENS.forEach(s=>{const el=document.getElementById(s);if(el)el.style.display=(s===id)?"flex":"none";});
-  document.getElementById("homeBtn").style.display=(id==="menu"||id==="settings"||id==="accountScreen"||id==="leaderboardScreen")?"none":"block";
-};
+canvas.addEventListener("touchmove", e => {
+  e.preventDefault();
+  if (!running) return;
+  if (!["single","tournament","coin","mirror","online","survival"].includes(mode)) return;
+  const touch = e.touches[0];
+  const pos   = screenToVirtual(touch.clientX, touch.clientY);
+  moveSingle(pos.x, pos.y);
+}, { passive: false });
 
-loop();
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  if (!running) return;
+  if (!["single","tournament","coin","mirror","online","survival"].includes(mode)) return;
+  const touch = e.touches[0];
+  const pos   = screenToVirtual(touch.clientX, touch.clientY);
+  moveSingle(pos.x, pos.y);
+}, { passive: false });
+
 </script>
 </body>
 </html>
