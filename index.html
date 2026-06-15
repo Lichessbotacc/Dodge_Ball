@@ -327,7 +327,21 @@ async function dbSet(path,val){return window._firebaseSet(dbRef(path),val);}
 async function dbUpdate(path,val){return window._firebaseUpdate(dbRef(path),val);}
 function dbOn(path,cb){window._firebaseOnValue(dbRef(path),snap=>cb(snap.val()));}
 async function dbRemove(path){return window._firebaseRemove(dbRef(path));}
+function syncOpponent(data){
+  if(!data || !onlineMatchId) return;
 
+  const opp = players.find(p => p.name !== onlineAccount.name);
+  if(!opp) return;
+
+  const oppRole = onlineRole === "p1" ? "p2" : "p1";
+  const d = data[oppRole];
+
+  if(d){
+    opp.x = d.x;
+    opp.y = d.y;
+    opp.alive = d.alive;
+  }
+}
 // ════════════════════════════════════════════════════════════════════════════
 //  ACCOUNT (stored in localStorage + Firebase)
 // ════════════════════════════════════════════════════════════════════════════
@@ -1076,12 +1090,7 @@ function update(){
     if(p.alive&&!["Player","Player 1","Player 2","YOU","Mirror"].includes(p.name)&&p.name.startsWith("Bot"))
       updateAI(p,balls);
 
-  // Online: opponent runs as AI locally (simulation)
-  if(mode==="online"){
-    for(const p of players){
-      if(p.name!==onlineAccount.name&&p.alive)updateAI(p,balls);
-    }
-  }
+  
 
   for(const p of players){
     p.x=Math.max(p.radius,Math.min(canvas.width-p.radius,p.x));
@@ -1470,6 +1479,21 @@ function draw(){
 // ════════════════════════════════════════════════════════════════════════════
 function moveSingle(x,y){
   if(spectateModeActive||humanRemovedFromQueue)return;
+ if(mode==="online"){
+  const me = players.find(p => p.name === onlineAccount.name);
+  if(!me) return;
+
+  me.x = x;
+  me.y = y;
+
+  dbUpdate(`onlineMatches/${onlineMatchId}/${onlineRole}`, {
+    x: me.x,
+    y: me.y,
+    alive: true
+  });
+
+  return;
+}
   if(mode==="tournament"){
     const match=playerMatchMap.get("YOU");if(!match||!match.running)return;
     const me=match.players.find(p=>p.name==="YOU");
