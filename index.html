@@ -75,7 +75,14 @@ button:hover{background:#555;}
   position:absolute;inset:0;display:none;flex-direction:column;
   justify-content:center;align-items:center;background:#111;color:white;z-index:30;
 }
-#menu{display:flex;}
+#menu {
+  display: flex;
+  overflow-y: auto;                  /* Erlaubt das Scrollen NUR in diesem Menü */
+  justify-content: flex-start;       /* Verhindert, dass der obere Titel beim Scrollen abgeschnitten wird */
+  padding: 60px 10px;                /* Gibt oben und unten einen schönen, sauberen Abstand beim Scrollen */
+  -webkit-overflow-scrolling: touch; /* Macht das Scrollen auf iPhones und iPads butterweich */
+}
+
 h1{font-size:50px;margin-bottom:20px;}
 h2{font-size:30px;margin-bottom:20px;}
 #gameOver{background:rgba(0,0,0,0.85);z-index:40;}
