@@ -624,11 +624,10 @@ async function openOnlineProfile(name) {
       <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
       
-      <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} vs ${p.bestWinOpp || "-"}</span></div>
-      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} vs ${p.worstLossOpp || "-"}</span></div>
-      
+            <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${p.bestWinOpp || "-"}</span></div>
+      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${p.worstLossOpp || "-"}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Total Elo Loss</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
     `;
 
     document.getElementById("profileModal").style.display = "flex";
