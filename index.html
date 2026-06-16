@@ -1218,38 +1218,37 @@ async function handleOnlineResult(winnerName, change) {
   saveAccountLocal();
   if (fbReady) await pushAccountToFirebase();
 
-  showEloAnimation(won ? eloChange : -eloChange);
+   showEloAnimation(won ? eloChange : -eloChange);
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
 
   // --- Online Bot Stats vollständig berechnen & in Firebase speichern ---
-    // --- Online Bot Stats vollständig berechnen & in Firebase speichern ---
   if (onlineVsBot && onlineOpponent) {
     onlineOpponent = sanitizeAccount(onlineOpponent);
     
     if (won) {
       // Spieler gewinnt -> Bot verliert
       onlineOpponent.elo = Math.max(100, onlineOpponent.elo - eloChange);
-      onlineOpponent.losses++;
+      onlineOpponent.losses = (onlineOpponent.losses ?? 0) + 1;
       onlineOpponent.currentStreak = 0;
-      onlineOpponent.totalEloLost += eloChange;
+      onlineOpponent.totalEloLost = (onlineOpponent.totalEloLost ?? 0) + eloChange;
 
       if (onlineOpponent.elo < (onlineOpponent.lowestElo ?? onlineOpponent.elo)) {
         onlineOpponent.lowestElo = onlineOpponent.elo;
       }
 
-      if (onlineOpponent.worstLossChange === 0 || myOriginalElo < onlineOpponent.worstLossChange) {
+      if (myOriginalElo < (onlineOpponent.worstLossChange ?? 9999)) {
         onlineOpponent.worstLossChange = myOriginalElo;
         onlineOpponent.worstLossOpp = onlineAccount.name;
       }
     } else {
       // Bot gewinnt -> Spieler verliert
       onlineOpponent.elo += eloChange;
-      onlineOpponent.wins++;
-      onlineOpponent.currentStreak++;
+      onlineOpponent.wins = (onlineOpponent.wins ?? 0) + 1;
+      onlineOpponent.currentStreak = (onlineOpponent.currentStreak ?? 0) + 1;
       if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak ?? 0)) {
         onlineOpponent.bestStreak = onlineOpponent.currentStreak;
       }
-      onlineOpponent.totalEloGained += eloChange;
+      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained ?? 0) + eloChange;
 
       if (onlineOpponent.elo > (onlineOpponent.highestElo ?? onlineOpponent.elo)) {
         onlineOpponent.highestElo = onlineOpponent.elo;
