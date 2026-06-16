@@ -858,26 +858,30 @@ function startBotMatch() {
 
   onlineResultHandled = false;
 
-  // === WICHTIG: Bot-Stats aus Firebase laden ===
+  // === WICHTIG: Bot-Stats vollständig aus Firebase laden ===
   if (fbReady) {
     dbGet("players/Online Bot").then(data => {
       if (data) {
-        onlineOpponent.elo    = data.elo    || onlineBotElo;
-        onlineOpponent.wins   = data.wins   || 0;
-        onlineOpponent.losses = data.losses || 0;
+        onlineOpponent = sanitizeAccount(data);
+        onlineOpponent.name = "Online Bot";
+        onlineOpponent.skill = 0.40;
       } else {
-        onlineOpponent.wins   = 0;
-        onlineOpponent.losses = 0;
+        onlineOpponent = {
+          name: "Online Bot",
+          elo: onlineBotElo,
+          wins: 0,
+          losses: 0,
+          skill: 0.40
+        };
+        onlineOpponent = sanitizeAccount(onlineOpponent);
       }
       onlineBotElo = onlineOpponent.elo;
       localStorage.setItem("onlineBotElo", onlineBotElo);
     }).catch(() => {
-      onlineOpponent.wins   = 0;
-      onlineOpponent.losses = 0;
+      onlineOpponent = sanitizeAccount(onlineOpponent);
     });
   } else {
-    onlineOpponent.wins   = 0;
-    onlineOpponent.losses = 0;
+    onlineOpponent = sanitizeAccount(onlineOpponent);
   }
 
   showVSScreen(
