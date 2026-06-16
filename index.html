@@ -612,23 +612,23 @@ async function openOnlineProfile(name) {
       `<span style="color:${name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${p.name}</span>`;
 
     document.getElementById("profileStats").innerHTML = `
-      <div class="prof-row"><span class="prof-label">ELO</span><span class="prof-val">${Math.round(p.elo)}</span></div>
-      <div class="prof-row"><span class="prof-label">Spiele gesamt</span><span class="prof-val">${totalGames}</span></div>
-      <div class="prof-row"><span class="prof-label">Siege</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
-      <div class="prof-row"><span class="prof-label">Niederlagen</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
+      <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Total Games</span><span class="prof-val">${totalGames}</span></div>
+      <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
+      <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
       <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
       
-      <div class="prof-row"><span class="prof-label">Höchstes ELO</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
-      <div class="prof-row"><span class="prof-label">Niedrigstes ELO</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Highest Elo</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Lowest Elo</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
       
-      <div class="prof-row"><span class="prof-label">Beste Serie</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Aktuelle Serie</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
       
-      <div class="prof-row"><span class="prof-label">Bester Sieg</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} vs ${p.bestWinOpp || "-"}</span></div>
-      <div class="prof-row"><span class="prof-label">Schlimmste Niederlage</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} vs ${p.worstLossOpp || "-"}</span></div>
+      <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} vs ${p.bestWinOpp || "-"}</span></div>
+      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} vs ${p.worstLossOpp || "-"}</span></div>
       
-      <div class="prof-row"><span class="prof-label">Gesamter ELO-Gewinn</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Gesamter ELO-Verlust</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Total Elo Loss</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
     `;
 
     document.getElementById("profileModal").style.display = "flex";
