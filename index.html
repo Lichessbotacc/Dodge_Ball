@@ -770,7 +770,7 @@ function startBotMatch() {
   onlineOpponent = {
     name: "Online Bot",
     elo: onlineBotElo,
-    skill: 0.30
+    skill: 0.40
   };
 
   onlineResultHandled = false;
@@ -902,15 +902,19 @@ function startOnlineGame(matchData) {
   oppPlayer.tx = oppX;
   oppPlayer.ty = py;
 
-  if (onlineVsBot) {
-    // Weak bot: low skill stats so it's an easy fallback opponent
-    const s = 0.50;
+      if (onlineVsBot) {
+    // Fester Skill-Wert (s = 0.30) wie im Original, aber mit den echten Offline-Formeln
+    const s = 0.30; 
+
     oppPlayer.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
-    oppPlayer.speed      = 1.2 + s * 3;
-    oppPlayer.awareness  = 60  + s * 80;
-    oppPlayer.dodgePower = 0.3 + s * 1.2;
-    oppPlayer.randomness = (1 - s) * 5;
+    oppPlayer.speed      = 1.5  + s * 8;
+    oppPlayer.reaction   = 2    + s * 6;
+    oppPlayer.awareness  = 60   + s * 100;
+    oppPlayer.dodgePower = 0.5  + s * 3.5;
+    oppPlayer.randomness = (1 - s) * 4;
   }
+
+
 
   players.push(mePlayer, oppPlayer);
 
