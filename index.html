@@ -397,19 +397,55 @@ async function dbRemove(path)  { return window._firebaseRemove(dbRef(path)); }
 // ═══════════════════════════════════════════════
 //  ACCOUNT
 // ═══════════════════════════════════════════════
+function sanitizeAccount(acc) {
+  if (!acc) return null;
+  acc.elo = acc.elo ?? 1500;
+  acc.wins = acc.wins ?? 0;
+  acc.losses = acc.losses ?? 0;
+  acc.highestElo = acc.highestElo ?? acc.elo;
+  acc.lowestElo = acc.lowestElo ?? acc.elo;
+  acc.currentStreak = acc.currentStreak ?? 0;
+  acc.bestStreak = acc.bestStreak ?? 0;
+  acc.totalEloGained = acc.totalEloGained ?? 0;
+  acc.totalEloLost = acc.totalEloLost ?? 0;
+  acc.bestWinChange = acc.bestWinChange ?? 0;
+  acc.bestWinOpp = acc.bestWinOpp ?? "";
+  acc.worstLossChange = acc.worstLossChange ?? 0;
+  acc.worstLossOpp = acc.worstLossOpp ?? "";
+  return acc;
+}
+
 let onlineAccount = null;
-try { onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null"); } catch(e) {}
+try { 
+  onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null"); 
+  if (onlineAccount) onlineAccount = sanitizeAccount(onlineAccount);
+} catch(e) {}
 
 function saveAccountLocal() {
   if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
 }
+
 async function pushAccountToFirebase() {
   if (!fbReady || !onlineAccount) return;
   await dbSet("players/" + onlineAccount.name, {
-    name: onlineAccount.name, elo: onlineAccount.elo,
-    wins: onlineAccount.wins, losses: onlineAccount.losses, updatedAt: Date.now()
+    name: onlineAccount.name,
+    elo: onlineAccount.elo,
+    wins: onlineAccount.wins,
+    losses: onlineAccount.losses,
+    highestElo: onlineAccount.highestElo,
+    lowestElo: onlineAccount.lowestElo,
+    currentStreak: onlineAccount.currentStreak,
+    bestStreak: onlineAccount.bestStreak,
+    totalEloGained: onlineAccount.totalEloGained,
+    totalEloLost: onlineAccount.totalEloLost,
+    bestWinChange: onlineAccount.bestWinChange,
+    bestWinOpp: onlineAccount.bestWinOpp,
+    worstLossChange: onlineAccount.worstLossChange,
+    worstLossOpp: onlineAccount.worstLossOpp,
+    updatedAt: Date.now()
   });
 }
+
 
 // ═══════════════════════════════════════════════
 //  SETTINGS
@@ -544,18 +580,46 @@ function showEloAnimation(change) {
 async function loadLeaderboard() {
   const lbTable = document.getElementById("lbTable");
   lbTable.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
-  if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase nicht verbunden</span></div>'; return; }
   try {
     const data = await dbGet("players");
-    if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>No players yet</span></div>'; return; }
+    if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
     Object.values(data).sort((a,b) => b.elo - a.elo).forEach((p, i) => {
       const isMe = onlineAccount && p.name === onlineAccount.name;
-      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}">
+      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.name}')">
         <span>#${i+1}</span><span>${p.name}</span>
         <span>${Math.round(p.elo)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
-  } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Error loading</span></div>'; }
+  } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
+}
+
+async function openOnlineProfile(name) {
+  if (!fbReady) return;
+  try {
+    const p = await dbGet("players/" + name);
+    if (!p) return;
+    const wins = p.wins ?? 0;
+    const losses = p.losses ?? 0;
+    const totalGames = wins + losses;
+    const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
+    
+    document.getElementById("profileName").innerHTML = `<span style="color:#00ff88">${p.name}</span>`;
+    document.getElementById("profileStats").innerHTML = `
+      <div class="prof-row"><span class="prof-label">ELO</span><span class="prof-val">${Math.round(p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Spiele gesamt</span><span class="prof-val">${totalGames}</span></div>
+      <div class="prof-row"><span class="prof-label">Siege</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
+      <div class="prof-row"><span class="prof-label">Niederlagen</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
+      <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
+      <div class="prof-row"><span class="prof-label">Höchstes ELO</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Niedrigstes ELO</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Beste Serie</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Aktuelle Serie</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Bester Sieg</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} (vs ${p.bestWinOpp || "-"})</span></div>
+      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} (vs ${p.worstLossOpp || "-"})</span></div>
+    `;
+    document.getElementById("profileModal").style.display = "flex";
+  } catch(e) { console.warn("Fehler beim Laden des Profils", e); }
 }
 
 // ═══════════════════════════════════════════════
@@ -1089,50 +1153,70 @@ async function handleOnlineResult(winnerName, change) {
 
   const won       = winnerName === onlineAccount.name;
   const eloChange = Math.round(change);
+  const oppName   = onlineOpponent ? onlineOpponent.name : "Online Bot";
 
-  // --- Spieler aktualisieren ---
+  onlineAccount = sanitizeAccount(onlineAccount);
+
   if (won) { 
     onlineAccount.elo += eloChange; 
-    onlineAccount.wins++;   
+    onlineAccount.wins++;
+    onlineAccount.currentStreak++;
+    if (onlineAccount.currentStreak > onlineAccount.bestStreak) {
+      onlineAccount.bestStreak = onlineAccount.currentStreak;
+    }
+    onlineAccount.totalEloGained += eloChange;
+
+    if (onlineAccount.elo > onlineAccount.highestElo) {
+      onlineAccount.highestElo = onlineAccount.elo;
+    }
+
+    if (eloChange > onlineAccount.bestWinChange) {
+      onlineAccount.bestWinChange = eloChange;
+      onlineAccount.bestWinOpp = oppName;
+    }
   } else { 
     onlineAccount.elo = Math.max(100, onlineAccount.elo - eloChange); 
-    onlineAccount.losses++; 
+    onlineAccount.losses++;
+    onlineAccount.currentStreak = 0;
+    onlineAccount.totalEloLost += eloChange;
+
+    if (onlineAccount.elo < onlineAccount.lowestElo) {
+      onlineAccount.lowestElo = onlineAccount.elo;
+    }
+
+    if (eloChange > onlineAccount.worstLossChange) {
+      onlineAccount.worstLossChange = eloChange;
+      onlineAccount.worstLossOpp = oppName;
+    }
   }
   saveAccountLocal();
-  if (fbReady) pushAccountToFirebase();
+  if (fbReady) await pushAccountToFirebase();
 
   showEloAnimation(won ? eloChange : -eloChange);
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
 
-  // --- Online Bot Stats aktualisieren ---
   if (onlineVsBot && onlineOpponent) {
     if (won) {
-      // Spieler gewinnt → Bot verliert
       onlineOpponent.elo = Math.max(100, onlineOpponent.elo - eloChange);
       if (!onlineOpponent.losses) onlineOpponent.losses = 0;
       onlineOpponent.losses++;
     } else {
-      // Bot gewinnt → Spieler verliert
       onlineOpponent.elo += eloChange;
       if (!onlineOpponent.wins) onlineOpponent.wins = 0;
       onlineOpponent.wins++;
     }
-
     onlineBotElo = onlineOpponent.elo;
     localStorage.setItem("onlineBotElo", onlineBotElo);
-
-    // In Firebase speichern (mit aktualisierten Wins/Losses)
     if (fbReady) {
       await dbSet("players/Online Bot", {
-        name: "Online Bot",
-        elo: onlineBotElo,
-        wins: onlineOpponent.wins || 0,
-        losses: onlineOpponent.losses || 0,
+        name: "Online Bot", elo: onlineBotElo,
+        wins: onlineOpponent.wins || 0, losses: onlineOpponent.losses || 0,
         updatedAt: Date.now()
       });
     }
   }
 }
+
 
 function showWinnerOverlay(winnerName, eloChange) {
   document.getElementById("winnerText").innerHTML =
