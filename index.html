@@ -907,12 +907,12 @@ function startOnlineGame(matchData) {
 
       if (onlineVsBot) {
     // Fester Skill-Wert (s = 0.30) wie im Original, aber mit den echten Offline-Formeln
-    const s = 0.30; 
+    const s = 0.20; 
 
     oppPlayer.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
-    oppPlayer.speed      = 1.5  + s * 8;
+    oppPlayer.speed      = 2.5  + s * 8;
     oppPlayer.reaction   = 2    + s * 6;
-    oppPlayer.awareness  = 60   + s * 100;
+    oppPlayer.awareness  = 80   + s * 100;
     oppPlayer.dodgePower = 0.5  + s * 3.5;
     oppPlayer.randomness = (1 - s) * 4;
   }
