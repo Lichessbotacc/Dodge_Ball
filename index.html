@@ -1211,22 +1211,54 @@ async function handleOnlineResult(winnerName, change) {
   showEloAnimation(won ? eloChange : -eloChange);
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
 
+    // --- Online Bot Stats aktualisieren + Profil vollständig speichern ---
   if (onlineVsBot && onlineOpponent) {
     if (won) {
+      // Spieler gewinnt → Bot verliert
       onlineOpponent.elo = Math.max(100, onlineOpponent.elo - eloChange);
-      if (!onlineOpponent.losses) onlineOpponent.losses = 0;
-      onlineOpponent.losses++;
+      onlineOpponent.losses = (onlineOpponent.losses || 0) + 1;
+      onlineOpponent.currentStreak = 0;
+      onlineOpponent.totalEloLost = (onlineOpponent.totalEloLost || 0) + eloChange;
+
+      if (!onlineOpponent.lowestElo || onlineOpponent.elo < onlineOpponent.lowestElo) {
+        onlineOpponent.lowestElo = onlineOpponent.elo;
+      }
     } else {
+      // Bot gewinnt → Spieler verliert
       onlineOpponent.elo += eloChange;
-      if (!onlineOpponent.wins) onlineOpponent.wins = 0;
-      onlineOpponent.wins++;
+      onlineOpponent.wins = (onlineOpponent.wins || 0) + 1;
+      onlineOpponent.currentStreak = (onlineOpponent.currentStreak || 0) + 1;
+
+      if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak || 0)) {
+        onlineOpponent.bestStreak = onlineOpponent.currentStreak;
+      }
+      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained || 0) + eloChange;
+
+      if (!onlineOpponent.highestElo || onlineOpponent.elo > onlineOpponent.highestElo) {
+        onlineOpponent.highestElo = onlineOpponent.elo;
+      }
     }
+
     onlineBotElo = onlineOpponent.elo;
     localStorage.setItem("onlineBotElo", onlineBotElo);
+
+    // Vollständiges Profil speichern
     if (fbReady) {
       await dbSet("players/Online Bot", {
-        name: "Online Bot", elo: onlineBotElo,
-        wins: onlineOpponent.wins || 0, losses: onlineOpponent.losses || 0,
+        name: "Online Bot",
+        elo: onlineBotElo,
+        wins: onlineOpponent.wins || 0,
+        losses: onlineOpponent.losses || 0,
+        highestElo: onlineOpponent.highestElo || onlineBotElo,
+        lowestElo: onlineOpponent.lowestElo || onlineBotElo,
+        currentStreak: onlineOpponent.currentStreak || 0,
+        bestStreak: onlineOpponent.bestStreak || 0,
+        totalEloGained: onlineOpponent.totalEloGained || 0,
+        totalEloLost: onlineOpponent.totalEloLost || 0,
+        bestWinChange: onlineOpponent.bestWinChange || 0,
+        bestWinOpp: onlineOpponent.bestWinOpp || "",
+        worstLossChange: onlineOpponent.worstLossChange || 0,
+        worstLossOpp: onlineOpponent.worstLossOpp || "",
         updatedAt: Date.now()
       });
     }
