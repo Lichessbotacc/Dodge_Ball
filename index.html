@@ -598,28 +598,44 @@ async function openOnlineProfile(name) {
   if (!fbReady) return;
   try {
     const p = await dbGet("players/" + name);
-    if (!p) return;
+    if (!p) {
+      alert("Profil nicht gefunden.");
+      return;
+    }
+
     const wins = p.wins ?? 0;
     const losses = p.losses ?? 0;
     const totalGames = wins + losses;
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
-    
-    document.getElementById("profileName").innerHTML = `<span style="color:#00ff88">${p.name}</span>`;
+
+    document.getElementById("profileName").innerHTML = 
+      `<span style="color:${name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${p.name}</span>`;
+
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">ELO</span><span class="prof-val">${Math.round(p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Spiele gesamt</span><span class="prof-val">${totalGames}</span></div>
       <div class="prof-row"><span class="prof-label">Siege</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
       <div class="prof-row"><span class="prof-label">Niederlagen</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
       <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
+      
       <div class="prof-row"><span class="prof-label">Höchstes ELO</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Niedrigstes ELO</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
+      
       <div class="prof-row"><span class="prof-label">Beste Serie</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Aktuelle Serie</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Bester Sieg</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} (vs ${p.bestWinOpp || "-"})</span></div>
-      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} (vs ${p.worstLossOpp || "-"})</span></div>
+      
+      <div class="prof-row"><span class="prof-label">Bester Sieg</span><span class="prof-val" style="color:#00ff88">+${p.bestWinChange ?? 0} vs ${p.bestWinOpp || "-"}</span></div>
+      <div class="prof-row"><span class="prof-label">Schlimmste Niederlage</span><span class="prof-val" style="color:#ff4444">-${p.worstLossChange ?? 0} vs ${p.worstLossOpp || "-"}</span></div>
+      
+      <div class="prof-row"><span class="prof-label">Gesamter ELO-Gewinn</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Gesamter ELO-Verlust</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
     `;
+
     document.getElementById("profileModal").style.display = "flex";
-  } catch(e) { console.warn("Fehler beim Laden des Profils", e); }
+  } catch(e) {
+    console.warn("Fehler beim Laden des Profils", e);
+    alert("Fehler beim Laden des Profils.");
+  }
 }
 
 // ═══════════════════════════════════════════════
