@@ -1676,23 +1676,28 @@ function update() {
 // ── Online collision: only check local player, report result ──
 function checkOnlineCollision(me) {
   for (const b of balls) {
-    const dx = me.x - b.x, dy = me.y - b.y;
+    const dx = me.x - b.x;
+    const dy = me.y - b.y;
     if (Math.sqrt(dx*dx + dy*dy) < me.radius + b.radius) {
       me.alive = false;
       const opp = players.find(p => p.name !== me.name);
 
       if (onlineVsBot) {
-        // Local result, no network round trip needed
-        const diff   = Math.abs(onlineAccount.elo - (onlineOpponent?.elo || 1200));
-        const change = Math.max(1, Math.min(8, Math.round(3 + diff / 150))); // smaller swing vs bot
+        // Du verlierst gegen den Bot (Winner = Bot (oppElo), Loser = Du (onlineAccount.elo))
+        const oppElo = onlineOpponent?.elo || 1500;
+        const diff = onlineAccount.elo - oppElo; // loserElo - winnerElo
+        const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
+        
         handleOnlineResult(opp ? opp.name : "", change);
       } else {
+        // Echtes Online-Match meldet das Ergebnis an die DB
         reportOnlineResult(opp ? opp.name : "", me.name);
       }
       return;
     }
   }
 }
+
 // Bot collision in vs Bot mode
 // Bot collision in vs Bot mode
 function checkBotCollision(bot) {
@@ -1704,10 +1709,11 @@ function checkBotCollision(bot) {
       const me = players.find(p => p.name === onlineAccount.name);
       
       if (me && me.alive) {
-        // Spieler gewinnt -> Echte Elo-Berechnung (K = 10, tatsächliches Ergebnis = 1)
         const oppElo = onlineOpponent?.elo || 1500;
-        const expected = 1 / (1 + Math.pow(10, (oppElo - onlineAccount.elo) / 400));
-        const change = Math.max(1, Math.round(10 * (1 - expected)));
+        
+        // Du gewinnst (Winner = Du (onlineAccount.elo), Loser = Bot (oppElo))
+        const diff = oppElo - onlineAccount.elo; // loserElo - winnerElo
+        const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
         
         handleOnlineResult(me.name, change);
       }
@@ -1715,6 +1721,7 @@ function checkBotCollision(bot) {
     }
   }
 }
+
 
 function updateTournament() {
   for (const match of [...matches]) {
@@ -1784,12 +1791,14 @@ async function reportOnlineResult(winnerName, loserName) {
 
   const me = onlineAccount;
   const opp = onlineOpponent || { elo: 1500 };
-  const playerWon = (winnerName === me.name);
-  
-  // Standard Elo Formula (K = 10)
-  const expected = 1 / (1 + Math.pow(10, (opp.elo - me.elo) / 400));
-  const actual = playerWon ? 1 : 0;
-  const change = Math.max(1, Math.round(Math.abs(10 * (actual - expected))));
+
+  // ELOs für Gewinner und Verlierer bestimmen
+  const winnerElo = (winnerName === me.name) ? me.elo : opp.elo;
+  const loserElo = (loserName === me.name) ? me.elo : opp.elo;
+
+  // Genau wie im Offline-Turnier (finishMatch)
+  const diff = loserElo - winnerElo;
+  const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
 
   if (fbReady && onlineMatchId) {
     try {
@@ -1803,6 +1812,7 @@ async function reportOnlineResult(winnerName, loserName) {
     handleOnlineResult(winnerName, change);
   }
 }
+
 
 
 // ═══════════════════════════════════════════════
