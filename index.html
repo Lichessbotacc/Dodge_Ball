@@ -1186,19 +1186,21 @@ function applyBallCorrection(authoritative) {
 // Push my position
 let lastPosPush = 0;
 function pushMyPosition() {
-  if (!fbReady || !onlineMatchId || !running || mode !== "online") return; // "|| onlineVsBot" entfernt
+  if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
   const now = Date.now();
-  if (now - lastPosPush < 60) return; // Auf 60ms gedrosselt, um Schreibvorgänge im Spark-Plan zu schonen
+  if (now - lastPosPush < 60) return;
   lastPosPush = now;
 
   const me = players.find(p => p.name === onlineAccount.name);
   if (!me) return;
 
+  // KORREKTUR: Nutze dynamisch den richtigen State-Key je nach Rolle (p1 oder p2)
+  const stateKey = onlineRole === "p1" ? "p1State" : "p2State";
+
   const updateData = {
-    p1State: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
+    [stateKey]: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
   };
 
-  // Im Bot-Match senden wir auch die Position des lokal simulierten Bots
   if (onlineVsBot) {
     const bot = players.find(p => p.name !== onlineAccount.name);
     if (bot) {
@@ -1208,6 +1210,7 @@ function pushMyPosition() {
 
   dbUpdate("onlineMatches/" + onlineMatchId, updateData).catch(() => {});
 }
+
 
 
 // Host pushes ball state periodically as a correction reference (FIX #1/#2)
