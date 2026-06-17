@@ -199,6 +199,7 @@ input[type=text],input[type=number]{
     <div id="menu">
       <h1>DarkOnBalls</h1>
       <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
+      <button onclick="startOnlineTV()">📺 Best Online TV</button>
       <button onclick="startGame('single')">Singleplayer</button>
       <button onclick="startGame('multi')">Multiplayer (local)</button>
       <button onclick="startGame('ai')">AI Spectate</button>
@@ -507,7 +508,7 @@ let onlineSearchInterval = null;
 let onlineResultHandled  = false;
 let onlineIsHost         = false;  // p1 is host: authoritative ball physics
 let onlineVsBot          = false;  // true if opponent is the fallback AI bot
-
+let onlineTvUnsubscribe = null; // Speicherort für den Live-Zuschauer-Stream
 let onlineRng             = null;
 let onlineBallSpawnTimer  = 0;
 let onlineSearchStartTime = 0;
@@ -712,6 +713,11 @@ function cleanupOnline() {
   onlineVsBot         = false;
   document.getElementById("pingDisplay").style.display   = "none";
   document.getElementById("onlineHUD").style.display     = "none";
+    if (onlineTvUnsubscribe) {
+    try { onlineTvUnsubscribe(); } catch(e) {}
+    onlineTvUnsubscribe = null;
+  }
+
 }
 
 async function cleanStaleMatches() {
@@ -1732,6 +1738,26 @@ function update() {
   if (el) el.textContent = Math.floor((Date.now() - startTime) / 1000);
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
+  // ── SCHRITT 3: HIER EINFÜGEN FÜR ONLINE TV ──
+  if (mode === "online_tv") {
+    // Beide Spieler flüssig zu ihren Live-Zielkoordinaten bewegen (Interpolation)
+    for (const p of players) {
+      if (p.tx !== undefined && p.ty !== undefined) {
+        p.x += (p.tx - p.x) * 0.45;
+        p.y += (p.ty - p.y) * 0.45;
+      }
+    }
+    // Bälle lokal flüssig weiterbewegen und an Wänden abprallen lassen
+    for (const b of balls) {
+      b.x += b.vx; b.y += b.vy;
+      if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+      if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
+      if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+      if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+    }
+    return; // Verhindert, dass die restliche Spiellogik (Kollisionen, Tastendruck) läuft!
+  }
+  // ───────────────────────────────────────────
 
   // ── Online mode ──
   if (mode === "online") {
@@ -2376,6 +2402,90 @@ function moveSingle(x, y) {
     players[0].x = Math.max(players[0].radius, Math.min(W()-players[0].radius, x));
     players[0].y = Math.max(players[0].radius, Math.min(H()-players[0].radius, y));
   }
+}
+// ═══════════════════════════════════════════════
+//  ONLINE TV FUNCTION
+// ═══════════════════════════════════════════════
+async function startOnlineTV() {
+  cleanupOnline(); // Beendet eventuelle eigene Suchen
+  clearAllTimers();
+  
+  if (!fbReady) {
+    alert("Firebase ist noch nicht verbunden!");
+    return;
+  }
+  
+  // Menüs ausblenden, UI für Zuschauer vorbereiten
+  hideAllScreensForGame();
+  document.getElementById("spectatorInfo").style.display = "block";
+  
+  mode = "online_tv";
+  running = true;
+  balls = [];
+  players = [];
+  startTime = Date.now();
+  
+  // 1. Alle aktiven Matches aus Firebase holen
+  const matchesData = await dbGet("onlineMatches");
+  if (!matchesData) {
+    document.getElementById("spectatorText").innerHTML = "Aktuell laufen keine Online-Spiele.";
+    return;
+  }
+  
+  let bestMatchId = null;
+  let bestElo = -1;
+  let bestMatch = null;
+  
+  // 2. Das Match mit dem höchsten ELO-Durchschnitt suchen
+  for (const [id, m] of Object.entries(matchesData)) {
+    if (m.status !== "done" && m.status !== "abandoned" && m.status !== "waiting") {
+      const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
+      if (avgElo > bestElo) {
+        bestElo = avgElo;
+        bestMatchId = id;
+        bestMatch = m;
+      }
+    }
+  }
+  
+  if (!bestMatchId) {
+    document.getElementById("spectatorText").innerHTML = "Aktuell läuft kein Live-Match.";
+    return;
+  }
+  
+  // 3. Dummy-Spieler für die Anzeige auf dem Bildschirm erstellen
+  const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
+  const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
+  players = [p1, p2];
+  
+  // 4. Live-Daten abonnieren
+  onlineTvUnsubscribe = dbOn("onlineMatches/" + bestMatchId, (data) => {
+    if (!data || data.status === "done" || data.status === "abandoned") {
+      if (onlineTvUnsubscribe) { onlineTvUnsubscribe(); onlineTvUnsubscribe = null; }
+      document.getElementById("spectatorText").innerHTML = "Match beendet. Suche nächstes Spiel...";
+      setTimeout(startOnlineTV, 3000);
+      return;
+    }
+    
+    // Positionen der Spieler updaten
+    if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
+    if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
+    
+    // Bälle via sanfter Snapshot-Korrektur synchronisieren
+    if (data.ballState) {
+      try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
+    }
+    
+    // UI-Text anpassen
+    document.getElementById("spectatorText").innerHTML = `
+      <div style="text-align:center; line-height: 1.4;">
+        <b style="color: gold;">📺 LIVE GAME TV (Schnitt: ${Math.round(bestElo)} ELO)</b><br>
+        <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs 
+        <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
+      </div>
+    `;
+  });
+  onlineUnsubscribes.push(onlineTvUnsubscribe);
 }
 
 document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
