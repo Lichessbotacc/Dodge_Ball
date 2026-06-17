@@ -253,7 +253,7 @@ input[type=text],input[type=number]{
       <div id="onlineStatus">Searching for opponent…</div>
 
      <div style="font-size:13px;opacity:0.8;margin-top:6px;">
-  Matchmaking may take up to 30 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.
+  Matchmaking may take up to 10 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.
 </div>
       <div id="onlineSearchAnim" style="font-size:40px;margin:10px 0;">⏳</div>
       <button onclick="cancelOnline()">Cancel</button>
@@ -780,7 +780,7 @@ async function startSearchingOnline() {
   // FIX #3: after 30s with no human opponent found, pair with a weak AI bot
   onlineBotMatchTimeout = setTimeout(() => {
     if (!onlineMatchId) startBotMatch();
-  }, 30000);
+  }, 15000);
 }
 
 async function tryMatchmake() {
