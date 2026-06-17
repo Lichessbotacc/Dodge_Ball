@@ -641,7 +641,18 @@ async function loadLeaderboard() {
   try {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
-    Object.values(data).sort((a,b) => b.elo - a.elo).forEach((p, i) => {
+    
+    // Filtert Spieler heraus, die noch 0 Siege und 0 Niederlagen haben
+    const activePlayers = Object.values(data)
+      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
+      .sort((a, b) => b.elo - a.elo);
+
+    if (activePlayers.length === 0) {
+      lbTable.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No active players yet</span></div>';
+      return;
+    }
+
+    activePlayers.forEach((p, i) => {
       const isMe = onlineAccount && p.name === onlineAccount.name;
       lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.name}')">
         <span>#${i+1}</span><span>${p.name}</span>
@@ -650,6 +661,7 @@ async function loadLeaderboard() {
     });
   } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
 }
+
 
 async function openOnlineProfile(name) {
   if (!fbReady) return;
