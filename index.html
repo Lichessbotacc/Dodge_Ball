@@ -1021,7 +1021,7 @@ function startOnlineGame(matchData) {
   document.getElementById("pingDisplay").style.display = "block";
   document.getElementById("onlineStatusHUD").textContent = onlineVsBot ? "Practice match" : "";
 
-  if (onlineVsBot) {
+    if (onlineVsBot) {
     // No network needed; runs as a fully local match
     return;
   }
@@ -1030,13 +1030,18 @@ function startOnlineGame(matchData) {
     setInterval(pushBallState, 100);
   }
 
+  // HIER FEHLTE DER START DES LISTENERS (wieder hinzugefügt):
+  const matchUnsub = dbOn("onlineMatches/" + onlineMatchId, (data) => {
+    if (!data) return;
+
     // Setzt den Status auf "playing", sobald beide Spieler bereit sind (nur für den Host)
     if (onlineIsHost && data.status === "waiting" && data.p1Ready && data.p2Ready) {
       dbUpdate("onlineMatches/" + onlineMatchId, { status: "playing" }).catch(() => {});
     }
 
-
     const oppRole = onlineRole === "p1" ? "p2" : "p1";
+
+    
     const oppState = data[oppRole + "State"];
     if (oppState) {
       const op = players.find(p => p.name !== myName);
