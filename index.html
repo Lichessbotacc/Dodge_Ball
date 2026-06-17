@@ -1762,12 +1762,33 @@ function setupMatch(match) {
 // ═══════════════════════════════════════════════
 //  GAME LOOP
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  GAME LOOP (FIXED TIMESTEP)
+// ═══════════════════════════════════════════════
+let lastTime = performance.now();
+const timestep = 1000 / 60; // Erzwingt exakt 60 Logik-Updates pro Sekunde
+let accumulator = 0;
+
 function loop() {
-  update();
+  const now = performance.now();
+  const dt = now - lastTime;
+  lastTime = now;
+
+  // Begrenzt extreme Ruckler (z. B. wenn der Tab im Hintergrund war)
+  accumulator += Math.min(dt, 250); 
+
+  // Führe die Physik/Logik-Updates im festen 60-FPS-Takt aus
+  while (accumulator >= timestep) {
+    update();
+    accumulator -= timestep;
+  }
+
+  // Zeichne das Bild so oft wie möglich (butterweich bei z.B. 144Hz)
   draw();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+
 
 function restartGame() {
   clearAllTimers();
