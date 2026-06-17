@@ -780,7 +780,7 @@ async function startSearchingOnline() {
   // FIX #3: after 30s with no human opponent found, pair with a weak AI bot
   onlineBotMatchTimeout = setTimeout(() => {
     if (!onlineMatchId) startBotMatch();
-  }, 15000);
+  }, 10000);
 }
 
 async function tryMatchmake() {
