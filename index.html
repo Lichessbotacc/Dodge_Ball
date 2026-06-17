@@ -508,7 +508,11 @@ let onlineSearchInterval = null;
 let onlineResultHandled  = false;
 let onlineIsHost         = false;  // p1 is host: authoritative ball physics
 let onlineVsBot          = false;  // true if opponent is the fallback AI bot
-let onlineTvUnsubscribe = null; // Speicherort für den Live-Zuschauer-Stream
+let onlineTvUnsubscribe = null;      // Speicherort für den Haupt-TV-Sucher-Stream
+let onlineTvInnerUnsubscribe = null; // Speicherort für das aktuell gezeigte Einzelmatch
+let onlineTvCurrentMatchId = null;   // ID des Matches, dem wir gerade zuschauen
+
+
 let onlineRng             = null;
 let onlineBallSpawnTimer  = 0;
 let onlineSearchStartTime = 0;
@@ -713,10 +717,18 @@ function cleanupOnline() {
   onlineVsBot         = false;
   document.getElementById("pingDisplay").style.display   = "none";
   document.getElementById("onlineHUD").style.display     = "none";
-    if (onlineTvUnsubscribe) {
+      // Beendet alle Live-TV Abos sauber beim Verlassen
+  if (onlineTvUnsubscribe) {
     try { onlineTvUnsubscribe(); } catch(e) {}
     onlineTvUnsubscribe = null;
   }
+  if (onlineTvInnerUnsubscribe) {
+    try { onlineTvInnerUnsubscribe(); } catch(e) {}
+    onlineTvInnerUnsubscribe = null;
+  }
+  onlineTvCurrentMatchId = null;
+}
+
 
 }
 
@@ -2457,8 +2469,11 @@ function moveSingle(x, y) {
 // ═══════════════════════════════════════════════
 //  ONLINE TV FUNCTION (English Version)
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ONLINE TV FUNCTION (Fully Reactive English Version)
+// ═══════════════════════════════════════════════
 async function startOnlineTV() {
-  cleanupOnline(); // Ends any active searches/queue
+  cleanupOnline(); // Clean up any previous listeners
   clearAllTimers();
   
   if (!fbReady) {
@@ -2476,68 +2491,97 @@ async function startOnlineTV() {
   players = [];
   startTime = Date.now();
   
-  // 1. Get all active matches from Firebase
-  const matchesData = await dbGet("onlineMatches");
-  if (!matchesData) {
-    document.getElementById("spectatorText").innerHTML = "No online games are currently running.";
-    return;
-  }
+  document.getElementById("spectatorText").innerHTML = "Waiting for an active match to start...";
   
-  let bestMatchId = null;
-  let bestElo = -1;
-  let bestMatch = null;
+  let p1 = null;
+  let p2 = null;
   
-  // 2. Find the match with the highest average ELO
-  for (const [id, m] of Object.entries(matchesData)) {
-    if (m.status !== "done" && m.status !== "abandoned" && m.status !== "waiting") {
-      const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
-      if (avgElo > bestElo) {
-        bestElo = avgElo;
-        bestMatchId = id;
-        bestMatch = m;
-      }
-    }
-  }
-  
-  if (!bestMatchId) {
-    document.getElementById("spectatorText").innerHTML = "No live match is currently running.";
-    return;
-  }
-  
-  // 3. Create dummy players for the screen display
-  const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
-  const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
-  players = [p1, p2];
-  
-  // 4. Subscribe to live data
-  onlineTvUnsubscribe = dbOn("onlineMatches/" + bestMatchId, (data) => {
-    if (!data || data.status === "done" || data.status === "abandoned") {
-      if (onlineTvUnsubscribe) { onlineTvUnsubscribe(); onlineTvUnsubscribe = null; }
-      document.getElementById("spectatorText").innerHTML = "Match finished. Searching for next game...";
-      setTimeout(startOnlineTV, 3000);
+  // 1. Reactive live-listener on the entire matches database
+  onlineTvUnsubscribe = dbOn("onlineMatches", (matchesData) => {
+    if (!matchesData) {
+      document.getElementById("spectatorText").innerHTML = "No online games are currently running.";
+      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
+      onlineTvCurrentMatchId = null;
+      players = [];
+      balls = [];
       return;
     }
     
-    // Update player positions
-    if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
-    if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
+    let bestMatchId = null;
+    let bestElo = -1;
+    let bestMatch = null;
     
-    // Smoothly correct ball positions
-    if (data.ballState) {
-      try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
+    // 2. Scan all matches to find the best currently "playing" match
+    for (const [id, m] of Object.entries(matchesData)) {
+      if (m.status === "playing") {
+        const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
+        if (avgElo > bestElo) {
+          bestElo = avgElo;
+          bestMatchId = id;
+          bestMatch = m;
+        }
+      }
     }
     
-    // Update UI text (English)
-    document.getElementById("spectatorText").innerHTML = `
-      <div style="text-align:center; line-height: 1.4;">
-        <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
-        <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs 
-        <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
-      </div>
-    `;
+    // Case A: No active matches currently "playing"
+    if (!bestMatchId) {
+      document.getElementById("spectatorText").innerHTML = "No live match is currently running. Waiting for a game...";
+      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
+      onlineTvCurrentMatchId = null;
+      players = [];
+      balls = [];
+      return;
+    }
+    
+    // Case B: We found an active match and it's a new/different one
+    if (bestMatchId !== onlineTvCurrentMatchId) {
+      // Unsubscribe from previous match if there was one
+      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
+      
+      onlineTvCurrentMatchId = bestMatchId;
+      balls = [];
+      
+      // Create fresh spectator players
+      p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
+      p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
+      players = [p1, p2];
+      
+      // 3. Subscribe to the specific live coordinate data of this active match
+      onlineTvInnerUnsubscribe = dbOn("onlineMatches/" + bestMatchId, (data) => {
+        if (!data || data.status === "done" || data.status === "abandoned") {
+          // If match ends, unsubscribe and reset, so the parent listener can wait for the next game
+          if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
+          onlineTvCurrentMatchId = null;
+          players = [];
+          balls = [];
+          document.getElementById("spectatorText").innerHTML = "Match finished. Searching for next game...";
+          return;
+        }
+        
+        // Update player positions
+        if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
+        if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
+        
+        // Smoothly correct ball positions
+        if (data.ballState) {
+          try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
+        }
+        
+        // Update UI text (English)
+        document.getElementById("spectatorText").innerHTML = `
+          <div style="text-align:center; line-height: 1.4;">
+            <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
+            <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs 
+            <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
+          </div>
+        `;
+      });
+      onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
+    }
   });
   onlineUnsubscribes.push(onlineTvUnsubscribe);
 }
+
 
 
 document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
