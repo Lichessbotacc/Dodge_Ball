@@ -893,6 +893,20 @@ function startBotMatch() {
   } else {
     onlineOpponent = sanitizeAccount(onlineOpponent);
   }
+  // Bot-Match für Zuschauer in Firebase registrieren
+  if (fbReady) {
+    dbSet("onlineMatches/" + onlineMatchId, {
+      p1: onlineAccount.name,
+      p2: "Online Bot",
+      p1elo: onlineAccount.elo,
+      p2elo: onlineOpponent.elo,
+      status: "playing",
+      createdAt: Date.now(),
+      seed: Math.floor(Math.random() * 1000000)
+    }).catch(() => {});
+  }
+
+  
 
   showVSScreen(
     onlineAccount.name, 
@@ -1021,10 +1035,14 @@ function startOnlineGame(matchData) {
   document.getElementById("pingDisplay").style.display = "block";
   document.getElementById("onlineStatusHUD").textContent = onlineVsBot ? "Practice match" : "";
 
-    if (onlineVsBot) {
-    // No network needed; runs as a fully local match
+      if (onlineVsBot) {
+    // Auch beim Bot-Spiel müssen wir die Bälle für Zuschauer senden
+    if (onlineIsHost) {
+      setInterval(pushBallState, 100);
+    }
     return;
   }
+
 
   if (onlineIsHost) {
     setInterval(pushBallState, 100);
@@ -1156,21 +1174,35 @@ function applyBallCorrection(authoritative) {
 // Push my position
 let lastPosPush = 0;
 function pushMyPosition() {
-  if (!fbReady || !onlineMatchId || !running || mode !== "online" || onlineVsBot) return;
+  if (!fbReady || !onlineMatchId || !running || mode !== "online") return; // "|| onlineVsBot" entfernt
   const now = Date.now();
-    if (now - lastPosPush < 40) return;   // schnelleres Update return;
+  if (now - lastPosPush < 60) return; // Auf 60ms gedrosselt, um Schreibvorgänge im Spark-Plan zu schonen
   lastPosPush = now;
+
   const me = players.find(p => p.name === onlineAccount.name);
   if (!me) return;
-  dbUpdate("onlineMatches/" + onlineMatchId, {
-    [onlineRole + "State"]: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
-  }).catch(() => {});
+
+  const updateData = {
+    p1State: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
+  };
+
+  // Im Bot-Match senden wir auch die Position des lokal simulierten Bots
+  if (onlineVsBot) {
+    const bot = players.find(p => p.name !== onlineAccount.name);
+    if (bot) {
+      updateData.p2State = { x: Math.round(bot.x), y: Math.round(bot.y), alive: bot.alive };
+    }
+  }
+
+  dbUpdate("onlineMatches/" + onlineMatchId, updateData).catch(() => {});
 }
+
 
 // Host pushes ball state periodically as a correction reference (FIX #1/#2)
 let lastBallPush = 0;
 function pushBallState() {
-  if (!onlineIsHost || !fbReady || !onlineMatchId || !running || onlineVsBot) return;
+if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
+
   const now = Date.now();
   if (now - lastBallPush < 100) return;
   lastBallPush = now;
@@ -1302,6 +1334,14 @@ async function handleOnlineResult(winnerName, change) {
       });
     }
   }
+    // Meldet das Ende des Bot-Spiels an Firebase für die Zuschauer
+  if (fbReady && onlineMatchId && onlineVsBot) {
+    dbUpdate("onlineMatches/" + onlineMatchId, {
+      status: "done",
+      winner: winnerName
+    }).catch(() => {});
+  }
+
 }
 
 
