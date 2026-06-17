@@ -2454,16 +2454,19 @@ function moveSingle(x, y) {
 // ═══════════════════════════════════════════════
 //  ONLINE TV FUNCTION
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ONLINE TV FUNCTION (English Version)
+// ═══════════════════════════════════════════════
 async function startOnlineTV() {
-  cleanupOnline(); // Beendet eventuelle eigene Suchen
+  cleanupOnline(); // Ends any active searches/queue
   clearAllTimers();
   
   if (!fbReady) {
-    alert("Firebase ist noch nicht verbunden!");
+    alert("Firebase is not connected yet!");
     return;
   }
   
-  // Menüs ausblenden, UI für Zuschauer vorbereiten
+  // Hide menus, prepare UI for spectators
   hideAllScreensForGame();
   document.getElementById("spectatorInfo").style.display = "block";
   
@@ -2473,10 +2476,10 @@ async function startOnlineTV() {
   players = [];
   startTime = Date.now();
   
-  // 1. Alle aktiven Matches aus Firebase holen
+  // 1. Get all active matches from Firebase
   const matchesData = await dbGet("onlineMatches");
   if (!matchesData) {
-    document.getElementById("spectatorText").innerHTML = "Aktuell laufen keine Online-Spiele.";
+    document.getElementById("spectatorText").innerHTML = "No online games are currently running.";
     return;
   }
   
@@ -2484,7 +2487,7 @@ async function startOnlineTV() {
   let bestElo = -1;
   let bestMatch = null;
   
-  // 2. Das Match mit dem höchsten ELO-Durchschnitt suchen
+  // 2. Find the match with the highest average ELO
   for (const [id, m] of Object.entries(matchesData)) {
     if (m.status !== "done" && m.status !== "abandoned" && m.status !== "waiting") {
       const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
@@ -2497,37 +2500,37 @@ async function startOnlineTV() {
   }
   
   if (!bestMatchId) {
-    document.getElementById("spectatorText").innerHTML = "Aktuell läuft kein Live-Match.";
+    document.getElementById("spectatorText").innerHTML = "No live match is currently running.";
     return;
   }
   
-  // 3. Dummy-Spieler für die Anzeige auf dem Bildschirm erstellen
+  // 3. Create dummy players for the screen display
   const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
   const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
   players = [p1, p2];
   
-  // 4. Live-Daten abonnieren
+  // 4. Subscribe to live data
   onlineTvUnsubscribe = dbOn("onlineMatches/" + bestMatchId, (data) => {
     if (!data || data.status === "done" || data.status === "abandoned") {
       if (onlineTvUnsubscribe) { onlineTvUnsubscribe(); onlineTvUnsubscribe = null; }
-      document.getElementById("spectatorText").innerHTML = "Match beendet. Suche nächstes Spiel...";
+      document.getElementById("spectatorText").innerHTML = "Match finished. Searching for next game...";
       setTimeout(startOnlineTV, 3000);
       return;
     }
     
-    // Positionen der Spieler updaten
+    // Update player positions
     if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
     if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
     
-    // Bälle via sanfter Snapshot-Korrektur synchronisieren
+    // Smoothly correct ball positions
     if (data.ballState) {
       try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
     }
     
-    // UI-Text anpassen
+    // Update UI text (English)
     document.getElementById("spectatorText").innerHTML = `
       <div style="text-align:center; line-height: 1.4;">
-        <b style="color: gold;">📺 LIVE GAME TV (Schnitt: ${Math.round(bestElo)} ELO)</b><br>
+        <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
         <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs 
         <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
       </div>
@@ -2535,6 +2538,7 @@ async function startOnlineTV() {
   });
   onlineUnsubscribes.push(onlineTvUnsubscribe);
 }
+
 
 document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
 document.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
