@@ -452,6 +452,53 @@ async function pushAccountToFirebase() {
   });
 }
 
+// ── HIER DIE NEUEN FUNKTIONEN EINPASTEN ──
+
+async function changeUsername(newName) {
+  if (!fbReady || !onlineAccount) return;
+  newName = newName.trim();
+  
+  if (newName.length < 2) { 
+    alert("Name must be at least 2 characters."); 
+    return; 
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(newName)) { 
+    alert("Only letters, numbers, _ and - allowed."); 
+    return; 
+  }
+  
+  const oldName = onlineAccount.name;
+  if (oldName === newName) return;
+
+  const existing = await dbGet("players/" + newName);
+  if (existing) {
+    alert("This name is already taken!");
+    return;
+  }
+
+  await dbRemove("players/" + oldName);
+  onlineAccount.name = newName;
+  saveAccountLocal();
+  await pushAccountToFirebase();
+  
+  alert("Name successfully changed!");
+  if (document.getElementById("leaderboardScreen").style.display === "flex") {
+    loadLeaderboard();
+  }
+}
+
+// Hilfsfunktion, die ein praktisches Eingabefenster öffnet
+window.triggerNameChange = function() {
+  if (!onlineAccount) {
+    alert("You need to create an account first!");
+    return;
+  }
+  const newName = prompt("Enter your new username:", onlineAccount.name);
+  if (newName !== null && newName.trim() !== "") {
+    changeUsername(newName);
+  }
+};
+
 
 // ═══════════════════════════════════════════════
 //  SETTINGS
