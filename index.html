@@ -1030,8 +1030,11 @@ function startOnlineGame(matchData) {
     setInterval(pushBallState, 100);
   }
 
-  const matchUnsub = dbOn("onlineMatches/" + onlineMatchId, (data) => {
-    if (!data) return;
+    // Setzt den Status auf "playing", sobald beide Spieler bereit sind (nur für den Host)
+    if (onlineIsHost && data.status === "waiting" && data.p1Ready && data.p2Ready) {
+      dbUpdate("onlineMatches/" + onlineMatchId, { status: "playing" }).catch(() => {});
+    }
+
 
     const oppRole = onlineRole === "p1" ? "p2" : "p1";
     const oppState = data[oppRole + "State"];
