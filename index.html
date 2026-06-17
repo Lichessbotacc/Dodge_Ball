@@ -1848,11 +1848,14 @@ function update() {
     pushMyPosition();
     onlineSimTick++;
 
-    // Ball spawning + physics
-    if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
-      onlineBallSpawnTimer = Date.now();
-      balls.push(makeOnlineBall());
-    }
+    // Ball spawning + physics (KORREKTUR: Nur der Host steuert den Spawn-Timer!)
+if (onlineIsHost) {
+  if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
+    onlineBallSpawnTimer = Date.now();
+    balls.push(makeOnlineBall());
+  }
+}
+
 
     for (const b of balls) {
       b.x += b.vx; b.y += b.vy;
