@@ -22,7 +22,7 @@ const firebaseConfig = {
 };
 
 try {
-  const app = initializeApp(firebaseConfig);
+  const app = initializeApp(firebaseConfig); 
   const db  = getDatabase(app);
   try { getAnalytics(app); } catch(e) {}
   window._firebaseDB              = db;
