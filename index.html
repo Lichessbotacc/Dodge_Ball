@@ -293,14 +293,21 @@ input[type=text],input[type=number]{
     <canvas id="game"></canvas>
     <div id="coinHUD">🪙 <span id="coinScore">0</span> &nbsp;|&nbsp; ⏱ <span id="coinTime">60</span>s</div>
     <div id="pingDisplay">📶 -- ms</div>
-    <div id="onlineHUD">
+        <div id="onlineHUD">
       <div class="online-names">
-        <span id="onlineNameMe" style="color:#00ff88">Me</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span id="onlineNameMe" style="color:#00ff88">Me</span>
+          <span id="onlineRankMe" style="color:#ffd700;font-size:13px;">(#-)</span>
+        </div>
         <span style="color:#aaa">VS</span>
-        <span id="onlineNameOpp" style="color:#ff8844">Opp</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span id="onlineNameOpp" style="color:#ff8844">Opp</span>
+          <span id="onlineRankOpp" style="color:#ffd700;font-size:13px;">(#-)</span>
+        </div>
       </div>
       <div id="onlineStatusHUD" style="color:#aaa;font-size:13px;margin-top:4px;">Connecting…</div>
     </div>
+
     <div id="opponentInfo"><div id="opponentText"></div></div>
     <div id="spectatorInfo"><b>👁 Spectator Mode</b><br><div id="spectatorText"></div></div>
 
