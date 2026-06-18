@@ -1023,12 +1023,51 @@ function joinMatch(matchId, opp, matchData) {
 // ═══════════════════════════════════════════════
 //  VS SCREEN
 // ═══════════════════════════════════════════════
+async function getPlayerRanks(p1Name, p2Name) {
+  if (!fbReady) return { r1: "?", r2: "?" };
+  try {
+    const data = await dbGet("players");
+    if (!data) return { r1: "?", r2: "?" };
+    
+    // Sortiere alle aktiven Spieler nach ELO absteigend
+    const sorted = Object.values(data)
+      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
+      .sort((a, b) => b.elo - a.elo);
+      
+    const idx1 = sorted.findIndex(p => p.name === p1Name);
+    const idx2 = sorted.findIndex(p => p.name === p2Name);
+    
+    return {
+      r1: idx1 !== -1 ? `#${idx1 + 1}` : "Unranked",
+      r2: idx2 !== -1 ? `#${idx2 + 1}` : "Unranked"
+    };
+  } catch(e) {
+    console.warn("Error loading ranks:", e);
+    return { r1: "?", r2: "?" };
+  }
+}
+
 function showVSScreen(n1, e1, n2, e2, callback) {
   document.getElementById("vsName1").textContent = n1;
   document.getElementById("vsElo1").textContent  = "ELO " + Math.round(e1);
+  document.getElementById("vsRank1").textContent = "Rank: Loading...";
+  
   document.getElementById("vsName2").textContent = n2;
   document.getElementById("vsElo2").textContent  = "ELO " + Math.round(e2);
+  document.getElementById("vsRank2").textContent = "Rank: Loading...";
+  
   showScreen("vsScreen");
+  
+  // Ränge asynchron im Hintergrund laden und anzeigen
+  getPlayerRanks(n1, n2).then(ranks => {
+    document.getElementById("vsRank1").textContent = "Rank: " + ranks.r1;
+    document.getElementById("vsRank2").textContent = "Rank: " + ranks.r2;
+    
+    // Direkt das HUD für die Spielrunde mit den Rängen befüllen
+    document.getElementById("onlineRankMe").textContent  = `(${ranks.r1})`;
+    document.getElementById("onlineRankOpp").textContent = `(${ranks.r2})`;
+  });
+
   let cd = 3;
   document.getElementById("vsCountdown").textContent = "Starting in " + cd + "…";
   const iv = setInterval(() => {
@@ -1042,6 +1081,7 @@ function showVSScreen(n1, e1, n2, e2, callback) {
     }
   }, 1000);
 }
+
 
 // ═══════════════════════════════════════════════
 //  SEEDED RNG (deterministic across both clients)
