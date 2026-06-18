@@ -1466,27 +1466,61 @@ function getSkillValue(p) {
 
 function updateAI(p, activeBalls) {
   if (!p.alive) return;
+  
+  // NUR IM COIN-MODUS: Wenn der Bot eingefroren ist, Bewegung sperren
+  if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) return;
+
   let danger = false;
+  // ... (Ab hier geht dein bisheriger Code in updateAI unverändert weiter!)
+
   for (const b of activeBalls) {
     const dx = p.x - b.x, dy = p.y - b.y;
     if (Math.sqrt(dx*dx + dy*dy) < p.awareness) { danger = true; break; }
   }
+  
+  // NEU: Münzen-Targeting im Coin-Modus
   if (!danger) {
-    if (p.targetX === null || p.targetY === null || Math.random() < 0.02) {
-      p.targetX = Math.random() * W();
-      p.targetY = Math.random() * H();
+    if (mode === "coin" && coins.length > 0) {
+      let nearestCoin = null;
+      let minDist = Infinity;
+      for (const c of coins) {
+        const dx = c.x - p.x, dy = c.y - p.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < minDist) {
+          minDist = dist;
+          nearestCoin = c;
+        }
+      }
+      if (nearestCoin) {
+        p.targetX = nearestCoin.x;
+        p.targetY = nearestCoin.y;
+      }
+    } else {
+      if (p.targetX === null || p.targetY === null || Math.random() < 0.02) {
+        p.targetX = Math.random() * W();
+        p.targetY = Math.random() * H();
+      }
     }
   }
+  // ... (restliche Bewegungs- und Ausweichlogik der Funktion bleibt gleich)
+
   let moveX = (p.targetX || W()/2) - p.x;
   let moveY = (p.targetY || H()/2) - p.y;
   const moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
   moveX /= moveDist; moveY /= moveDist;
-  let avoidX = 0, avoidY = 0;
-  const wallMargin = 140;
-  if (p.x < wallMargin)     avoidX += (wallMargin - p.x) * 0.03;
-  if (p.x > W()-wallMargin) avoidX -= (p.x - (W()-wallMargin)) * 0.03;
-  if (p.y < wallMargin)     avoidY += (wallMargin - p.y) * 0.03;
-  if (p.y > H()-wallMargin) avoidY -= (p.y - (H()-wallMargin)) * 0.03;
+    let avoidX = 0, avoidY = 0;
+  
+  // NEU: Wenn wir im Münzen-Modus (coin) sind, setzen wir den Sicherheitsabstand 
+  // zum Rand auf 0. Dadurch können die Bots problemlos bis in die Ecken laufen.
+  const wallMargin = (mode === "coin") ? 0 : 140;
+  
+  if (wallMargin > 0) {
+    if (p.x < wallMargin)     avoidX += (wallMargin - p.x) * 0.03;
+    if (p.x > W()-wallMargin) avoidX -= (p.x - (W()-wallMargin)) * 0.03;
+    if (p.y < wallMargin)     avoidY += (wallMargin - p.y) * 0.03;
+    if (p.y > H()-wallMargin) avoidY -= (p.y - (H()-wallMargin)) * 0.03;
+  }
+
   for (const b of activeBalls) {
     const dx = p.x - b.x, dy = p.y - b.y;
     const dist = Math.sqrt(dx*dx + dy*dy) || 1;
@@ -1602,27 +1636,35 @@ function startCoinMode() {
   document.getElementById("coinHUD").style.display = "block";
   document.getElementById("coinScore").textContent = 0;
   document.getElementById("coinTime").textContent  = 60;
+  
   players = [];
   players.push(createPlayer(W()/2, H()/2, "#00ff88", "Player"));
   for (let i = 0; i < aiBotCount; i++)
     players.push(createPlayer(Math.random()*W(), Math.random()*H(),
       `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
+  
+  // Jeder Spieler startet mit 0 Münzen
+  for (const p of players) {
+    p.coinsCollected = 0;
+  }
+
   for (let i = 0; i < 8; i++) spawnCoin();
   for (let i = 0; i < startBallCount; i++) createBall();
   spawnLoop();
+  
   coinIntervalId = setInterval(() => {
     if (!running) { clearInterval(coinIntervalId); coinIntervalId = null; return; }
     coinTimeLeft--;
     document.getElementById("coinTime").textContent = coinTimeLeft;
+    
     if (coinTimeLeft <= 0) {
       clearInterval(coinIntervalId); coinIntervalId = null;
-      running = false;
-      document.getElementById("coinHUD").style.display = "none";
-      document.getElementById("finalTime").textContent  = coinScorePlayer + " Coins";
-      showScreen("gameOver");
-    } else if (Math.random() < 0.4) spawnCoin();
+      endCoinMode();
+    }
   }, 1000);
 }
+
+
 
 // ═══════════════════════════════════════════════
 //  SURVIVAL
@@ -2009,23 +2051,34 @@ if (onlineIsHost) {
   }
 
   // Coin collection
+    // Coin collection
   if (mode === "coin") {
     for (const p of players) {
       if (!p.alive) continue;
-      for (let i = coins.length-1; i >= 0; i--) {
+      for (let i = coins.length - 1; i >= 0; i--) {
         const c = coins[i];
-        const dx = p.x - c.x, dy = p.y - c.y;
-        if (Math.sqrt(dx*dx + dy*dy) < p.radius + c.r) {
+        const dx = p.x - c.x;
+        const dy = p.y - c.y;
+        
+        // Prüfen, ob der Spieler (oder Bot) die Münze berührt
+        if (Math.sqrt(dx * dx + dy * dy) < p.radius + c.r) {
+          // Münzkonto des jeweiligen Spielers erhöhen
+          p.coinsCollected = (p.coinsCollected || 0) + c.value;
+          
+          // Wenn es der menschliche Spieler ist, HUD aktualisieren
           if (p.name === "Player") {
-            coinScorePlayer += c.value;
+            coinScorePlayer = p.coinsCollected;
             document.getElementById("coinScore").textContent = coinScorePlayer;
           }
-          coins.splice(i, 1);
-          if (Math.random() < 0.4) spawnCoin();
+          
+          // Münze entfernen und eventuell eine neue spawnen
+        coins.splice(i, 1);
+          spawnCoin(); 
         }
       }
     }
   }
+
 
   for (const p of players) checkCollision(p);
 }
@@ -2124,21 +2177,38 @@ function updateMatch(match) {
 
 function checkCollision(p) {
   if (!p.alive) return;
-  for (const b of balls) {
-    const dx = p.x - b.x, dy = p.y - b.y;
-    if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
-      p.alive = false;
-      p.deathTime = Date.now();
-      eliminated.push(p);
-      const alive = players.filter(x => x.alive);
-      if (alive.length <= 1) {
-        if (alive.length === 1 && !eliminated.includes(alive[0])) {
-          alive[0].deathTime = Infinity;
-          eliminated.push(alive[0]);
-        }
-        finishArena();
+
+  // NUR IM COIN-MODUS: Unverwundbarkeit prüfen
+  if (mode === "coin" && p.invulnerableUntil && Date.now() < p.invulnerableUntil) return;
+
+  if (mode === "coin") {
+    // Münzen-Modus: Einfrieren statt Ausscheiden
+    for (const b of balls) {
+      const dx = p.x - b.x, dy = p.y - b.y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+        p.stunnedUntil = Date.now() + 5000;
+        p.invulnerableUntil = Date.now() + 6000; // 5s Freeze + 1s Fluchtzeit
+        return;
       }
-      return;
+    }
+  } else {
+    // Alle anderen Modi: Normales Ausscheiden bei Treffer
+    for (const b of balls) {
+      const dx = p.x - b.x, dy = p.y - b.y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+        p.alive = false;
+        p.deathTime = Date.now();
+        eliminated.push(p);
+        const alive = players.filter(x => x.alive);
+        if (alive.length <= 1) {
+          if (alive.length === 1 && !eliminated.includes(alive[0])) {
+            alive[0].deathTime = Infinity;
+            eliminated.push(alive[0]);
+          }
+          finishArena();
+        }
+        return;
+      }
     }
   }
 }
@@ -2507,10 +2577,9 @@ function draw() {
         const opp = myMatch.players.find(p => p.name !== "YOU");
         if (opp) {
           const sorted  = [...participants].sort((a,b) => b.elo - a.elo);
-          const oppRank = sorted.findIndex(p => p.name === opp.name) + 1;
-          oppDiv.style.display = "block";
-          document.getElementById("opponentText").innerHTML =
-            `Opponent: <b style="color:#ffd700">${opp.name}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(getSkillValue(opp)*100)}%</b>`;
+         const oppRank = sorted.findIndex(p => p.name === opp.name) + 1;
+oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(getSkillValue(opp)*100)}%</b>`;
+
         }
       } else { oppDiv.style.display = "none"; }
       specDiv.style.display = "none";
@@ -2551,8 +2620,25 @@ function draw() {
   // ── PLAYERS ──
   for (const p of players) {
     if (!p.alive) continue;
+
+    // NUR IM COIN-MODUS: Blinken (Flashen) während der Unverwundbarkeit
+    if (mode === "coin" && p.invulnerableUntil && Date.now() < p.invulnerableUntil) {
+      if (Math.floor(Date.now() / 100) % 2 === 0) {
+        continue; // Überspringt das Zeichnen dieses Frames (Blink-Effekt)
+      }
+    }
+
     ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fillStyle = p.color; ctx.fill();
+
+    // NUR IM COIN-MODUS: Eisblauer Ring um eingefrorene (stunned) Spieler/Bots zeichnen
+    if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0, 191, 255, 0.8)"; // Eisblau
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
 
     if (mode === "mirror" && p.name === "Mirror") {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.radius+4, 0, Math.PI*2);
@@ -2570,11 +2656,15 @@ function draw() {
     if (me && !me.alive) {
       ctx.fillStyle = "rgba(255,0,0,0.18)";
       ctx.fillRect(0, 0, W(), H());
-      ctx.fillStyle = "white"; ctx.font = "bold 48px Arial"; ctx.textAlign = "center";
-      ctx.fillText("💀 You died! Waiting for result…", W()/2, H()/2);
-    }
-  }
-}
+     ctx.fillStyle = "white"              ; ctx.font = "bold 48px Arial"; ctx.textAlign = "center";
+              ctx.fillText("💀 You died! Waiting for result…", W()/2, H()/2);
+            }
+          }
+        }
+
+
+
+
 
 // ═══════════════════════════════════════════════
 //  CONTROLS — coordinates always mapped through the fixed virtual canvas
@@ -2582,22 +2672,26 @@ function draw() {
 function moveSingle(x, y) {
   if (spectateModeActive || humanRemovedFromQueue) return;
 
+  // NUR IM COIN-MODUS: Bewegung sperren, wenn eingefroren
+  const me = players.find(p => p.name === "Player" || p.name === "YOU" || p.name === "Player 1");
+  if (mode === "coin" && me && me.stunnedUntil && Date.now() < me.stunnedUntil) return;
+
   if (mode === "tournament") {
     const match = playerMatchMap.get("YOU");
     if (!match || !match.running) return;
-    const me = match.players.find(p => p.name === "YOU");
-    if (me && me.alive) {
-      me.x = Math.max(me.radius, Math.min(W()-me.radius, x));
-      me.y = Math.max(me.radius, Math.min(H()-me.radius, y));
+    const meMatch = match.players.find(p => p.name === "YOU");
+    if (meMatch && meMatch.alive) {
+      meMatch.x = Math.max(meMatch.radius, Math.min(W()-meMatch.radius, x));
+      meMatch.y = Math.max(meMatch.radius, Math.min(H()-meMatch.radius, y));
     }
     return;
   }
 
   if (mode === "online") {
-    const me = players.find(p => p.name === onlineAccount?.name);
-    if (me && me.alive) {
-      me.x = Math.max(me.radius, Math.min(W()-me.radius, x));
-      me.y = Math.max(me.radius, Math.min(H()-me.radius, y));
+    const meOnline = players.find(p => p.name === onlineAccount?.name);
+    if (meOnline && meOnline.alive) {
+      meOnline.x = Math.max(meOnline.radius, Math.min(W()-meOnline.radius, x));
+      meOnline.y = Math.max(meOnline.radius, Math.min(H()-meOnline.radius, y));
     }
     return;
   }
@@ -2607,6 +2701,29 @@ function moveSingle(x, y) {
     players[0].y = Math.max(players[0].radius, Math.min(H()-players[0].radius, y));
   }
 }
+
+  function endCoinMode() {
+  running = false;
+  clearAllTimers();
+  document.getElementById("coinHUD").style.display = "none";
+  
+  // Sortiert alle Spieler nach den gesammelten Münzen (absteigend)
+  const sorted = [...players].sort((a, b) => (b.coinsCollected || 0) - (a.coinsCollected || 0));
+  
+  // Erstellt eine eigene Münzen-Bestenliste für die rechte Seite
+  let html = "<b>🪙 COIN HUNT RANKING</b><br><br>";
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i];
+    const isMe = p.name === "Player" ? " (YOU)" : "";
+    html += `${i+1}. <span style="color:${p.color}">${p.name}${isMe}</span>: <b>${p.coinsCollected || 0}</b><br>`;
+  }
+  document.getElementById("ranking").innerHTML = html;
+  
+  // Zeigt den Game-Over-Bildschirm mit deinem Ergebnis
+  document.getElementById("finalTime").textContent = coinScorePlayer + " Coins";
+  showScreen("gameOver");
+}
+
 // ═══════════════════════════════════════════════
 //  ONLINE TV FUNCTION
 // ═══════════════════════════════════════════════
