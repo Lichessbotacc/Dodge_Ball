@@ -196,7 +196,7 @@ input[type=text],input[type=number]{
       </div>
     </div>
 
-    <div id="menu">
+      <div id="menu">
       <h1>DarkOnBalls</h1>
       <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
       <button onclick="startOnlineTV()">📺 Best Online TV</button>
@@ -207,7 +207,14 @@ input[type=text],input[type=number]{
       <button onclick="startGame('coin')">🪙 Coin Hunt</button>
       <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
       <button onclick="openSettings()">Settings</button>
+
+      <!-- NEU: Online-Spieler-Panel im Menü -->
+      <div id="onlinePlayersPanel" style="margin-top: 25px; width: 320px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 200px; overflow-y: auto;">
+        <b>🟢 Active Players:</b><br>
+        <span style="color: #888;">Connecting presence service...</span>
+      </div>
     </div>
+
 
     <div id="settings">
       <h2>Settings</h2>
@@ -405,6 +412,22 @@ window.addEventListener("firebaseReady", async () => {
   fbReady = true;
   if (onlineAccount) await pushAccountToFirebase();
 });
+  window.addEventListener("firebaseReady", async () => {
+  fbReady = true;
+  if (onlineAccount) {
+    await pushAccountToFirebase();
+    
+    // Automatisch offline gehen, wenn die Internetverbindung abbricht oder der Tab geschlossen wird
+    const statusRef = dbRef(`players/${onlineAccount.name}/status`);
+    window._firebaseOnDisconnect(statusRef).set("offline");
+    
+    // Initialen Status setzen
+    updatePlayerStatus("Idle in Menu");
+  }
+  // Startet den Listen-Stream für das Menü-Panel
+  startMenuPresenceListener();
+});
+
 function dbRef(path)           { return window._firebaseRef(window._firebaseDB, path); }
 async function dbGet(path)     { return (await window._firebaseGet(dbRef(path))).val(); }
 async function dbSet(path, v)  { return window._firebaseSet(dbRef(path), v); }
@@ -417,6 +440,55 @@ function dbOn(path, cb) {
   const score = await dbGet(`headToHead/${h2hKey}`);
   return score || { [p1]: 0, [p2]: 0 };
 }
+  // Aktualisiert den Aktivitätsstatus des Spielers in Firebase
+async function updatePlayerStatus(statusText) {
+  if (!fbReady || !onlineAccount) return;
+  await dbUpdate(`players/${onlineAccount.name}`, {
+    status: statusText,
+    lastActive: Date.now()
+  });
+}
+
+// Live-Listener für alle Online-Spieler im Menü
+let menuPresenceUnsubscribe = null;
+function startMenuPresenceListener() {
+  if (menuPresenceUnsubscribe) { menuPresenceUnsubscribe(); menuPresenceUnsubscribe = null; }
+  if (!fbReady) return;
+
+  menuPresenceUnsubscribe = dbOn("players", (playersData) => {
+    const panel = document.getElementById("onlinePlayersPanel");
+    if (!panel) return;
+
+    if (!playersData) {
+      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
+      return;
+    }
+
+    // Zeige nur Spieler an, die nicht offline sind und innerhalb der letzten 2 Minuten aktiv waren
+    const activeList = Object.values(playersData).filter(p => 
+      p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
+    );
+
+    if (activeList.length === 0) {
+      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
+      return;
+    }
+
+    let html = "<b>🟢 Active Players:</b><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
+    activeList.forEach(p => {
+      const isMe = onlineAccount && p.name === onlineAccount.name;
+      html += `
+        <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${p.name}${isMe ? ' (You)' : ''}</span>
+          <span style="color: #ffd700; font-style: italic;">${p.status}</span>
+        </div>
+      `;
+    });
+    html += "</div>";
+    panel.innerHTML = html;
+  });
+}
+
 
 async function recordHeadToHeadWin(winner, loser) {
   const h2hKey = [winner, loser].sort().join("__VS__");
