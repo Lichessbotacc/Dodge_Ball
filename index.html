@@ -77,13 +77,13 @@ button:hover{background:#555;}
 }
 #menu {
   display: flex !important;
-  flex-direction: column !important; /* Wieder Spalte für die perfekte vertikale Zentrierung */
-  justify-content: center !important;/* Zentriert das Hauptmenü perfekt in der Mitte */
-  align-items: center !important;
-  overflow-y: auto;
-  padding: 60px 10px;
-  -webkit-overflow-scrolling: touch;
-  position: relative;                /* Wichtig, damit sich die absolute Liste daran ausrichtet */
+  flex-direction: row !important;     /* NEU: Elemente stehen nun nebeneinander */
+  justify-content: center;           /* Zentriert die beiden Blöcke horizontal */
+  align-items: center;               /* Zentriert die beiden Blöcke vertikal */
+  gap: 50px;                         /* Abstand zwischen Spieler-Panel und Buttons */
+  overflow-y: auto;                  /* Erlaubt das Scrollen NUR in diesem Menü */
+  padding: 60px 20px;                /* Abstand oben/unten */
+  -webkit-overflow-scrolling: touch; /* Weiches Scrollen auf Mobilgeräten */
 }
 
 
@@ -208,15 +208,7 @@ input[type=text],input[type=number]{
       </div>
 
       <!-- RECHTS: Hauptmenü-Buttons und Titel (bleiben als Spalte zusammen) -->
-         <div id="menu">
-      <!-- LINKS (SCHWEBEND): Active Players Panel -->
-      <div id="onlinePlayersPanel" style="position: absolute; left: 40px; top: 50%; transform: translateY(-50%); width: 320px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 70vh; overflow-y: auto; z-index: 10;">
-        <b>🟢 Active Players:</b><br>
-        <span style="color: #888;">Connecting presence service...</span>
-      </div>
-
-      <!-- IN DER GENAUEN MITTE: Hauptmenü-Inhalte -->
-      <div style="display: flex; flex-direction: column; align-items: center; z-index: 1;">
+      <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
         <h1>DarkOnBalls</h1>
         <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
         <button onclick="startOnlineTV()">📺 Best Online TV</button>
@@ -229,7 +221,6 @@ input[type=text],input[type=number]{
         <button onclick="openSettings()">Settings</button>
       </div>
     </div>
-
 
 
     <div id="settings">
