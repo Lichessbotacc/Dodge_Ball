@@ -740,27 +740,15 @@ async function createAccount() {
   const info = document.getElementById("accountInfo");
   if (!name || name.length < 2)           { info.textContent = "Name must be at least 2 characters."; info.style.color="#f44"; return; }
   if (!/^[a-zA-Z0-9_-]+$/.test(name))     { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
-  
   if (fbReady) {
     const existing = await dbGet("players/" + name);
-    if (existing) {
-      // TRICK: Wenn der Account existiert, logge uns einfach ein!
-      onlineAccount = sanitizeAccount(existing);
-      saveAccountLocal();
-      info.textContent = "Welcome back! Logging in...";
-      info.style.color = "#00ff88";
-      setTimeout(() => { enterOnlineQueue(); }, 1000);
-      return;
-    }
+    if (existing)                          { info.textContent = "Name already taken."; info.style.color="#f44"; return; }
   }
-  
-  // Normaler Registrierungs-Flow, falls der Name neu ist
   onlineAccount = { name, elo: 1500, wins: 0, losses: 0 };
   saveAccountLocal();
   if (fbReady) await pushAccountToFirebase();
   enterOnlineQueue();
 }
-
 
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
