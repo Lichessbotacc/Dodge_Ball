@@ -1387,15 +1387,30 @@ async function handleOnlineResult(winnerName, change) {
   const oppName = onlineOpponent ? onlineOpponent.name : "Online Bot";
 
   // ── NEU: H2H SCORE BEI SPIELENDE SPEICHERN & UPDATEN ──
+  // ── NEU: H2H SCORE BEI SPIELENDE SPEICHERN & UPDATEN (Ohne Double-Write Bug!) ──
   if (!onlineVsBot && fbReady) {
     const loserName = won ? oppName : onlineAccount.name;
-    recordHeadToHeadWin(winnerName, loserName).then(score => {
-      const myWins = score[onlineAccount.name] || 0;
-      const oppWins = score[oppName] || 0;
-      const scoreHUD = document.getElementById("onlineScoreHUD");
-      if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
-    });
+    if (onlineIsHost) {
+      // Nur der Host schreibt den neuen Score aktiv in die Datenbank
+      recordHeadToHeadWin(winnerName, loserName).then(score => {
+        const myWins = score[onlineAccount.name] || 0;
+        const oppWins = score[oppName] || 0;
+        const scoreHUD = document.getElementById("onlineScoreHUD");
+        if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
+      });
+    } else {
+      // Der Client (p2) wartet kurz auf den Write des Hosts und liest dann den korrekten Stand aus
+      setTimeout(() => {
+        getHeadToHeadScore(onlineAccount.name, oppName).then(score => {
+          const myWins = score[onlineAccount.name] || 0;
+          const oppWins = score[oppName] || 0;
+          const scoreHUD = document.getElementById("onlineScoreHUD");
+          if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
+        });
+      }, 400); // 400ms Verzögerung verhindert jegliche Überschneidung
+    }
   } else if (onlineVsBot) {
+    // Bei Bot-Spielen gibt es ohnehin nur einen Client, hier ist kein Double-Write möglich
     const botScoreKey = `h2h_bot_${onlineAccount.name}`;
     const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
     if (won) {
@@ -1407,6 +1422,8 @@ async function handleOnlineResult(winnerName, change) {
     const scoreHUD = document.getElementById("onlineScoreHUD");
     if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
   }
+  // ──────────────────────────────────────────────────────
+
   // ──────────────────────────────────────────────────────
 
   // Wir merken uns die originalen ELOs vor dem Update
