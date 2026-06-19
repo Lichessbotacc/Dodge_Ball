@@ -76,15 +76,55 @@ button:hover{background:#555;}
   justify-content:center;align-items:center;background:#111;color:white;z-index:30;
 }
 #menu {
-  display: flex !important;
-  flex-direction: column !important; /* Wieder Spalte für die perfekte vertikale Zentrierung */
-  justify-content: center !important;/* Zentriert das Hauptmenü perfekt in der Mitte */
-  align-items: center !important;
-  overflow-y: auto;
-  padding: 60px 10px;
+  position: absolute;
+  inset: 0;
+  display: none; /* Wird über showScreen gesteuert */
+  flex-direction: row; /* Richtet Spieler-Panel links und Buttons mittig aus */
+  justify-content: center;
+  align-items: center;
+  background: #111;
+  color: white;
+  z-index: 30;
+  overflow-y: auto; /* Ermöglicht das Scrollen des gesamten Menüs */
+  padding: 40px 20px;
+  gap: 60px; /* Abstand zwischen dem linken Panel und den Knöpfen */
   -webkit-overflow-scrolling: touch;
-  position: relative;                /* Wichtig, damit sich die absolute Liste daran ausrichtet */
 }
+
+#onlinePlayersPanel {
+  width: 320px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 15px;
+  border-radius: 12px;
+  font-size: 14px;
+  text-align: left;
+  max-height: 80vh; /* Verhindert, dass das Panel zu lang wird */
+  overflow-y: auto; /* Macht die Spielerliste selbst scrollbar */
+  flex-shrink: 0;
+}
+
+.menu-modes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Responsive Ansicht für Mobilgeräte: Elemente werden untereinander gestapelt */
+@media (max-width: 800px) {
+  #menu {
+    flex-direction: column-reverse; /* Zeigt das Spieler-Panel auf Mobilgeräten unten an */
+    justify-content: flex-start;
+    padding-top: 60px;
+  }
+  #onlinePlayersPanel {
+    width: 100%;
+    max-width: 320px;
+    max-height: 200px;
+  }
+}
+
 
 
 h1{font-size:50px;margin-bottom:20px;}
