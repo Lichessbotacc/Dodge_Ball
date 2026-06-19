@@ -2190,14 +2190,12 @@ function update() {
     onlineSimTick++;
 
     // Ball spawning + physics (KORREKTUR: Nur der Host steuert den Spawn-Timer!)
-// BEIDE Spieler spawnen den Ball synchron auf ihrem eigenen Gerät!
-// Dank des gemeinsamen Seeds (onlineRng) sind die Bälle zu 100% identisch.
-if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
-  onlineBallSpawnTimer = Date.now();
-  balls.push(makeOnlineBall());
-
+if (onlineIsHost) {
+  if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
+    onlineBallSpawnTimer = Date.now();
+    balls.push(makeOnlineBall());
   }
-  
+}
 
 
     for (const b of balls) {
