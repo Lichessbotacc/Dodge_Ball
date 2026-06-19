@@ -1408,31 +1408,48 @@ function applyBallCorrection(authoritative) {
 }
 
 // Push my position
+// Hilfsvariablen für das State-Tracking (oberhalb der Funktion platzieren)
 let lastPosPush = 0;
+let lastSentX = -999;
+let lastSentY = -999;
+let lastSentAlive = true;
+
 function pushMyPosition() {
   if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
   const now = Date.now();
-  if (now - lastPosPush < 60) return;
-  lastPosPush = now;
+  if (now - lastPosPush < 75) return; // Intervall leicht auf 75ms erhöht (schont die CPU/Leitung)
 
   const me = players.find(p => p.name === onlineAccount.name);
   if (!me) return;
 
-  // KORREKTUR: Nutze dynamisch den richtigen State-Key je nach Rolle (p1 oder p2)
-  const stateKey = onlineRole === "p1" ? "p1State" : "p2State";
+  const roundedX = Math.round(me.x);
+  const roundedY = Math.round(me.y);
+  const aliveState = me.alive;
 
-  const updateData = {
-    [stateKey]: { x: Math.round(me.x), y: Math.round(me.y), alive: me.alive }
-  };
+  // Sende-Stopp: Nur senden, wenn sich Position oder Lebensstatus geändert haben!
+  if (roundedX === lastSentX && roundedY === lastSentY && aliveState === lastSentAlive) {
+    return; 
+  }
+
+  // Werte für den nächsten Vergleich aktualisieren
+  lastPosPush = now;
+  lastSentX = roundedX;
+  lastSentY = roundedY;
+  lastSentAlive = aliveState;
+
+  const stateKey = onlineRole === "p1" ? "p1State" : "p2State";
+  const stateData = { x: roundedX, y: roundedY, alive: aliveState };
+
+  // Direkt in den spezifischen Unterpfad schreiben (spart enorm Bandbreite!)
+  dbSet("onlineMatches/" + onlineMatchId + "/" + stateKey, stateData).catch(() => {});
 
   if (onlineVsBot) {
     const bot = players.find(p => p.name !== onlineAccount.name);
     if (bot) {
-      updateData.p2State = { x: Math.round(bot.x), y: Math.round(bot.y), alive: bot.alive };
+      const botData = { x: Math.round(bot.x), y: Math.round(bot.y), alive: bot.alive };
+      dbSet("onlineMatches/" + onlineMatchId + "/p2State", botData).catch(() => {});
     }
   }
-
-  dbUpdate("onlineMatches/" + onlineMatchId, updateData).catch(() => {});
 }
 
 
@@ -1440,18 +1457,22 @@ function pushMyPosition() {
 // Host pushes ball state periodically as a correction reference (FIX #1/#2)
 let lastBallPush = 0;
 function pushBallState() {
-if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
+  if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
 
   const now = Date.now();
-  if (now - lastBallPush < 100) return;
+  if (now - lastBallPush < 120) return; // Intervall von 100ms auf 120ms erhöht
   lastBallPush = now;
+  
   const bs = JSON.stringify(balls.map(b => ({
     x: Math.round(b.x), y: Math.round(b.y),
     vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)),
     radius: b.radius
   })));
-  dbUpdate("onlineMatches/" + onlineMatchId, { ballState: bs }).catch(() => {});
+  
+  // Gezieltes Schreiben in den Unterpfad "/ballState" statt dbUpdate auf das Hauptdokument
+  dbSet("onlineMatches/" + onlineMatchId + "/ballState", bs).catch(() => {});
 }
+
 
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
