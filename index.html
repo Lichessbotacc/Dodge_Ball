@@ -76,12 +76,16 @@ button:hover{background:#555;}
   justify-content:center;align-items:center;background:#111;color:white;z-index:30;
 }
 #menu {
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;     /* NEU: Elemente stehen nun nebeneinander */
+  justify-content: center;           /* Zentriert die beiden Blöcke horizontal */
+  align-items: center;               /* Zentriert die beiden Blöcke vertikal */
+  gap: 50px;                         /* Abstand zwischen Spieler-Panel und Buttons */
   overflow-y: auto;                  /* Erlaubt das Scrollen NUR in diesem Menü */
-  justify-content: flex-start;       /* Verhindert, dass der obere Titel beim Scrollen abgeschnitten wird */
-  padding: 60px 10px;                /* Gibt oben und unten einen schönen, sauberen Abstand beim Scrollen */
-  -webkit-overflow-scrolling: touch; /* Macht das Scrollen auf iPhones und iPads butterweich */
+  padding: 60px 20px;                /* Abstand oben/unten */
+  -webkit-overflow-scrolling: touch; /* Weiches Scrollen auf Mobilgeräten */
 }
+
 
 h1{font-size:50px;margin-bottom:20px;}
 h2{font-size:30px;margin-bottom:20px;}
@@ -196,22 +200,25 @@ input[type=text],input[type=number]{
       </div>
     </div>
 
-      <div id="menu">
-      <h1>DarkOnBalls</h1>
-      <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
-      <button onclick="startOnlineTV()">📺 Best Online TV</button>
-      <button onclick="startGame('single')">Singleplayer</button>
-      <button onclick="startGame('multi')">Multiplayer (local)</button>
-      <button onclick="startGame('ai')">AI Spectate</button>
-      <button onclick="startGame('tournament')">1vs1 Tournament (Offline)</button>
-      <button onclick="startGame('coin')">🪙 Coin Hunt</button>
-      <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
-      <button onclick="openSettings()">Settings</button>
-
-      <!-- NEU: Online-Spieler-Panel im Menü -->
-      <div id="onlinePlayersPanel" style="margin-top: 25px; width: 320px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 200px; overflow-y: auto;">
+         <div id="menu">
+      <!-- LINKS: Active Players Panel -->
+      <div id="onlinePlayersPanel" style="width: 320px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 400px; overflow-y: auto; flex-shrink: 0;">
         <b>🟢 Active Players:</b><br>
         <span style="color: #888;">Connecting presence service...</span>
+      </div>
+
+      <!-- RECHTS: Hauptmenü-Buttons und Titel (bleiben als Spalte zusammen) -->
+      <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+        <h1>DarkOnBalls</h1>
+        <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
+        <button onclick="startOnlineTV()">📺 Best Online TV</button>
+        <button onclick="startGame('single')">Singleplayer</button>
+        <button onclick="startGame('multi')">Multiplayer (local)</button>
+        <button onclick="startGame('ai')">AI Spectate</button>
+        <button onclick="startGame('tournament')">1vs1 Tournament (Offline)</button>
+        <button onclick="startGame('coin')">🪙 Coin Hunt</button>
+        <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
+        <button onclick="openSettings()">Settings</button>
       </div>
     </div>
 
