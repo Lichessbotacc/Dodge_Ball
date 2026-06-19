@@ -76,8 +76,8 @@ button:hover{background:#555;}
   justify-content:center;align-items:center;background:#111;color:white;z-index:30;
 }
 #menu {
-  /* display: flex !important; <-- ENTFERNT, damit showScreen() wieder funktioniert */
-  flex-direction: row;        /* Kein !important nötig */
+  display: flex;              /* NEU: Zeigt das Menü standardmäßig beim Laden (ohne !important) */
+  flex-direction: row;        
   justify-content: center;           
   align-items: center;               
   gap: 50px;                         
@@ -85,6 +85,7 @@ button:hover{background:#555;}
   padding: 60px 20px;                
   -webkit-overflow-scrolling: touch; 
 }
+
 
 
 h1{font-size:50px;margin-bottom:20px;}
