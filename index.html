@@ -1297,14 +1297,25 @@ if (!onlineVsBot && fbReady) {
 
     
     const oppState = data[oppRole + "State"];
-    if (oppState) {
-      const op = players.find(p => p.name !== myName);
-      if (op) {
-        op.tx    = oppState.x;
-        op.ty    = oppState.y;
-        op.alive = oppState.alive !== false;
-      }
+if (oppState) {
+  const op = players.find(p => p.name !== myName);
+  if (op) {
+    // Wenn wir bereits eine Zielposition haben, berechnen wir die Richtung & Geschwindigkeit
+    if (op.tx !== undefined && op.ty !== undefined) {
+      op.vx = oppState.x - op.tx;
+      op.vy = oppState.y - op.ty;
+    } else {
+      op.vx = 0;
+      op.vy = 0;
     }
+    
+    op.tx = oppState.x;
+    op.ty = oppState.y;
+    op.alive = oppState.alive !== false;
+    op.lastPacketTime = Date.now(); // Ankunftszeit des Pakets speichern
+  }
+}
+
 
     // FIX #1/#2: snapshot is a gentle correction only, not a hard overwrite.
     // This prevents a single delayed/lagged packet from causing a visible
@@ -2217,11 +2228,23 @@ if (onlineIsHost) {
       }
     } else {
       // Real opponent – flüssige Interpolation
-      const opp = players.find(p => p.name !== onlineAccount.name);
-      if (opp && opp.tx !== undefined && opp.ty !== undefined) {
-        opp.x += (opp.tx - opp.x) * 0.45;
-        opp.y += (opp.ty - opp.y) * 0.45;
-      }
+      // Real opponent – Extrapolation bei Lag
+const opp = players.find(p => p.name !== onlineAccount.name);
+if (opp && opp.tx !== undefined && opp.ty !== undefined) {
+  const timeSinceLastPacket = Date.now() - (opp.lastPacketTime || Date.now());
+
+  // Wenn die Daten länger als 100ms ausbleiben, rechnen wir seinen Weg hoch (bis max. 1,5 Sekunden)
+  if (timeSinceLastPacket > 100 && timeSinceLastPacket < 1500) {
+    // Wir lassen ihn mit seiner letzten bekannten Richtung sanft weitergleiten
+    opp.tx += (opp.vx || 0) * 0.15; 
+    opp.ty += (opp.vy || 0) * 0.15;
+  }
+
+  // Weiches Hinbewegen (0.22 statt 0.45 macht es bei hohem Ping deutlich flüssiger!)
+  opp.x += (opp.tx - opp.x) * 0.22;
+  opp.y += (opp.ty - opp.y) * 0.22;
+}
+
     }
 
     // Eigener Spieler clampen
