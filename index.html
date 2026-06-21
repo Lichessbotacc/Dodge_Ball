@@ -1154,11 +1154,15 @@ async function loadLeaderboard() {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
     
+    // Holt alle Einträge und zeigt absolut jeden Account (inkl. Bot & älterer Accounts),
+    // der mindestens eine Partie (Sieg oder Niederlage) absolviert hat.
     const activePlayers = Object.entries(data)
       .map(([uid, p]) => ({ uid, ...p }))
-      .filter(p => p.uid !== p.name) // Filtert alte Legacy-Namenseinträge heraus
-      .filter(p => p.uid === "bot__online_bot" || ((p.wins || 0) + (p.losses || 0)) > 0) // Zeigt nur Spieler mit Spielen ODER den Bot
-      .sort((a, b) => (b.elo || 1500) - (a.elo || 1500));
+      .filter(p => {
+        const totalGames = (Number(p.wins) || 0) + (Number(p.losses) || 0);
+        return totalGames >= 1;
+      })
+      .sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
 
     if (activePlayers.length === 0) {
       lbTable.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No active players yet</span></div>';
@@ -1174,6 +1178,7 @@ async function loadLeaderboard() {
     });
   } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
 }
+
 
 
 
