@@ -1081,6 +1081,11 @@ async function loadLeaderboard() {
   try {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
+    const activePlayers = Object.entries(data)
+      .map(([uid, p]) => ({ uid, ...p }))
+      .filter(p => p.uid !== p.name) // <-- NEU: Entfernt alle alten legacy Namens-Knoten
+      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
+      .sort((a, b) => b.elo - a.elo);
 
     const activePlayers = Object.entries(data)
       .map(([uid, p]) => ({ uid, ...p }))
