@@ -1775,6 +1775,7 @@ let lastSentAlive = true;
 // using a name-derived key.
 function pushMyPosition() {
   if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
+   if (onlineVsBot) return;
   const now = Date.now();
   if (now - lastPosPush < 75) return;
 
@@ -1813,7 +1814,7 @@ function pushMyPosition() {
 let lastBallPush = 0;
 function pushBallState() {
   if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
-
+if (onlineVsBot) return;
   const now = Date.now();
   if (now - lastBallPush < 120) return;
   lastBallPush = now;
