@@ -1154,12 +1154,11 @@ async function loadLeaderboard() {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
     
-    // activePlayers wird jetzt nur noch EINMAL korrekt deklariert und gefiltert:
     const activePlayers = Object.entries(data)
       .map(([uid, p]) => ({ uid, ...p }))
-      .filter(p => p.uid !== p.name) // Filtert alte legacy Namens-Knoten heraus
-      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
-      .sort((a, b) => b.elo - a.elo);
+      .filter(p => p.uid !== p.name) // Filtert alte Legacy-Namenseinträge heraus
+      .filter(p => p.uid === "bot__online_bot" || ((p.wins || 0) + (p.losses || 0)) > 0) // Zeigt nur Spieler mit Spielen ODER den Bot
+      .sort((a, b) => (b.elo || 1500) - (a.elo || 1500));
 
     if (activePlayers.length === 0) {
       lbTable.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No active players yet</span></div>';
@@ -1170,11 +1169,12 @@ async function loadLeaderboard() {
       const isMe = myUid && p.uid === myUid;
       lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
         <span>#${i+1}</span><span>${p.name}</span>
-        <span>${Math.round(p.elo)}</span>
+        <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
   } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
 }
+
 
 
 
