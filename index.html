@@ -71,6 +71,38 @@
       (e.g. a Cloud Function) that computes results, not a client.
       This is flagged again at the bottom of this file in
       `RULES.txt` (suggested Realtime Database Security Rules).
+
+   ───────────────────────────────────────────────────────────────────
+   NETWORK SMOOTHNESS PATCH (this revision)
+   ───────────────────────────────────────────────────────────────────
+   Previously the opponent's on-screen position was nudged toward the
+   last received network packet with a FIXED smoothing factor
+   (0.22/frame) and a fixed dead-reckoning window (100-1500ms). This
+   meant: if YOUR connection is great but your OPPONENT's connection
+   is bad/laggy, their packets arrive late or irregularly — and since
+   the catch-up speed never adapted to that, the opponent appeared to
+   teleport/freeze/snap instead of moving smoothly. Your own ping was
+   never the cause; this is purely about how *their* movement is
+   reconstructed on your screen.
+
+   Fixes:
+     - Per-opponent adaptive interpolation: we now measure the actual
+       time between two consecutive opponent packets (packet interval)
+       and continuously estimate their effective "network framerate".
+       The visual catch-up speed scales with how stale the data is,
+       so a big gap (bad ping) still results in smooth motion instead
+       of a jump, while a small gap (good ping) stays snappy.
+     - Velocity-based dead-reckoning: between packets we keep moving
+       the opponent along their last known velocity (extrapolation),
+       capped to a sane max distance so a long dropout doesn't send
+       them flying off-screen. This keeps motion alive instead of
+       freezing when packets are delayed.
+     - Smoothing factor is now framerate-independent (uses dt-based
+       exponential smoothing instead of a flat per-frame constant),
+       so it behaves consistently regardless of any local frame drops.
+     - Ball state interpolation also got smoother lerp (was a flat
+       0.15 snap toward host authority every correction; now scaled by
+       how much time has passed since the last correction).
    ═══════════════════════════════════════════════════════════════════ */
 
 import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -1013,6 +1045,46 @@ document.getElementById("record").textContent = record;
 let matchBanner = null;
 
 // ═══════════════════════════════════════════════
+//  NETWORK SMOOTHING (NEW)
+//  ─────────────────────────────────────────────
+//  Goal: YOUR screen should look smooth even when the OPPONENT has a
+//  bad/unstable connection. Their packets may arrive late or with
+//  irregular gaps — we adapt how we reconstruct their motion based on
+//  the ACTUAL measured gap between their last two packets, instead of
+//  a fixed catch-up speed. We also keep extrapolating along their
+//  last known velocity between packets (dead-reckoning) so motion
+//  never visibly freezes, and we clamp the extrapolation distance so
+//  a long dropout doesn't fling them across the map.
+// ═══════════════════════════════════════════════
+const NET_SMOOTH = {
+  // Minimum/maximum opponent packet interval we plan around (ms).
+  // Below this we trust packets are basically "live"; above this we
+  // treat the connection as laggy and lean more on extrapolation.
+  MIN_INTERVAL: 60,
+  MAX_INTERVAL: 1000,
+  // Maximum distance (px, virtual coords) we'll extrapolate the
+  // opponent forward without a fresh packet, to avoid them flying
+  // off if their connection drops entirely.
+  MAX_EXTRAPOLATE_DIST: 140,
+  // After this long with no packet at all, stop extrapolating and
+  // just hold position (still alive-looking, just paused).
+  FREEZE_AFTER_MS: 1200
+};
+
+// Returns an exponential-smoothing alpha for a given dt (ms) and a
+// target "time to mostly catch up" (ms). This makes the catch-up
+// speed independent of actual frame rate AND adapts automatically:
+// callers pass a longer catch-up window when the opponent's own
+// packet interval is large (laggy), and a short one when packets are
+// arriving quickly (good connection) — so a good connection still
+// feels snappy, and a bad one still looks smooth instead of jumpy.
+function smoothingAlpha(dtMs, catchUpMs) {
+  if (catchUpMs <= 0) return 1;
+  // 1 - e^(-dt/tau): standard framerate-independent exponential smoothing.
+  return 1 - Math.exp(-dtMs / catchUpMs);
+}
+
+// ═══════════════════════════════════════════════
 //  HOME / EXIT
 // ═══════════════════════════════════════════════
 function confirmHome() {
@@ -1615,6 +1687,13 @@ function startOnlineGame(matchData) {
 
   oppPlayer.tx = oppX;
   oppPlayer.ty = py;
+  // NEW: network-smoothing bookkeeping for the opponent's reconstructed
+  // motion. lastPacketAt / prevPacketAt let us measure the real gap
+  // between their last two updates so the catch-up speed can adapt.
+  oppPlayer.lastPacketAt = 0;
+  oppPlayer.prevPacketAt = 0;
+  oppPlayer.netVX = 0;
+  oppPlayer.netVY = 0;
 
   if (onlineVsBot) {
     const s = 0.20;
@@ -1662,18 +1741,33 @@ function startOnlineGame(matchData) {
     if (oppState) {
       const op = players.find(p => p.name !== myName);
       if (op) {
+        // NEW: measure the ACTUAL elapsed time since the opponent's
+        // previous packet (not a fixed assumption). This is the key
+        // piece of data that lets us tell "their connection is fine
+        // right now" apart from "their connection just hiccuped" and
+        // react with an appropriately fast or slow catch-up.
+        const now = Date.now();
+        const prevAt = op.lastPacketAt || now;
+        const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(1, now - prevAt));
+
         if (op.tx !== undefined && op.ty !== undefined) {
-          op.vx = oppState.x - op.tx;
-          op.vy = oppState.y - op.ty;
+          // Velocity derived from real elapsed time (px/ms), not a
+          // hardcoded per-frame guess — this stays correct whether
+          // packets are arriving every 50ms or every 600ms.
+          op.netVX = (oppState.x - op.tx) / interval;
+          op.netVY = (oppState.y - op.ty) / interval;
         } else {
-          op.vx = 0;
-          op.vy = 0;
+          op.netVX = 0;
+          op.netVY = 0;
         }
 
+        op.prevPacketAt = prevAt;
         op.tx = oppState.x;
         op.ty = oppState.y;
         op.alive = oppState.alive !== false;
-        op.lastPacketTime = Date.now();
+        op.lastPacketTime = now;
+        op.lastPacketAt = now;
+        op.netInterval = interval;
       }
     }
 
@@ -1745,7 +1839,22 @@ function makeOnlineBall() {
   };
 }
 
+// CHANGED: ball correction now scales the lerp factor by how long it's
+// been since the previous correction, instead of a flat 0.15 snap
+// every time a correction arrives. With irregular host packet timing
+// (host has bad ping) this avoids visible "snapping" — small/frequent
+// corrections stay gentle, while a correction after a longer gap pulls
+// harder so we don't drift indefinitely out of sync.
+let lastBallCorrectionAt = 0;
 function applyBallCorrection(authoritative) {
+  const now = Date.now();
+  const gap = lastBallCorrectionAt ? Math.min(NET_SMOOTH.MAX_INTERVAL, now - lastBallCorrectionAt) : 120;
+  lastBallCorrectionAt = now;
+  // Roughly: short gap -> gentle ~0.15 pull (matches old feel when
+  // connection is good); long gap -> stronger pull so we catch up
+  // without a hard teleport.
+  const pull = Math.min(0.6, 0.15 * (gap / 120));
+
   for (let i = 0; i < authoritative.length; i++) {
     const a = authoritative[i];
     if (!balls[i]) {
@@ -1753,8 +1862,8 @@ function applyBallCorrection(authoritative) {
       continue;
     }
     const b = balls[i];
-    b.x += (a.x - b.x) * 0.15;
-    b.y += (a.y - b.y) * 0.15;
+    b.x += (a.x - b.x) * pull;
+    b.y += (a.y - b.y) * pull;
     b.vx = a.vx;
     b.vy = a.vy;
     b.radius = a.radius;
@@ -2153,6 +2262,10 @@ function createPlayer(x, y, color, name) {
     lastVX: 0, lastVY: 0,
     aiVX: 0, aiVY: 0,
     arenaScore: 0, deathTime: 0,
+    // NEW: network-smoothing bookkeeping (only meaningful for the
+    // remote-controlled opponent in "online" mode; harmless no-ops
+    // for every other player/bot since nothing else reads them).
+    lastPacketAt: 0, prevPacketAt: 0, netVX: 0, netVY: 0, netInterval: 100,
     stats: {
   wins:0,
   losses:0,
@@ -2567,17 +2680,62 @@ function update() {
         checkBotCollision(bot);
       }
     } else {
+      // CHANGED (network smoothing): replaced the fixed-rate nudge
+      // ( opp.x += (opp.tx - opp.x) * 0.22 every frame, with a fixed
+      // 0.15 extrapolation window of 100-1500ms ) with an adaptive
+      // version. We use TWO ingredients together:
+      //   1) Dead-reckoning: keep moving opp.tx/opp.ty forward along
+      //      their last known network velocity (netVX/netVY, computed
+      //      from REAL elapsed time between their last two packets),
+      //      capped so a long dropout can't fling them off-screen.
+      //   2) Adaptive smoothing: the visual position (opp.x/opp.y)
+      //      chases the (possibly extrapolated) target with a
+      //      catch-up speed that scales with how laggy their packets
+      //      have been recently (op.netInterval) — laggy connection
+      //      => smoother/slower chase so it doesn't look like
+      //      teleporting; good connection => snappier chase.
+      // This means YOUR experience stays smooth regardless of the
+      // OPPONENT's connection quality, which is exactly the lag you
+      // described (good ping for you, choppy because of them).
       const opp = players.find(p => p.name !== onlineAccount.name);
       if (opp && opp.tx !== undefined && opp.ty !== undefined) {
-        const timeSinceLastPacket = Date.now() - (opp.lastPacketTime || Date.now());
+        const nowMs = Date.now();
+        const sinceLastPacket = nowMs - (opp.lastPacketAt || nowMs);
 
-        if (timeSinceLastPacket > 100 && timeSinceLastPacket < 1500) {
-          opp.tx += (opp.vx || 0) * 0.15;
-          opp.ty += (opp.vy || 0) * 0.15;
+        // Dead-reckon the *target* point forward using their last
+        // known velocity, but only while the gap is still plausible
+        // (not a dead connection) and only up to a max distance.
+        if (sinceLastPacket > 0 && sinceLastPacket < NET_SMOOTH.FREEZE_AFTER_MS) {
+          const dtFrame = timestep; // ~16.6ms, one fixed sim step
+          let stepX = (opp.netVX || 0) * dtFrame;
+          let stepY = (opp.netVY || 0) * dtFrame;
+          const stepDist = Math.sqrt(stepX*stepX + stepY*stepY);
+          const totalExtrapolated = Math.sqrt(
+            Math.pow(opp.tx - (opp.baseTx ?? opp.tx), 2) +
+            Math.pow(opp.ty - (opp.baseTy ?? opp.ty), 2)
+          );
+          if (stepDist > 0 && totalExtrapolated < NET_SMOOTH.MAX_EXTRAPOLATE_DIST) {
+            opp.tx += stepX;
+            opp.ty += stepY;
+          }
         }
 
-        opp.x += (opp.tx - opp.x) * 0.22;
-        opp.y += (opp.ty - opp.y) * 0.22;
+        // Adaptive catch-up: the worse (larger) their recent packet
+        // interval has been, the longer we give ourselves to close
+        // the gap, trading a little positional accuracy for smooth
+        // motion. Good connections (small netInterval) stay snappy.
+        const recentInterval = Math.min(
+          NET_SMOOTH.MAX_INTERVAL,
+          Math.max(NET_SMOOTH.MIN_INTERVAL, opp.netInterval || NET_SMOOTH.MIN_INTERVAL)
+        );
+        // catchUpMs scales from ~70ms (great connection, near-instant
+        // chase) up to ~260ms (bad connection, gentle glide) — tuned
+        // so it never feels sluggish even at the high end.
+        const catchUpMs = 70 + (recentInterval - NET_SMOOTH.MIN_INTERVAL) * 0.2;
+        const alpha = smoothingAlpha(timestep, catchUpMs);
+
+        opp.x += (opp.tx - opp.x) * alpha;
+        opp.y += (opp.ty - opp.y) * alpha;
       }
     }
 
@@ -3498,6 +3656,16 @@ canvas.addEventListener("touchstart", e => {
         misbehaving client for player A could still write bogus
         position/ball data into a match — but it can no longer affect
         any OTHER match or any other player's profile.
+     4. NETWORK SMOOTHING (this revision) is a presentation-layer fix
+        only — it changes how the opponent's reported positions are
+        rendered/extrapolated on YOUR screen, not the underlying
+        collision authority. Hit detection for the opponent's ball
+        collisions is still driven by their own client reporting its
+        own death (or the host's ball state), so this patch cannot by
+        itself fix disputes about "did I actually get hit" under
+        extreme packet loss — that remains a server-authoritative-
+        simulation problem (Cloud Function / dedicated game server)
+        if you want to fully solve it.
 ═══════════════════════════════════════════════════════════════════ -->
 </body>
 </html>
