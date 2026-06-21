@@ -1081,14 +1081,11 @@ async function loadLeaderboard() {
   try {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
+    
+    // activePlayers wird jetzt nur noch EINMAL korrekt deklariert und gefiltert:
     const activePlayers = Object.entries(data)
       .map(([uid, p]) => ({ uid, ...p }))
-      .filter(p => p.uid !== p.name) // <-- NEU: Entfernt alle alten legacy Namens-Knoten
-      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
-      .sort((a, b) => b.elo - a.elo);
-
-    const activePlayers = Object.entries(data)
-      .map(([uid, p]) => ({ uid, ...p }))
+      .filter(p => p.uid !== p.name) // Filtert alte legacy Namens-Knoten heraus
       .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
       .sort((a, b) => b.elo - a.elo);
 
@@ -1106,6 +1103,7 @@ async function loadLeaderboard() {
     });
   } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
 }
+
 
 
 // CHANGED: now takes a uid (not a name) and reads players/{uid}
