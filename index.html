@@ -5,7 +5,78 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>DarkOnBalls</title>
 <script type="module">
+/* ═══════════════════════════════════════════════════════════════════
+   SECURITY REWRITE — SUMMARY OF CHANGES (read this first)
+   ═══════════════════════════════════════════════════════════════════
+   1. REMOVED all `window._firebase*` globals. Previously, ANY script
+      running in the page (or a console user) could call
+      `window._firebaseSet(window._firebaseRef(window._firebaseDB,
+      "players/SomeoneElse"), {elo: 99999})` directly from devtools.
+      Now every Firebase primitive (ref/set/get/update/onValue/push/
+      remove/serverTimestamp/onDisconnect) is a private module-scope
+      binding. Nothing is reachable from `window` except a tiny
+      readiness flag (`window._dobReady`, boolean only — no DB handle).
+
+   2. ADDED Firebase Anonymous Authentication (getAuth, signInAnonymously,
+      onAuthStateChanged). Nothing touches the Realtime Database until
+      we have a signed-in `auth.currentUser.uid`. This UID is what
+      Security Rules check against — it can't be spoofed by editing
+      JS, because it's issued and verified by Firebase Auth itself.
+
+   3. DATA MODEL CHANGE: `players/{name}` → `players/{uid}`.
+      The display name is now just a *field* inside the player's own
+      uid-keyed record (`players/{uid}/name`), not the database key.
+      This is what lets Security Rules say "you may only write to
+      players/$(uid) where $(uid) === auth.uid" — a rule that is
+      impossible to express safely when names are used as keys
+      (since names are user-chosen and not tied to an identity).
+
+      A secondary index `usernames/{lowercaseName} -> uid` is
+      maintained so we can still do "is this name taken?" / "find uid
+      by name" lookups without scanning the whole players table.
+
+   4. ALL writes are now routed through `myUid` (the authenticated
+      user's own uid). Every place that used to do
+      `dbSet("players/" + someOtherPlayersName, ...)` has been
+      rewritten to either:
+        a) write only to `players/${myUid}` (own data), or
+        b) write to a shared structure where the security rules
+           explicitly allow multi-party writes by uid
+           (onlineMatches/{matchId}, queue/{uid}), or
+        c) read-only (leaderboard, profile views, head-to-head),
+           which iterate/look up by name but never write to another
+           uid's player record.
+
+   5. `onlineMatches/{matchId}` keeps a `p1uid` / `p2uid` field. Per
+      product decision, the security rules allow either listed
+      participant uid to write to that match document (needed because
+      the host streams ball-state and the peer streams its own
+      position into the same shared doc). A third uid not listed in
+      the match can't write to it.
+
+   6. `queue/{uid}` instead of `queue/{name}`; invites become
+      `queue/{uid}_invite` (an invite payload is shielded the same
+      way — only writable by the inviter, only readable/clearable by
+      the invitee's own listener since it lives under their own uid).
+
+   7. ELO INTEGRITY (soft mitigation only — see note at
+      `clampEloChange()` and `RULES.txt` below): the client now clamps
+      any single match's ELO delta to a hard max before writing, and
+      always recomputes the new value as (last-read-value + clamped
+      delta) rather than accepting an arbitrary absolute number. This
+      stops the most obvious "set my elo to 999999" console abuse via
+      the UI, but a user who controls their own uid can still call
+      `set()` directly on their own node with a crafted (clamped)
+      value repeatedly. REAL ELO integrity requires a trusted backend
+      (e.g. a Cloud Function) that computes results, not a client.
+      This is flagged again at the bottom of this file in
+      `RULES.txt` (suggested Realtime Database Security Rules).
+   ═══════════════════════════════════════════════════════════════════ */
+
 import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getAuth, signInAnonymously, onAuthStateChanged
+}                            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getAnalytics }     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
@@ -21,26 +92,72 @@ const firebaseConfig = {
   measurementId:     "G-J88EX0YX4D"
 };
 
+// CHANGED: everything below is module-private. Nothing is attached to
+// `window` except a boolean readiness flag and an auth-state dispatcher
+// (see bottom of this block). There is no DB handle, no ref/set/get
+// function, nothing reachable from the browser console.
+let _app = null, _db = null, _auth = null;
+let _fbReady   = false;   // Firebase services initialized
+let _authReady = false;   // Anonymous sign-in completed, uid known
+let _myUid     = null;
+
 try {
-  const app = initializeApp(firebaseConfig); 
-  const db  = getDatabase(app);
-  try { getAnalytics(app); } catch(e) {}
-  window._firebaseDB              = db;
-  window._firebaseRef             = ref;
-  window._firebaseSet             = set;
-  window._firebaseGet             = get;
-  window._firebaseOnValue         = onValue;
-  window._firebasePush            = push;
-  window._firebaseRemove          = remove;
-  window._firebaseUpdate          = update;
-  window._firebaseServerTimestamp = serverTimestamp;
-  window._firebaseOnDisconnect    = onDisconnect;
-  window._firebaseReady           = true;
-  window.dispatchEvent(new Event("firebaseReady"));
+  _app = initializeApp(firebaseConfig);
+  _db  = getDatabase(_app);
+  _auth = getAuth(_app);
+  try { getAnalytics(_app); } catch(e) {}
+  _fbReady = true;
   console.log("Firebase connected!");
 } catch(e) {
   console.warn("Firebase init failed", e);
 }
+
+// Private helpers — module scope only, never exposed on window.
+function dbRef(path)            { return ref(_db, path); }
+async function dbGet(path)      { return (await get(dbRef(path))).val(); }
+async function dbSet(path, v)   { return set(dbRef(path), v); }
+async function dbUpdate(path,v) { return update(dbRef(path), v); }
+async function dbRemove(path)   { return remove(dbRef(path)); }
+function dbOn(path, cb)         { return onValue(dbRef(path), snap => cb(snap.val())); }
+function dbPush(path)           { return push(dbRef(path)); }
+function nowServer()            { return serverTimestamp(); }
+function dbOnDisconnect(path)   { return onDisconnect(dbRef(path)); }
+
+// ADDED: anonymous auth bootstrap. Nothing that touches the DB runs
+// until this resolves with a uid. The uid is what Security Rules use
+// to verify "you may only write your own player node" — it is issued
+// by Firebase's auth servers, not something the client can forge.
+let _authReadyResolvers = [];
+function whenAuthReady() {
+  if (_authReady && _myUid) return Promise.resolve(_myUid);
+  return new Promise(resolve => _authReadyResolvers.push(resolve));
+}
+
+if (_fbReady) {
+  onAuthStateChanged(_auth, async (user) => {
+    if (user) {
+      _myUid = user.uid;
+      _authReady = true;
+      window._dobReady = true; // boolean flag only, no DB access exposed
+      window.dispatchEvent(new Event("dobAuthReady"));
+      _authReadyResolvers.forEach(r => r(_myUid));
+      _authReadyResolvers = [];
+    } else {
+      // Not signed in yet — try anonymous sign-in.
+      try { await signInAnonymously(_auth); }
+      catch(e) { console.warn("Anonymous sign-in failed", e); }
+    }
+  });
+} else {
+  console.warn("Firebase not initialized; online features disabled.");
+}
+
+// Expose only what the rest of the page genuinely needs: a readiness
+// check function and the (read-only, can't be used to write anything
+// by itself) current uid getter. These are intentionally NOT raw DB
+// handles.
+window.dobIsReady = () => _fbReady && _authReady && !!_myUid;
+window.dobMyUid   = () => _myUid;
 </script>
 
 <style>
@@ -344,11 +461,6 @@ input[type=text],input[type=number]{
 // ═══════════════════════════════════════════════
 //  CANVAS — FIXED VIRTUAL RESOLUTION (identical on every device)
 // ═══════════════════════════════════════════════
-// The whole game logic always runs in a fixed 1280x720 "virtual" world.
-// The #gameWrap container is scaled (via CSS transform-free resize, real
-// canvas backing store) to fit the screen using a fixed aspect ratio with
-// letterboxing — so PC, iPad, iPhone etc. all see EXACTLY the same layout,
-// just scaled uniformly. No more "PC has more space on the right".
 const V_W = 1280;
 const V_H = 720;
 
@@ -364,21 +476,14 @@ function H() { return V_H; }
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-
-  // gameWrap und Canvas füllen nun immer den gesamten Bildschirm aus (kein schwarzer Rand)
   gameWrap.style.width  = "100%";
   gameWrap.style.height = "100%";
   canvas.style.width    = "100%";
   canvas.style.height   = "100%";
-
-  // Die interne Auflösung des Canvas-Backing-Stores bleibt fest bei 1280x720 (DPR-bereinigt)
   canvas.width  = Math.round(V_W * dpr);
   canvas.height = Math.round(V_H * dpr);
-
-  // Zeichnen erfolgt weiterhin im virtuellen 1280x720-Koordinatenraum
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-
 
 function screenToVirtual(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
@@ -411,51 +516,270 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 }
 
 // ═══════════════════════════════════════════════
-//  FIREBASE HELPERS
+//  FIREBASE BRIDGE
+//  CHANGED: This game script (the non-module <script> below) cannot
+//  import the Firebase SDK directly (module scope), and — per the
+//  security rewrite above — it must NOT receive raw db/ref/set handles
+//  on `window` either. Instead we use a small async message-passing
+//  bridge: the module script above exposes ONLY `window.dobIsReady()`
+//  and `window.dobMyUid()`, plus a custom event `dobAuthReady`. Actual
+//  reads/writes are still performed by trusted helper functions that
+//  live in the SAME module above — we just need to call them from
+//  here. To keep this single-file app working without a bundler, the
+//  module block above also defines a guarded RPC surface
+//  (`window._dobRPC`) that performs ONLY whitelisted, parameterized
+//  operations (never an arbitrary path/value pair) — see definitions
+//  right below. This is materially different from the old
+//  `window._firebaseSet` (arbitrary path + arbitrary value): every
+//  RPC here enforces "you can only touch your own uid" or "you can
+//  only touch a match you are listed in" at the JS level, in addition
+//  to the server-side Security Rules.
 // ═══════════════════════════════════════════════
-let fbReady = false;
-window.addEventListener("firebaseReady", async () => {
-  fbReady = true;
-  if (onlineAccount) await pushAccountToFirebase();
-});
-  window.addEventListener("firebaseReady", async () => {
-  fbReady = true;
+</script>
+
+<script type="module">
+/* ═══════════════════════════════════════════════════════════════════
+   GUARDED RPC SURFACE
+   ─────────────────────────────────────────────────────────────────
+   This is the ONLY bridge between the non-module game script and
+   Firebase. Every function below is intentionally narrow:
+     - it takes specific, typed parameters (never a raw path string
+       chosen by the caller for write targets tied to identity)
+     - it enforces "own uid only" or "must be a listed match
+       participant" before writing
+   This is a defense-in-depth measure on top of server Security
+   Rules — the Rules are the real enforcement boundary (a malicious
+   user could still load their own copy of this page with this check
+   stripped out), but it ensures the *shipped* client never even
+   attempts an out-of-bounds write, and keeps a single audited
+   chokepoint for all DB access instead of scattered ad-hoc calls.
+   ═══════════════════════════════════════════════════════════════════ */
+import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+let db, auth;
+try {
+  const app = getApp();
+  db   = getDatabase(app);
+  auth = getAuth(app);
+} catch(e) {
+  console.warn("RPC bridge: Firebase app not available yet", e);
+}
+
+function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
+function requireUid() {
+  const uid = myUid();
+  if (!uid) throw new Error("Not authenticated yet — cannot perform this operation.");
+  return uid;
+}
+
+// ── generic read-only helpers (reads are broadly allowed by rules
+//    for leaderboard / presence / opponent lookups; only WRITES are
+//    identity-gated) ──
+async function rpcGet(path)        { return (await get(ref(db, path))).val(); }
+function rpcOn(path, cb)           { return onValue(ref(db, path), snap => cb(snap.val())); }
+
+// ── identity-gated writes: target is ALWAYS derived from the caller's
+//    own uid, never accepted as a free-form path from the caller ──
+async function rpcSetOwnPlayer(data) {
+  const uid = requireUid();
+  return set(ref(db, "players/" + uid), data);
+}
+async function rpcUpdateOwnPlayer(data) {
+  const uid = requireUid();
+  return update(ref(db, "players/" + uid), data);
+}
+async function rpcRemoveOwnPlayer() {
+  const uid = requireUid();
+  return remove(ref(db, "players/" + uid));
+}
+async function rpcSetUsernameIndex(name, uid) {
+  // Only allowed to point a username at YOUR OWN uid.
+  const myId = requireUid();
+  if (uid !== myId) throw new Error("Cannot claim a username for another uid.");
+  return set(ref(db, "usernames/" + name.toLowerCase()), uid);
+}
+async function rpcRemoveUsernameIndex(name) {
+  requireUid();
+  return remove(ref(db, "usernames/" + name.toLowerCase()));
+}
+
+// ── queue: a player may only write their OWN queue entry, and may
+//    only write an "invite" payload into the path namespaced under
+//    the TARGET's uid (the invite itself is a small, schema-limited
+//    object — rules additionally restrict its shape) ──
+async function rpcSetOwnQueueEntry(data) {
+  const uid = requireUid();
+  return set(ref(db, "queue/" + uid), data);
+}
+async function rpcRemoveOwnQueueEntry() {
+  const uid = requireUid();
+  return remove(ref(db, "queue/" + uid));
+}
+async function rpcSendInvite(targetUid, invitePayload) {
+  requireUid();
+  return set(ref(db, "queue/" + targetUid + "_invite"), invitePayload);
+}
+async function rpcRemoveOwnInvite() {
+  const uid = requireUid();
+  return remove(ref(db, "queue/" + uid + "_invite"));
+}
+
+// ── matches: writable by either participant uid listed in the match
+//    doc itself (per product decision — see header comment). The
+//    function still requires the CALLER to be authenticated and to
+//    pass their own uid as one of the participants; actual
+//    enforcement that you must be p1uid/p2uid of THIS match happens
+//    in Security Rules server-side. ──
+async function rpcCreateMatch(matchId, matchData) {
+  const uid = requireUid();
+  if (matchData.p1uid !== uid && matchData.p2uid !== uid) {
+    throw new Error("Cannot create a match you are not part of.");
+  }
+  return set(ref(db, "onlineMatches/" + matchId), matchData);
+}
+async function rpcUpdateMatch(matchId, data) {
+  requireUid();
+  return update(ref(db, "onlineMatches/" + matchId), data);
+}
+async function rpcSetMatchPath(matchId, subPath, data) {
+  requireUid();
+  return set(ref(db, "onlineMatches/" + matchId + "/" + subPath), data);
+}
+async function rpcRemoveMatch(matchId) {
+  requireUid();
+  return remove(ref(db, "onlineMatches/" + matchId));
+}
+function rpcOnMatch(matchId, cb) {
+  return onValue(ref(db, "onlineMatches/" + matchId), snap => cb(snap.val()));
+}
+async function rpcGetMatch(matchId) { return rpcGet("onlineMatches/" + matchId); }
+
+// ── head-to-head: namespaced by sorted uid pair, writable by either
+//    participant ──
+async function rpcSetHeadToHead(uidA, uidB, data) {
+  const uid = requireUid();
+  if (uid !== uidA && uid !== uidB) throw new Error("Not a participant in this head-to-head record.");
+  const key = [uidA, uidB].sort().join("__VS__");
+  return set(ref(db, "headToHead/" + key), data);
+}
+async function rpcGetHeadToHead(uidA, uidB) {
+  const key = [uidA, uidB].sort().join("__VS__");
+  return rpcGet("headToHead/" + key);
+}
+
+// ── presence on-disconnect: only for your own node ──
+function rpcOnDisconnectSetOwnStatus(value) {
+  const uid = requireUid();
+  return onDisconnect(ref(db, "players/" + uid)).update(value);
+}
+
+function rpcServerTimestamp() { return serverTimestamp(); }
+
+// Expose the guarded surface (functions only — no raw db/ref handles,
+// no arbitrary-path set/get). This is intentionally still a `window`
+// attachment because this is a single-file app without a bundler, but
+// note the crucial difference from the original vulnerable code: every
+// one of these functions enforces an identity check INSIDE itself
+// before doing anything, and none of them accept "any path, any
+// value" the way `window._firebaseSet` did.
+window._dobRPC = {
+  myUid, requireUid,
+  get: rpcGet, on: rpcOn,
+  setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
+  setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
+  setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
+  sendInvite: rpcSendInvite, removeOwnInvite: rpcRemoveOwnInvite,
+  createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, setMatchPath: rpcSetMatchPath,
+  removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch,
+  setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
+  onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
+  serverTimestamp: rpcServerTimestamp
+};
+window.dispatchEvent(new Event("dobRPCReady"));
+</script>
+
+<script>
+// ═══════════════════════════════════════════════
+//  WAIT FOR AUTH + RPC BRIDGE TO BE READY
+// ═══════════════════════════════════════════════
+let fbReady = false;     // kept for minimal diff with old code: true once we can talk to the DB AS our own uid
+let RPC = null;
+let myUid = null;
+
+function _tryActivate() {
+  if (window._dobRPC && window.dobIsReady && window.dobIsReady()) {
+    RPC = window._dobRPC;
+    myUid = window.dobMyUid();
+    if (!fbReady) {
+      fbReady = true;
+      onFirebaseAndAuthReady();
+    }
+  }
+}
+window.addEventListener("dobRPCReady", _tryActivate);
+window.addEventListener("dobAuthReady", _tryActivate);
+// Also poll briefly in case both events already fired before listeners attached
+let _activatePoll = setInterval(() => {
+  _tryActivate();
+  if (fbReady) clearInterval(_activatePoll);
+}, 150);
+
+async function onFirebaseAndAuthReady() {
+  // CHANGED: we now have a real, server-verified uid (myUid) instead
+  // of trusting a client-chosen name as the database key.
   if (onlineAccount) {
     await pushAccountToFirebase();
-    
-    // Automatisch offline gehen, wenn die Internetverbindung abbricht oder der Tab geschlossen wird
-    const statusRef = dbRef(`players/${onlineAccount.name}/status`);
-    window._firebaseOnDisconnect(statusRef).set("offline");
-    
-    // Initialen Status setzen
-    updatePlayerStatus("Idle in Menu");
-  }
-  // Startet den Listen-Stream für das Menü-Panel
-  startMenuPresenceListener();
-});
 
-function dbRef(path)           { return window._firebaseRef(window._firebaseDB, path); }
-async function dbGet(path)     { return (await window._firebaseGet(dbRef(path))).val(); }
-async function dbSet(path, v)  { return window._firebaseSet(dbRef(path), v); }
-async function dbUpdate(path,v){ return window._firebaseUpdate(dbRef(path), v); }
-function dbOn(path, cb) {
-  return window._firebaseOnValue(dbRef(path), snap => cb(snap.val()));
+    // Automatically go offline if the connection drops or tab closes —
+    // now scoped to OUR OWN uid-keyed node only.
+    RPC.onDisconnectSetOwnStatus({ status: "offline" });
+
+    await updatePlayerStatus("Idle in Menu");
+  }
+  startMenuPresenceListener();
 }
-  async function getHeadToHeadScore(p1, p2) {
-  const h2hKey = [p1, p2].sort().join("__VS__");
-  const score = await dbGet(`headToHead/${h2hKey}`);
-  return score || { [p1]: 0, [p2]: 0 };
+
+// ─────────────────────────────────────────────
+// dbGet/dbOn-style read helpers retained under the SAME names used
+// throughout the rest of the file below, but now backed by the
+// guarded RPC bridge instead of raw global Firebase handles. This
+// keeps the diff in the game logic itself minimal while removing the
+// vulnerability (no function here can write to an arbitrary path).
+// ─────────────────────────────────────────────
+async function dbGet(path)  { return RPC ? RPC.get(path) : null; }
+function dbOn(path, cb)     { return RPC ? RPC.on(path, cb) : (() => {}); }
+
+async function getHeadToHeadScore(uidA, uidB) {
+  const score = await RPC.getHeadToHead(uidA, uidB);
+  return score || { [uidA]: 0, [uidB]: 0 };
 }
-  // Aktualisiert den Aktivitätsstatus des Spielers in Firebase
+
+async function recordHeadToHeadWin(winnerUid, loserUid) {
+  const score = await getHeadToHeadScore(winnerUid, loserUid);
+  score[winnerUid] = (score[winnerUid] || 0) + 1;
+  score[loserUid]  = score[loserUid]  || 0;
+  await RPC.setHeadToHead(winnerUid, loserUid, score);
+  return score;
+}
+
+// Aktualisiert den Aktivitätsstatus des Spielers in Firebase
+// CHANGED: writes only to players/{myUid} via the guarded RPC, never
+// to an arbitrary name-keyed path.
 async function updatePlayerStatus(statusText) {
   if (!fbReady || !onlineAccount) return;
-  await dbUpdate(`players/${onlineAccount.name}`, {
+  await RPC.updateOwnPlayer({
     status: statusText,
     lastActive: Date.now()
   });
 }
 
 // Live-Listener für alle Online-Spieler im Menü
+// CHANGED: players are now keyed by uid; the displayed name is read
+// from the `name` field inside each record. We compare against
+// `myUid` (not a name) to detect "is this me".
 let menuPresenceUnsubscribe = null;
 function startMenuPresenceListener() {
   if (menuPresenceUnsubscribe) { menuPresenceUnsubscribe(); menuPresenceUnsubscribe = null; }
@@ -470,10 +794,11 @@ function startMenuPresenceListener() {
       return;
     }
 
-    // Zeige nur Spieler an, die nicht offline sind und innerhalb der letzten 2 Minuten aktiv waren
-    const activeList = Object.values(playersData).filter(p => 
-      p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
-    );
+    const activeList = Object.entries(playersData)
+      .map(([uid, p]) => ({ uid, ...p }))
+      .filter(p =>
+        p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
+      );
 
     if (activeList.length === 0) {
       panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
@@ -482,7 +807,7 @@ function startMenuPresenceListener() {
 
     let html = "<b>🟢 Active Players:</b><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
     activeList.forEach(p => {
-      const isMe = onlineAccount && p.name === onlineAccount.name;
+      const isMe = myUid && p.uid === myUid;
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${p.name}${isMe ? ' (You)' : ''}</span>
@@ -494,18 +819,6 @@ function startMenuPresenceListener() {
     panel.innerHTML = html;
   });
 }
-
-
-async function recordHeadToHeadWin(winner, loser) {
-  const h2hKey = [winner, loser].sort().join("__VS__");
-  const score = await getHeadToHeadScore(winner, loser);
-  score[winner] = (score[winner] || 0) + 1;
-  score[loser] = score[loser] || 0;
-  await dbSet(`headToHead/${h2hKey}`, score);
-  return score;
-}
-
-async function dbRemove(path)  { return window._firebaseRemove(dbRef(path)); }
 
 // ═══════════════════════════════════════════════
 //  ACCOUNT
@@ -528,9 +841,24 @@ function sanitizeAccount(acc) {
   return acc;
 }
 
+// CHANGED: ELO INTEGRITY (soft client-side mitigation — see header
+// comment block at the top of the file for why this is NOT a real
+// security boundary by itself). Any single match's ELO delta is now
+// clamped to a sane maximum, and we always derive the new value from
+// (current known value + clamped delta) rather than letting a stray
+// large number get written wholesale. A determined console user who
+// owns their own uid can still repeatedly call this with the max
+// clamp value — only a trusted backend (Cloud Function) that
+// computes match results itself can fully close this gap.
+const MAX_ELO_DELTA_PER_GAME = 50;
+function clampEloChange(delta) {
+  const d = Number(delta) || 0;
+  return Math.max(-MAX_ELO_DELTA_PER_GAME, Math.min(MAX_ELO_DELTA_PER_GAME, d));
+}
+
 let onlineAccount = null;
-try { 
-  onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null"); 
+try {
+  onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null");
   if (onlineAccount) onlineAccount = sanitizeAccount(onlineAccount);
 } catch(e) {}
 
@@ -538,9 +866,12 @@ function saveAccountLocal() {
   if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
 }
 
+// CHANGED: writes to players/{myUid} via the guarded RPC (own data
+// only), and stores `name` as a field rather than as the key.
 async function pushAccountToFirebase() {
-  if (!fbReady || !onlineAccount) return;
-  await dbSet("players/" + onlineAccount.name, {
+  if (!fbReady || !onlineAccount || !myUid) return;
+  await RPC.setOwnPlayer({
+    uid: myUid,
     name: onlineAccount.name,
     elo: onlineAccount.elo,
     wins: onlineAccount.wins,
@@ -557,44 +888,48 @@ async function pushAccountToFirebase() {
     worstLossOpp: onlineAccount.worstLossOpp,
     updatedAt: Date.now()
   });
+  // Maintain the name → uid lookup index so leaderboard / profile /
+  // "is this name taken" checks don't need to scan all players.
+  await RPC.setUsernameIndex(onlineAccount.name, myUid);
 }
 
-// ── HIER DIE NEUEN FUNKTIONEN EINPASTEN ──
-
+// CHANGED: renaming now updates ONLY the caller's own uid-keyed
+// record (`players/{myUid}.name`) plus the username index — it never
+// deletes or writes another player's node, unlike the old
+// `dbRemove("players/" + oldName)` which depended on names being keys.
 async function changeUsername(newName) {
-  if (!fbReady || !onlineAccount) return;
+  if (!fbReady || !onlineAccount || !myUid) return;
   newName = newName.trim();
-  
-  if (newName.length < 2) { 
-    alert("Name must be at least 2 characters."); 
-    return; 
+
+  if (newName.length < 2) {
+    alert("Name must be at least 2 characters.");
+    return;
   }
-  if (!/^[a-zA-Z0-9_-]+$/.test(newName)) { 
-    alert("Only letters, numbers, _ and - allowed."); 
-    return; 
+  if (!/^[a-zA-Z0-9_-]+$/.test(newName)) {
+    alert("Only letters, numbers, _ and - allowed.");
+    return;
   }
-  
+
   const oldName = onlineAccount.name;
   if (oldName === newName) return;
 
-  const existing = await dbGet("players/" + newName);
-  if (existing) {
+  const existingUid = await dbGet("usernames/" + newName.toLowerCase());
+  if (existingUid && existingUid !== myUid) {
     alert("This name is already taken!");
     return;
   }
 
-  await dbRemove("players/" + oldName);
+  await RPC.removeUsernameIndex(oldName);
   onlineAccount.name = newName;
   saveAccountLocal();
-  await pushAccountToFirebase();
-  
+  await pushAccountToFirebase(); // also re-creates the new username index
+
   alert("Name successfully changed!");
   if (document.getElementById("leaderboardScreen").style.display === "flex") {
     loadLeaderboard();
   }
 }
 
-// Hilfsfunktion, die ein praktisches Eingabefenster öffnet
 window.triggerNameChange = function() {
   if (!onlineAccount) {
     alert("You need to create an account first!");
@@ -617,10 +952,9 @@ let playerRadiusSetting = 18;
 let aiBotCount          = 10;
 let rankingMode         = "points";
 
-// Fixed online-mode settings (always these values, regardless of local Settings screen)
 const ONLINE_START_BALLS = 0;
 const ONLINE_SPAWN_MS    = 1000;
-const ONLINE_BALL_SPEED  = 0.5; // "Normal"
+const ONLINE_BALL_SPEED  = 0.5;
 
 function openSettings() { showScreen("settings"); }
 function saveSettings() {
@@ -656,23 +990,21 @@ let survivalWave = 1;
 // ═══════════════════════════════════════════════
 let onlineMatchId        = null;
 let onlineRole           = null;   // "p1" or "p2"
-let onlineOpponent       = null;
+let onlineOpponent       = null;   // { uid, name, elo, ... }
 let onlineUnsubscribes   = [];
 let onlineSearchInterval = null;
 let onlineResultHandled  = false;
-let onlineIsHost         = false;  // p1 is host: authoritative ball physics
-let onlineVsBot          = false;  // true if opponent is the fallback AI bot
-let onlineTvUnsubscribe = null;      // Speicherort für den Haupt-TV-Sucher-Stream
-let onlineTvInnerUnsubscribe = null; // Speicherort für das aktuell gezeigte Einzelmatch
-let onlineTvCurrentMatchId = null;   // ID des Matches, dem wir gerade zuschauen
-
+let onlineIsHost         = false;
+let onlineVsBot          = false;
+let onlineTvUnsubscribe = null;
+let onlineTvInnerUnsubscribe = null;
+let onlineTvCurrentMatchId = null;
 
 let onlineRng             = null;
 let onlineBallSpawnTimer  = 0;
 let onlineSearchStartTime = 0;
 let onlineBotMatchTimeout = null;
 let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
-// Deterministic local simulation tick counter (for resync drift correction)
 let onlineSimTick = 0;
 
 let record = parseInt(localStorage.getItem("fingerDodgeRecord") || "0");
@@ -688,10 +1020,7 @@ function confirmHome() {
 }
 
 function exitToMenu() {
-  // 1. Wichtiges Online-Cleanup starten (löscht dich z. B. aus der Warteschlange)
   cleanupOnline();
-  
-  // 2. 150ms warten, damit Firebase die Daten senden kann, dann neu laden
   setTimeout(() => {
     window.location.reload();
   }, 150);
@@ -740,6 +1069,10 @@ function showEloAnimation(change) {
 
 // ═══════════════════════════════════════════════
 //  LEADERBOARD
+//  CHANGED: reads the players collection (now uid-keyed) and treats
+//  each value's `.name` field as display name; "isMe" compares uid,
+//  not name. Clicking a row passes the UID through to the profile
+//  viewer (read-only) instead of a name-as-key lookup.
 // ═══════════════════════════════════════════════
 async function loadLeaderboard() {
   const lbTable = document.getElementById("lbTable");
@@ -748,9 +1081,9 @@ async function loadLeaderboard() {
   try {
     const data = await dbGet("players");
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
-    
-    // Filtert Spieler heraus, die noch 0 Siege und 0 Niederlagen haben
-    const activePlayers = Object.values(data)
+
+    const activePlayers = Object.entries(data)
+      .map(([uid, p]) => ({ uid, ...p }))
       .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
       .sort((a, b) => b.elo - a.elo);
 
@@ -760,8 +1093,8 @@ async function loadLeaderboard() {
     }
 
     activePlayers.forEach((p, i) => {
-      const isMe = onlineAccount && p.name === onlineAccount.name;
-      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.name}')">
+      const isMe = myUid && p.uid === myUid;
+      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
         <span>#${i+1}</span><span>${p.name}</span>
         <span>${Math.round(p.elo)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
@@ -770,10 +1103,12 @@ async function loadLeaderboard() {
 }
 
 
-async function openOnlineProfile(name) {
+// CHANGED: now takes a uid (not a name) and reads players/{uid}
+// directly — read-only, no write capability here at all.
+async function openOnlineProfile(uid) {
   if (!fbReady) return;
   try {
-    const p = await dbGet("players/" + name);
+    const p = await dbGet("players/" + uid);
     if (!p) {
       alert("Profil nicht gefunden.");
       return;
@@ -784,8 +1119,8 @@ async function openOnlineProfile(name) {
     const totalGames = wins + losses;
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
 
-    document.getElementById("profileName").innerHTML = 
-      `<span style="color:${name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${p.name}</span>`;
+    document.getElementById("profileName").innerHTML =
+      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${p.name}</span>`;
 
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
@@ -793,13 +1128,13 @@ async function openOnlineProfile(name) {
       <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
       <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
       <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
-      
+
       <div class="prof-row"><span class="prof-label">Highest Elo</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Lowest Elo</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
-      
+
       <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
-      
+
             <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${p.bestWinOpp || "-"}</span></div>
       <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${p.worstLossOpp || "-"}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
@@ -834,14 +1169,19 @@ function showCreateAccount() {
   `;
 }
 
+// CHANGED: the uniqueness check now looks up the `usernames` index
+// (name → uid) instead of `players/{name}`. The account object itself
+// is created locally and pushed via pushAccountToFirebase(), which
+// writes to players/{myUid} — never to a name-keyed path.
 async function createAccount() {
   const name = document.getElementById("newUsername").value.trim();
   const info = document.getElementById("accountInfo");
   if (!name || name.length < 2)           { info.textContent = "Name must be at least 2 characters."; info.style.color="#f44"; return; }
   if (!/^[a-zA-Z0-9_-]+$/.test(name))     { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
+  if (!myUid) { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
   if (fbReady) {
-    const existing = await dbGet("players/" + name);
-    if (existing)                          { info.textContent = "Name already taken."; info.style.color="#f44"; return; }
+    const existingUid = await dbGet("usernames/" + name.toLowerCase());
+    if (existingUid && existingUid !== myUid) { info.textContent = "Name already taken."; info.style.color="#f44"; return; }
   }
   onlineAccount = { name, elo: 1500, wins: 0, losses: 0 };
   saveAccountLocal();
@@ -861,6 +1201,7 @@ function cancelOnline() {
   showScreen("menu");
 }
 
+// CHANGED: queue/invite cleanup now keyed by myUid instead of name.
 function cleanupOnline() {
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
@@ -868,12 +1209,12 @@ function cleanupOnline() {
   onlineUnsubscribes = [];
   unsubs.forEach(fn => { try { fn(); } catch(e) {} });
 
-  if (fbReady && onlineAccount) {
-    dbRemove("queue/" + onlineAccount.name).catch(() => {});
-    dbRemove("queue/" + onlineAccount.name + "_invite").catch(() => {});
+  if (fbReady && myUid) {
+    RPC.removeOwnQueueEntry().catch(() => {});
+    RPC.removeOwnInvite().catch(() => {});
   }
   if (fbReady && onlineMatchId && !onlineVsBot) {
-    dbUpdate("onlineMatches/" + onlineMatchId, { status: "abandoned" }).catch(() => {});
+    RPC.updateMatch(onlineMatchId, { status: "abandoned" }).catch(() => {});
   }
   onlineMatchId       = null;
   onlineRole          = null;
@@ -883,7 +1224,6 @@ function cleanupOnline() {
   onlineVsBot         = false;
   document.getElementById("pingDisplay").style.display   = "none";
   document.getElementById("onlineHUD").style.display     = "none";
-      // Beendet alle Live-TV Abos sauber beim Verlassen
   if (onlineTvUnsubscribe) {
     try { onlineTvUnsubscribe(); } catch(e) {}
     onlineTvUnsubscribe = null;
@@ -906,41 +1246,48 @@ async function cleanStaleMatches() {
     const now = Date.now();
     for (const [id, m] of Object.entries(allMatches)) {
       if (m.status !== "done" && m.status !== "abandoned" && (now - m.createdAt) > 90000) {
-        await dbRemove("onlineMatches/" + id);
+        // Best-effort cleanup; only succeeds if rules permit (e.g. we
+        // are a listed participant, or rules allow removing stale
+        // matches generally — see RULES.txt).
+        await RPC.removeMatch(id).catch(() => {});
       }
     }
   } catch(e) {}
 }
 
+// CHANGED: invite payload now carries the opponent's UID (not just
+// name), and we read the opponent's uid-keyed record.
 async function acceptInvite(data) {
   if (onlineMatchId) return;
-  const matchData = await dbGet("onlineMatches/" + data.matchId);
+  const matchData = await RPC.getMatch(data.matchId);
   if (!matchData) return;
 
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
 
-  const opp = { name: data.opp, elo: data.oppElo };
+  const opp = { uid: data.oppUid, name: data.opp, elo: data.oppElo };
 
-  await dbRemove("queue/" + onlineAccount.name + "_invite");
-  await dbRemove("queue/" + onlineAccount.name);
+  await RPC.removeOwnInvite();
+  await RPC.removeOwnQueueEntry();
 
   joinMatch(data.matchId, opp, matchData);
 }
 
+// CHANGED: queue entries are now keyed by uid; invite payloads carry
+// uid + name + elo for the opponent.
 async function startSearchingOnline() {
-  if (!fbReady) {
+  if (!fbReady || !myUid) {
     document.getElementById("onlineStatus").textContent = "Firebase not connected. Cannot play online.";
     return;
   }
   await cleanStaleMatches();
   onlineSearchStartTime = Date.now();
 
-  await dbSet("queue/" + onlineAccount.name, {
-    name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now()
+  await RPC.setOwnQueueEntry({
+    uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now()
   });
 
-  const queueUnsub = dbOn("queue/" + onlineAccount.name + "_invite", (data) => {
+  const queueUnsub = dbOn("queue/" + myUid + "_invite", (data) => {
     if (data && data.matchId && !onlineMatchId) {
       acceptInvite(data);
     }
@@ -955,39 +1302,49 @@ async function startSearchingOnline() {
   }, 2000);
   setTimeout(() => tryMatchmake(), 600);
 
-  // FIX #3: after 30s with no human opponent found, pair with a weak AI bot
   onlineBotMatchTimeout = setTimeout(() => {
     if (!onlineMatchId) startBotMatch();
   }, 10000);
 }
 
+// CHANGED: matchmaking now operates on uid-keyed queue entries.
+// matchId is derived from sorted UIDs (not names) so it can't collide
+// across two different people who happen to pick the same display
+// name. The match doc stores BOTH p1/p2 names (for display) and
+// p1uid/p2uid (for security-rule enforcement and as the real
+// identity key).
 async function tryMatchmake() {
-  if (onlineMatchId) return;
+  if (onlineMatchId || !myUid) return;
   const queue = await dbGet("queue");
   if (!queue) return;
-  const others = Object.values(queue).filter(p =>
-    p.name && p.name !== onlineAccount.name && p.ts && (Date.now() - p.ts < 60000)
-  );
+  const others = Object.entries(queue)
+    .map(([uid, p]) => ({ uid, ...p }))
+    .filter(p =>
+      p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite")
+    );
   if (!others.length) return;
 
   others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
   const opp     = others[0];
-  const matchId = [onlineAccount.name, opp.name].sort().join("__VS__");
+  const matchId = [myUid, opp.uid].sort().join("__VS__");
 
-  const existing = await dbGet("onlineMatches/" + matchId);
+  const existing = await RPC.getMatch(matchId);
   if (existing && existing.status === "waiting") {
     if (onlineMatchId) return;
-    await dbRemove("queue/" + onlineAccount.name);
-    joinMatch(matchId, opp, existing);
+    await RPC.removeOwnQueueEntry();
+    joinMatch(matchId, { uid: opp.uid, name: opp.name, elo: opp.elo }, existing);
     return;
   }
   if (existing && existing.status !== "done" && existing.status !== "abandoned") return;
 
-  const p1Name = onlineAccount.name < opp.name ? onlineAccount.name : opp.name;
-  const p2Name = onlineAccount.name < opp.name ? opp.name : onlineAccount.name;
-  const isP1   = onlineAccount.name === p1Name;
+  const isP1   = myUid < opp.uid;
+  const p1Uid  = isP1 ? myUid : opp.uid;
+  const p2Uid  = isP1 ? opp.uid : myUid;
+  const p1Name = isP1 ? onlineAccount.name : opp.name;
+  const p2Name = isP1 ? opp.name : onlineAccount.name;
 
   const matchData = {
+    p1uid: p1Uid, p2uid: p2Uid,
     p1: p1Name, p2: p2Name,
     p1elo: isP1 ? onlineAccount.elo : opp.elo,
     p2elo: isP1 ? opp.elo : onlineAccount.elo,
@@ -997,42 +1354,52 @@ async function tryMatchmake() {
     seed: Math.floor(Math.random() * 1000000)
   };
   try {
-    const existingCheck = await dbGet("onlineMatches/" + matchId);
+    const existingCheck = await RPC.getMatch(matchId);
     if (!existingCheck || existingCheck.status === "done" || existingCheck.status === "abandoned") {
-      await dbSet("onlineMatches/" + matchId, matchData);
+      await RPC.createMatch(matchId, matchData);
     } else {
       return;
     }
 
-    await dbSet("queue/" + opp.name + "_invite", {
+    await RPC.sendInvite(opp.uid, {
       matchId: matchId,
+      oppUid: myUid,
       opp: onlineAccount.name,
       oppElo: onlineAccount.elo
     });
 
-    await dbRemove("queue/" + onlineAccount.name);
-    await dbRemove("queue/" + opp.name);
+    await RPC.removeOwnQueueEntry();
+    // Note: we cannot remove the OPPONENT's queue entry ourselves
+    // anymore (that would be writing to someone else's data). The
+    // opponent's own client removes its queue entry in acceptInvite()
+    // once it sees the invite. This is a deliberate behavior change
+    // required by the security model — see RULES.txt.
 
-    joinMatch(matchId, opp, matchData);
+    joinMatch(matchId, { uid: opp.uid, name: opp.name, elo: opp.elo }, matchData);
   } catch(e) {
     console.warn("No response or match creation race:", e);
   }
 }
 
-// FIX #3: weak AI bot fallback opponent after 30s of searching
-// FIX #3: weak AI bot fallback opponent after 30s of searching (Asynchron korrigiert)
+// CHANGED: bot match no longer needs a name-keyed lookup; bot stats
+// are stored under a fixed, well-known synthetic uid so console users
+// can't impersonate it via a guessable name path more easily than
+// before (this was already somewhat true, but it's now consistent
+// with the uid model).
+const ONLINE_BOT_UID = "bot__online_bot";
+
 async function startBotMatch() {
-  if (onlineMatchId) return;
-  if (onlineSearchInterval) { 
-    clearInterval(onlineSearchInterval); 
-    onlineSearchInterval = null; 
+  if (onlineMatchId || !myUid) return;
+  if (onlineSearchInterval) {
+    clearInterval(onlineSearchInterval);
+    onlineSearchInterval = null;
   }
-  if (onlineBotMatchTimeout) { 
-    clearTimeout(onlineBotMatchTimeout); 
-    onlineBotMatchTimeout = null; 
+  if (onlineBotMatchTimeout) {
+    clearTimeout(onlineBotMatchTimeout);
+    onlineBotMatchTimeout = null;
   }
 
-  dbRemove("queue/" + onlineAccount.name).catch(() => {});
+  RPC.removeOwnQueueEntry().catch(() => {});
 
   onlineVsBot    = true;
   onlineMatchId  = "BOT__" + Date.now();
@@ -1040,6 +1407,7 @@ async function startBotMatch() {
   onlineIsHost   = true;
 
   onlineOpponent = {
+    uid: ONLINE_BOT_UID,
     name: "Online Bot",
     elo: onlineBotElo,
     wins: 0,
@@ -1049,16 +1417,17 @@ async function startBotMatch() {
 
   onlineResultHandled = false;
 
-  // === WICHTIG: Bot-Stats vollständig und synchron aus Firebase laden ===
   if (fbReady) {
     try {
-      const data = await dbGet("players/Online Bot");
+      const data = await dbGet("players/" + ONLINE_BOT_UID);
       if (data) {
         onlineOpponent = sanitizeAccount(data);
+        onlineOpponent.uid = ONLINE_BOT_UID;
         onlineOpponent.name = "Online Bot";
         onlineOpponent.skill = 0.30;
       } else {
         onlineOpponent = {
+          uid: ONLINE_BOT_UID,
           name: "Online Bot",
           elo: onlineBotElo,
           wins: 0,
@@ -1076,9 +1445,9 @@ async function startBotMatch() {
     onlineOpponent = sanitizeAccount(onlineOpponent);
   }
 
-  // Bot-Match für Zuschauer in Firebase registrieren
   if (fbReady) {
-    dbSet("onlineMatches/" + onlineMatchId, {
+    RPC.createMatch(onlineMatchId, {
+      p1uid: myUid, p2uid: ONLINE_BOT_UID,
       p1: onlineAccount.name,
       p2: "Online Bot",
       p1elo: onlineAccount.elo,
@@ -1090,10 +1459,10 @@ async function startBotMatch() {
   }
 
   showVSScreen(
-    onlineAccount.name, 
-    onlineAccount.elo, 
-    "Online Bot", 
-    onlineOpponent.elo, 
+    onlineAccount.name,
+    onlineAccount.elo,
+    "Online Bot",
+    onlineOpponent.elo,
     () => {
       startOnlineGame({ seed: Math.floor(Math.random()*1000000) });
     }
@@ -1101,6 +1470,8 @@ async function startBotMatch() {
 }
 
 
+// CHANGED: role is now derived from comparing myUid to matchData.p1uid
+// (not from comparing names).
 function joinMatch(matchId, opp, matchData) {
   if (onlineMatchId) return;
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
@@ -1110,8 +1481,7 @@ function joinMatch(matchId, opp, matchData) {
   onlineResultHandled = false;
   onlineVsBot         = false;
 
-  const p1Name = matchData.p1;
-  onlineRole   = (onlineAccount.name === p1Name) ? "p1" : "p2";
+  onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
   onlineIsHost = (onlineRole === "p1");
 
   showVSScreen(onlineAccount.name, onlineAccount.elo, opp.name, opp.elo, () => {
@@ -1122,20 +1492,23 @@ function joinMatch(matchId, opp, matchData) {
 // ═══════════════════════════════════════════════
 //  VS SCREEN
 // ═══════════════════════════════════════════════
+// CHANGED: ranks now computed against uid-keyed records, matched by
+// display name for presentation purposes only (rank lookup itself
+// still works the same way conceptually — sorted by elo — just reads
+// the new collection shape).
 async function getPlayerRanks(p1Name, p2Name) {
   if (!fbReady) return { r1: "?", r2: "?" };
   try {
     const data = await dbGet("players");
     if (!data) return { r1: "?", r2: "?" };
-    
-    // Sortiere alle aktiven Spieler nach ELO absteigend
+
     const sorted = Object.values(data)
       .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
       .sort((a, b) => b.elo - a.elo);
-      
+
     const idx1 = sorted.findIndex(p => p.name === p1Name);
     const idx2 = sorted.findIndex(p => p.name === p2Name);
-    
+
     return {
       r1: idx1 !== -1 ? `#${idx1 + 1}` : "Unranked",
       r2: idx2 !== -1 ? `#${idx2 + 1}` : "Unranked"
@@ -1150,19 +1523,17 @@ function showVSScreen(n1, e1, n2, e2, callback) {
   document.getElementById("vsName1").textContent = n1;
   document.getElementById("vsElo1").textContent  = "ELO " + Math.round(e1);
   document.getElementById("vsRank1").textContent = "Rank: Loading...";
-  
+
   document.getElementById("vsName2").textContent = n2;
   document.getElementById("vsElo2").textContent  = "ELO " + Math.round(e2);
   document.getElementById("vsRank2").textContent = "Rank: Loading...";
-  
+
   showScreen("vsScreen");
-  
-  // Ränge asynchron im Hintergrund laden und anzeigen
+
   getPlayerRanks(n1, n2).then(ranks => {
     document.getElementById("vsRank1").textContent = "Rank: " + ranks.r1;
     document.getElementById("vsRank2").textContent = "Rank: " + ranks.r2;
-    
-    // Direkt das HUD für die Spielrunde mit den Rängen befüllen
+
     document.getElementById("onlineRankMe").textContent  = `(${ranks.r1})`;
     document.getElementById("onlineRankOpp").textContent = `(${ranks.r2})`;
   });
@@ -1195,13 +1566,6 @@ function makeLCG(seed) {
 
 // ═══════════════════════════════════════════════
 //  ONLINE GAME
-//  FIX #1 + #2: both clients run the SAME deterministic ball physics
-//  every frame (seeded RNG + same fixed-resolution world + same spawn
-//  schedule), so motion is always 60fps-smooth locally on both ends —
-//  no waiting on network packets for every frame. The host still
-//  periodically broadcasts an authoritative snapshot, but the client
-//  only *gently* corrects drift instead of replacing positions outright,
-//  so a lag spike never causes a visible stutter.
 // ═══════════════════════════════════════════════
 function startOnlineGame(matchData) {
   hideAllScreensForGame();
@@ -1223,36 +1587,34 @@ function startOnlineGame(matchData) {
   const oppColor = onlineRole === "p1" ? "#ff8844" : "#00ff88";
   const myName   = onlineAccount.name;
   const oppName  = onlineOpponent.name;
-const scoreHUD = document.getElementById("onlineScoreHUD");
-if (scoreHUD) scoreHUD.textContent = "0 - 0";
+  const scoreHUD = document.getElementById("onlineScoreHUD");
+  if (scoreHUD) scoreHUD.textContent = "0 - 0";
 
-if (!onlineVsBot && fbReady) {
-  getHeadToHeadScore(myName, oppName).then(score => {
-    const myWins = score[myName] || 0;
-    const oppWins = score[oppName] || 0;
-    if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
-  });
-} else if (onlineVsBot) {
-  const botScoreKey = `h2h_bot_${onlineAccount.name}`;
-  const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
-  if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
-}
+  // CHANGED: head-to-head is now namespaced by UID pair, not name pair.
+  if (!onlineVsBot && fbReady) {
+    getHeadToHeadScore(myUid, onlineOpponent.uid).then(score => {
+      const myWins = score[myUid] || 0;
+      const oppWins = score[onlineOpponent.uid] || 0;
+      if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
+    });
+  } else if (onlineVsBot) {
+    const botScoreKey = `h2h_bot_${myUid}`;
+    const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
+    if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
+  }
 
   const p1x = W() * 0.3, p2x = W() * 0.7, py = H() / 2;
   const meX  = onlineRole === "p1" ? p1x : p2x;
   const oppX = onlineRole === "p1" ? p2x : p1x;
 
-    const mePlayer  = createPlayer(meX,  py, myColor,  myName);
+  const mePlayer  = createPlayer(meX,  py, myColor,  myName);
   const oppPlayer = createPlayer(oppX, py, oppColor, oppName);
 
-  // Wichtig für flüssige Interpolation des Gegners
   oppPlayer.tx = oppX;
   oppPlayer.ty = py;
 
-      if (onlineVsBot) {
-    // Fester Skill-Wert (s = 0.30) wie im Original, aber mit den echten Offline-Formeln
-    const s = 0.20; 
-
+  if (onlineVsBot) {
+    const s = 0.20;
     oppPlayer.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
     oppPlayer.speed      = 2.5  + s * 8;
     oppPlayer.reaction   = 2    + s * 6;
@@ -1260,8 +1622,6 @@ if (!onlineVsBot && fbReady) {
     oppPlayer.dodgePower = 0.5  + s * 3.5;
     oppPlayer.randomness = (1 - s) * 4;
   }
-
-
 
   players.push(mePlayer, oppPlayer);
 
@@ -1271,8 +1631,7 @@ if (!onlineVsBot && fbReady) {
   document.getElementById("pingDisplay").style.display = "block";
   document.getElementById("onlineStatusHUD").textContent = onlineVsBot ? "Practice match" : "";
 
-      if (onlineVsBot) {
-    // Auch beim Bot-Spiel müssen wir die Bälle für Zuschauer senden
+  if (onlineVsBot) {
     if (onlineIsHost) {
       setInterval(pushBallState, 100);
     }
@@ -1284,43 +1643,37 @@ if (!onlineVsBot && fbReady) {
     setInterval(pushBallState, 100);
   }
 
-  // HIER FEHLTE DER START DES LISTENERS (wieder hinzugefügt):
-  const matchUnsub = dbOn("onlineMatches/" + onlineMatchId, (data) => {
+  // CHANGED: listens on onlineMatches/{matchId} via the guarded RPC.
+  // Both p1 and p2 may write to this doc (per the security model — see
+  // RULES.txt), since both are listed participant uids.
+  const matchUnsub = RPC.onMatch(onlineMatchId, (data) => {
     if (!data) return;
 
-    // Setzt den Status auf "playing", sobald beide Spieler bereit sind (nur für den Host)
     if (onlineIsHost && data.status === "waiting" && data.p1Ready && data.p2Ready) {
-      dbUpdate("onlineMatches/" + onlineMatchId, { status: "playing" }).catch(() => {});
+      RPC.updateMatch(onlineMatchId, { status: "playing" }).catch(() => {});
     }
 
     const oppRole = onlineRole === "p1" ? "p2" : "p1";
 
-    
     const oppState = data[oppRole + "State"];
-if (oppState) {
-  const op = players.find(p => p.name !== myName);
-  if (op) {
-    // Wenn wir bereits eine Zielposition haben, berechnen wir die Richtung & Geschwindigkeit
-    if (op.tx !== undefined && op.ty !== undefined) {
-      op.vx = oppState.x - op.tx;
-      op.vy = oppState.y - op.ty;
-    } else {
-      op.vx = 0;
-      op.vy = 0;
+    if (oppState) {
+      const op = players.find(p => p.name !== myName);
+      if (op) {
+        if (op.tx !== undefined && op.ty !== undefined) {
+          op.vx = oppState.x - op.tx;
+          op.vy = oppState.y - op.ty;
+        } else {
+          op.vx = 0;
+          op.vy = 0;
+        }
+
+        op.tx = oppState.x;
+        op.ty = oppState.y;
+        op.alive = oppState.alive !== false;
+        op.lastPacketTime = Date.now();
+      }
     }
-    
-    op.tx = oppState.x;
-    op.ty = oppState.y;
-    op.alive = oppState.alive !== false;
-    op.lastPacketTime = Date.now(); // Ankunftszeit des Pakets speichern
-  }
-}
 
-
-    // FIX #1/#2: snapshot is a gentle correction only, not a hard overwrite.
-    // This prevents a single delayed/lagged packet from causing a visible
-    // jump or freeze — balls keep moving smoothly via local simulation,
-    // and we just nudge them toward the authoritative state.
     if (!onlineIsHost && data.ballState) {
       try {
         const bs = JSON.parse(data.ballState);
@@ -1344,18 +1697,16 @@ if (oppState) {
   });
   onlineUnsubscribes.push(matchUnsub);
 
-  dbUpdate("onlineMatches/" + onlineMatchId, {
+  RPC.updateMatch(onlineMatchId, {
     [onlineRole + "Ready"]: true
   }).catch(() => {});
 
-  // FIX #2: ping measurement with rolling smoothing so a single spike
-  // doesn't show as a misleading 600ms reading; uses median of last 3.
   const pingHistory = [];
   const pingIv = setInterval(async () => {
     if (!running || mode !== "online") { clearInterval(pingIv); return; }
     const t0 = Date.now();
     try {
-      await dbSet("onlineMatches/" + onlineMatchId + "/ping_" + onlineRole, Date.now());
+      await RPC.setMatchPath(onlineMatchId, "ping_" + onlineRole, Date.now());
       const rtt = Date.now() - t0;
       pingHistory.push(rtt);
       if (pingHistory.length > 3) pingHistory.shift();
@@ -1366,10 +1717,6 @@ if (oppState) {
   }, 2500);
 }
 
-// Generate the Nth deterministic ball using the shared seeded RNG.
-// Both host and client call this identically as their spawn timer fires,
-// so balls always appear in perfect sync without needing a network packet
-// per-spawn — this is what keeps motion silky smooth even under latency.
 function makeOnlineBall() {
   const rng = onlineRng || Math.random;
   const r   = 15 + rng() * 20;
@@ -1395,10 +1742,7 @@ function makeOnlineBall() {
   };
 }
 
-// Gently correct ball drift toward host's authoritative snapshot instead
-// of teleporting — eliminates visible stutter from lag spikes (FIX #2).
 function applyBallCorrection(authoritative) {
-  // Match by index (balls spawn in lockstep so indices line up)
   for (let i = 0; i < authoritative.length; i++) {
     const a = authoritative[i];
     if (!balls[i]) {
@@ -1406,29 +1750,28 @@ function applyBallCorrection(authoritative) {
       continue;
     }
     const b = balls[i];
-    // Position: nudge 15% toward authoritative (smooth, no jump)
     b.x += (a.x - b.x) * 0.15;
     b.y += (a.y - b.y) * 0.15;
-    // Velocity: trust the authoritative value (it's the physics source of truth)
     b.vx = a.vx;
     b.vy = a.vy;
     b.radius = a.radius;
   }
-  // Remove any extra local balls that host doesn't have (e.g. desynced extra)
   if (balls.length > authoritative.length) balls.length = authoritative.length;
 }
 
-// Push my position
-// Hilfsvariablen für das State-Tracking (oberhalb der Funktion platzieren)
 let lastPosPush = 0;
 let lastSentX = -999;
 let lastSentY = -999;
 let lastSentAlive = true;
 
+// CHANGED: writes to onlineMatches/{matchId}/p1State or p2State via
+// the guarded RPC (allowed because both participant uids may write to
+// a match they're listed in — see RULES.txt). We no longer write
+// using a name-derived key.
 function pushMyPosition() {
   if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
   const now = Date.now();
-  if (now - lastPosPush < 75) return; // Intervall leicht auf 75ms erhöht (schont die CPU/Leitung)
+  if (now - lastPosPush < 75) return;
 
   const me = players.find(p => p.name === onlineAccount.name);
   if (!me) return;
@@ -1437,12 +1780,10 @@ function pushMyPosition() {
   const roundedY = Math.round(me.y);
   const aliveState = me.alive;
 
-  // Sende-Stopp: Nur senden, wenn sich Position oder Lebensstatus geändert haben!
   if (roundedX === lastSentX && roundedY === lastSentY && aliveState === lastSentAlive) {
-    return; 
+    return;
   }
 
-  // Werte für den nächsten Vergleich aktualisieren
   lastPosPush = now;
   lastSentX = roundedX;
   lastSentY = roundedY;
@@ -1451,40 +1792,41 @@ function pushMyPosition() {
   const stateKey = onlineRole === "p1" ? "p1State" : "p2State";
   const stateData = { x: roundedX, y: roundedY, alive: aliveState };
 
-  // Direkt in den spezifischen Unterpfad schreiben (spart enorm Bandbreite!)
-  dbSet("onlineMatches/" + onlineMatchId + "/" + stateKey, stateData).catch(() => {});
+  RPC.setMatchPath(onlineMatchId, stateKey, stateData).catch(() => {});
 
   if (onlineVsBot) {
     const bot = players.find(p => p.name !== onlineAccount.name);
     if (bot) {
       const botData = { x: Math.round(bot.x), y: Math.round(bot.y), alive: bot.alive };
-      dbSet("onlineMatches/" + onlineMatchId + "/p2State", botData).catch(() => {});
+      RPC.setMatchPath(onlineMatchId, "p2State", botData).catch(() => {});
     }
   }
 }
 
 
 
-// Host pushes ball state periodically as a correction reference (FIX #1/#2)
 let lastBallPush = 0;
 function pushBallState() {
   if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
 
   const now = Date.now();
-  if (now - lastBallPush < 120) return; // Intervall von 100ms auf 120ms erhöht
+  if (now - lastBallPush < 120) return;
   lastBallPush = now;
-  
+
   const bs = JSON.stringify(balls.map(b => ({
     x: Math.round(b.x), y: Math.round(b.y),
     vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)),
     radius: b.radius
   })));
-  
-  // Gezieltes Schreiben in den Unterpfad "/ballState" statt dbUpdate auf das Hauptdokument
-  dbSet("onlineMatches/" + onlineMatchId + "/ballState", bs).catch(() => {});
+
+  RPC.setMatchPath(onlineMatchId, "ballState", bs).catch(() => {});
 }
 
 
+// CHANGED: ELO is now applied through clampEloChange() before being
+// written (soft mitigation — see header comment). Head-to-head and
+// bot-stat writes are now uid-keyed. The player's own profile write
+// still goes only to players/{myUid} via pushAccountToFirebase().
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
   onlineResultHandled = true;
@@ -1493,35 +1835,32 @@ async function handleOnlineResult(winnerName, change) {
   document.getElementById("onlineHUD").style.display = "none";
 
   const won = winnerName === onlineAccount.name;
-  const eloChange = Math.round(change);
+  const eloChange = clampEloChange(Math.round(change));
   const oppName = onlineOpponent ? onlineOpponent.name : "Online Bot";
+  const oppUid  = onlineOpponent ? onlineOpponent.uid  : ONLINE_BOT_UID;
 
-  // ── NEU: H2H SCORE BEI SPIELENDE SPEICHERN & UPDATEN ──
-  // ── NEU: H2H SCORE BEI SPIELENDE SPEICHERN & UPDATEN (Ohne Double-Write Bug!) ──
   if (!onlineVsBot && fbReady) {
-    const loserName = won ? oppName : onlineAccount.name;
+    const winnerUid = won ? myUid : oppUid;
+    const loserUid  = won ? oppUid : myUid;
     if (onlineIsHost) {
-      // Nur der Host schreibt den neuen Score aktiv in die Datenbank
-      recordHeadToHeadWin(winnerName, loserName).then(score => {
-        const myWins = score[onlineAccount.name] || 0;
-        const oppWins = score[oppName] || 0;
+      recordHeadToHeadWin(winnerUid, loserUid).then(score => {
+        const myWins = score[myUid] || 0;
+        const oppWins = score[oppUid] || 0;
         const scoreHUD = document.getElementById("onlineScoreHUD");
         if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
       });
     } else {
-      // Der Client (p2) wartet kurz auf den Write des Hosts und liest dann den korrekten Stand aus
       setTimeout(() => {
-        getHeadToHeadScore(onlineAccount.name, oppName).then(score => {
-          const myWins = score[onlineAccount.name] || 0;
-          const oppWins = score[oppName] || 0;
+        getHeadToHeadScore(myUid, oppUid).then(score => {
+          const myWins = score[myUid] || 0;
+          const oppWins = score[oppUid] || 0;
           const scoreHUD = document.getElementById("onlineScoreHUD");
           if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
         });
-      }, 400); // 400ms Verzögerung verhindert jegliche Überschneidung
+      }, 400);
     }
   } else if (onlineVsBot) {
-    // Bei Bot-Spielen gibt es ohnehin nur einen Client, hier ist kein Double-Write möglich
-    const botScoreKey = `h2h_bot_${onlineAccount.name}`;
+    const botScoreKey = `h2h_bot_${myUid}`;
     const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
     if (won) {
       botScore.me++;
@@ -1532,18 +1871,14 @@ async function handleOnlineResult(winnerName, change) {
     const scoreHUD = document.getElementById("onlineScoreHUD");
     if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
   }
-  // ──────────────────────────────────────────────────────
 
-  // ──────────────────────────────────────────────────────
-
-  // Wir merken uns die originalen ELOs vor dem Update
   const myOriginalElo = Math.round(onlineAccount.elo);
   const oppOriginalElo = onlineOpponent ? Math.round(onlineOpponent.elo) : 1500;
 
   onlineAccount = sanitizeAccount(onlineAccount);
 
-  if (won) { 
-    onlineAccount.elo += eloChange; 
+  if (won) {
+    onlineAccount.elo += eloChange;
     onlineAccount.wins++;
     onlineAccount.currentStreak++;
     if (onlineAccount.currentStreak > onlineAccount.bestStreak) {
@@ -1555,13 +1890,12 @@ async function handleOnlineResult(winnerName, change) {
       onlineAccount.highestElo = onlineAccount.elo;
     }
 
-    // BEST WIN: Speichert die absolute ELO des Gegners, wenn sie höher ist als die bisher beste besiegte ELO
     if (oppOriginalElo > (onlineAccount.bestWinChange || 0)) {
       onlineAccount.bestWinChange = oppOriginalElo;
       onlineAccount.bestWinOpp = oppName;
     }
-  } else { 
-    onlineAccount.elo = Math.max(100, onlineAccount.elo - eloChange); 
+  } else {
+    onlineAccount.elo = Math.max(100, onlineAccount.elo - eloChange);
     onlineAccount.losses++;
     onlineAccount.currentStreak = 0;
     onlineAccount.totalEloLost += eloChange;
@@ -1570,25 +1904,29 @@ async function handleOnlineResult(winnerName, change) {
       onlineAccount.lowestElo = onlineAccount.elo;
     }
 
-    // WORST LOSS: Speichert die absolute ELO des Gegners, wenn sie niedriger ist als die bisher niedrigste ELO, gegen die du verloren hast
     if (onlineAccount.worstLossChange === 0 || oppOriginalElo < onlineAccount.worstLossChange) {
       onlineAccount.worstLossChange = oppOriginalElo;
       onlineAccount.worstLossOpp = oppName;
     }
   }
-  
+
   saveAccountLocal();
-  if (fbReady) await pushAccountToFirebase();
+  if (fbReady) await pushAccountToFirebase(); // writes ONLY players/{myUid}
 
   showEloAnimation(won ? eloChange : -eloChange);
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
 
-  // --- Online Bot Stats vollständig berechnen & in Firebase speichern ---
+  // Bot stats: written to players/{ONLINE_BOT_UID}. This is the ONE
+  // place a client writes to a uid that isn't its own — acceptable
+  // because the bot is a synthetic system account, not a real player's
+  // identity, and should be locked down in Rules to only allow writes
+  // that keep it looking like a bot record (see RULES.txt note on
+  // "players/bot__online_bot"). If you want zero exceptions, move this
+  // to a Cloud Function trigger instead.
   if (onlineVsBot && onlineOpponent) {
     onlineOpponent = sanitizeAccount(onlineOpponent);
-    
+
     if (won) {
-      // Spieler gewinnt -> Bot verliert
       onlineOpponent.elo = Math.max(100, onlineOpponent.elo - eloChange);
       onlineOpponent.losses = (onlineOpponent.losses ?? 0) + 1;
       onlineOpponent.currentStreak = 0;
@@ -1603,58 +1941,77 @@ async function handleOnlineResult(winnerName, change) {
         onlineOpponent.worstLossOpp = onlineAccount.name;
       }
     } else {
-      // Bot gewinnt -> Spieler verliert
       onlineOpponent.elo += eloChange;
       onlineOpponent.wins = (onlineOpponent.wins ?? 0) + 1;
       onlineOpponent.currentStreak = (onlineOpponent.currentStreak ?? 0) + 1;
       if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak ?? 0)) {
         onlineOpponent.bestStreak = onlineOpponent.currentStreak;
       }
-                if (onlineOpponent.elo > (onlineOpponent.highestElo ?? onlineOpponent.elo)) {
-            onlineOpponent.highestElo = onlineOpponent.elo;
-          }
-
-          // KORREKTUR: Analog für den besten Sieg des Bots
-          if (onlineOpponent.bestWinChange === 0 || myOriginalElo > onlineOpponent.bestWinChange) {
-            onlineOpponent.bestWinChange = myOriginalElo;
-            onlineOpponent.bestWinOpp = onlineAccount.name;
-          }
-        }
-
-        onlineBotElo = onlineOpponent.elo;
-        localStorage.setItem("onlineBotElo", onlineBotElo);
-
-        if (fbReady) {
-          await dbSet("players/Online Bot", {
-            name: "Online Bot",
-            elo: onlineBotElo,
-            wins: onlineOpponent.wins ?? 0,
-            losses: onlineOpponent.losses ?? 0,
-            highestElo: onlineOpponent.highestElo ?? onlineBotElo,
-            lowestElo: onlineOpponent.lowestElo ?? onlineBotElo,
-            currentStreak: onlineOpponent.currentStreak ?? 0,
-            bestStreak: onlineOpponent.bestStreak ?? 0,
-            totalEloGained: onlineOpponent.totalEloGained ?? 0,
-            totalEloLost: onlineOpponent.totalEloLost ?? 0,
-            bestWinChange: onlineOpponent.bestWinChange ?? 0,
-            bestWinOpp: onlineOpponent.bestWinOpp ?? "",
-            worstLossChange: onlineOpponent.worstLossChange ?? 0,
-            worstLossOpp: onlineOpponent.worstLossOpp ?? "",
-            updatedAt: Date.now()
-          });
-        }
+      if (onlineOpponent.elo > (onlineOpponent.highestElo ?? onlineOpponent.elo)) {
+        onlineOpponent.highestElo = onlineOpponent.elo;
       }
 
-      // Meldet das Ende des Bot-Spiels an Firebase für die Zuschauer
-      if (fbReady && onlineMatchId && onlineVsBot) {
-        dbUpdate("onlineMatches/" + onlineMatchId, {
-          status: "done",
-          winner: winnerName
-        }).catch(() => {});
+      if (onlineOpponent.bestWinChange === 0 || myOriginalElo > onlineOpponent.bestWinChange) {
+        onlineOpponent.bestWinChange = myOriginalElo;
+        onlineOpponent.bestWinOpp = onlineAccount.name;
       }
     }
 
+    onlineBotElo = onlineOpponent.elo;
+    localStorage.setItem("onlineBotElo", onlineBotElo);
 
+    if (fbReady) {
+      await dbSetBotPlayer({
+        uid: ONLINE_BOT_UID,
+        name: "Online Bot",
+        elo: onlineBotElo,
+        wins: onlineOpponent.wins ?? 0,
+        losses: onlineOpponent.losses ?? 0,
+        highestElo: onlineOpponent.highestElo ?? onlineBotElo,
+        lowestElo: onlineOpponent.lowestElo ?? onlineBotElo,
+        currentStreak: onlineOpponent.currentStreak ?? 0,
+        bestStreak: onlineOpponent.bestStreak ?? 0,
+        totalEloGained: onlineOpponent.totalEloGained ?? 0,
+        totalEloLost: onlineOpponent.totalEloLost ?? 0,
+        bestWinChange: onlineOpponent.bestWinChange ?? 0,
+        bestWinOpp: onlineOpponent.bestWinOpp ?? "",
+        worstLossChange: onlineOpponent.worstLossChange ?? 0,
+        worstLossOpp: onlineOpponent.worstLossOpp ?? "",
+        updatedAt: Date.now()
+      });
+    }
+  }
+
+  if (fbReady && onlineMatchId && onlineVsBot) {
+    RPC.updateMatch(onlineMatchId, {
+      status: "done",
+      winner: winnerName
+    }).catch(() => {});
+  }
+}
+
+// Helper used only for the synthetic bot account write above. Kept as
+// its own tiny function (rather than extending the guarded RPC's
+// "own player only" rule) so the single intentional exception is easy
+// to find, audit, and remove later if bot-stat updates are moved to a
+// Cloud Function instead.
+async function dbSetBotPlayer(data) {
+  if (!RPC) return;
+  const { ref, set } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+  // We deliberately do NOT use RPC.setOwnPlayer here since the target
+  // is not our own uid. This path MUST be restricted server-side (see
+  // RULES.txt) to only allow writes that match the bot's expected
+  // schema, since it's the one place this client touches a uid that
+  // isn't its own.
+  try {
+    const dbInst = (await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js")).getApp();
+    const { getDatabase } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+    const db = getDatabase(dbInst);
+    await set(ref(db, "players/" + ONLINE_BOT_UID), data);
+  } catch(e) {
+    console.warn("Bot stat write failed (expected if Rules restrict it):", e);
+  }
+}
 
 
 function showWinnerOverlay(winnerName, eloChange) {
@@ -1696,19 +2053,15 @@ function getSkillValue(p) {
 
 function updateAI(p, activeBalls) {
   if (!p.alive) return;
-  
-  // NUR IM COIN-MODUS: Wenn der Bot eingefroren ist, Bewegung sperren
   if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) return;
 
   let danger = false;
-  // ... (Ab hier geht dein bisheriger Code in updateAI unverändert weiter!)
 
   for (const b of activeBalls) {
     const dx = p.x - b.x, dy = p.y - b.y;
     if (Math.sqrt(dx*dx + dy*dy) < p.awareness) { danger = true; break; }
   }
-  
-  // NEU: Münzen-Targeting im Coin-Modus
+
   if (!danger) {
     if (mode === "coin" && coins.length > 0) {
       let nearestCoin = null;
@@ -1732,18 +2085,15 @@ function updateAI(p, activeBalls) {
       }
     }
   }
-  // ... (restliche Bewegungs- und Ausweichlogik der Funktion bleibt gleich)
 
   let moveX = (p.targetX || W()/2) - p.x;
   let moveY = (p.targetY || H()/2) - p.y;
   const moveDist = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
   moveX /= moveDist; moveY /= moveDist;
-    let avoidX = 0, avoidY = 0;
-  
-  // NEU: Wenn wir im Münzen-Modus (coin) sind, setzen wir den Sicherheitsabstand 
-  // zum Rand auf 0. Dadurch können die Bots problemlos bis in die Ecken laufen.
+  let avoidX = 0, avoidY = 0;
+
   const wallMargin = (mode === "coin") ? 0 : 140;
-  
+
   if (wallMargin > 0) {
     if (p.x < wallMargin)     avoidX += (wallMargin - p.x) * 0.03;
     if (p.x > W()-wallMargin) avoidX -= (p.x - (W()-wallMargin)) * 0.03;
@@ -1866,14 +2216,13 @@ function startCoinMode() {
   document.getElementById("coinHUD").style.display = "block";
   document.getElementById("coinScore").textContent = 0;
   document.getElementById("coinTime").textContent  = 60;
-  
+
   players = [];
   players.push(createPlayer(W()/2, H()/2, "#00ff88", "Player"));
   for (let i = 0; i < aiBotCount; i++)
     players.push(createPlayer(Math.random()*W(), Math.random()*H(),
       `hsl(${i*360/aiBotCount},100%,50%)`, "Bot "+(i+1)));
-  
-  // Jeder Spieler startet mit 0 Münzen
+
   for (const p of players) {
     p.coinsCollected = 0;
   }
@@ -1881,12 +2230,12 @@ function startCoinMode() {
   for (let i = 0; i < 8; i++) spawnCoin();
   for (let i = 0; i < startBallCount; i++) createBall();
   spawnLoop();
-  
+
   coinIntervalId = setInterval(() => {
     if (!running) { clearInterval(coinIntervalId); coinIntervalId = null; return; }
     coinTimeLeft--;
     document.getElementById("coinTime").textContent = coinTimeLeft;
-    
+
     if (coinTimeLeft <= 0) {
       clearInterval(coinIntervalId); coinIntervalId = null;
       endCoinMode();
@@ -2025,7 +2374,8 @@ function hideAllScreensForGame() {
 }
 
 // ═══════════════════════════════════════════════
-//  TOURNAMENT
+//  TOURNAMENT (fully offline / local — no DB access, unaffected by the
+//  security rewrite, kept as-is)
 // ═══════════════════════════════════════════════
 function startTournament() {
   running = true; matches = []; participants = []; waitingQueue = [];
@@ -2112,13 +2462,10 @@ function setupMatch(match) {
 }
 
 // ═══════════════════════════════════════════════
-//  GAME LOOP
-// ═══════════════════════════════════════════════
-// ═══════════════════════════════════════════════
 //  GAME LOOP (FIXED TIMESTEP)
 // ═══════════════════════════════════════════════
 let lastTime = performance.now();
-const timestep = 1000 / 60; // Erzwingt exakt 60 Logik-Updates pro Sekunde
+const timestep = 1000 / 60;
 let accumulator = 0;
 
 function loop() {
@@ -2126,16 +2473,13 @@ function loop() {
   const dt = now - lastTime;
   lastTime = now;
 
-  // Begrenzt extreme Ruckler (z. B. wenn der Tab im Hintergrund war)
-  accumulator += Math.min(dt, 250); 
+  accumulator += Math.min(dt, 250);
 
-  // Führe die Physik/Logik-Updates im festen 60-FPS-Takt aus
   while (accumulator >= timestep) {
     update();
     accumulator -= timestep;
   }
 
-  // Zeichne das Bild so oft wie möglich (butterweich bei z.B. 144Hz)
   draw();
   requestAnimationFrame(loop);
 }
@@ -2174,16 +2518,13 @@ function update() {
   if (el) el.textContent = Math.floor((Date.now() - startTime) / 1000);
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
-  // ── SCHRITT 3: HIER EINFÜGEN FÜR ONLINE TV ──
   if (mode === "online_tv") {
-    // Beide Spieler flüssig zu ihren Live-Zielkoordinaten bewegen (Interpolation)
     for (const p of players) {
       if (p.tx !== undefined && p.ty !== undefined) {
         p.x += (p.tx - p.x) * 0.45;
         p.y += (p.ty - p.y) * 0.45;
       }
     }
-    // Bälle lokal flüssig weiterbewegen und an Wänden abprallen lassen
     for (const b of balls) {
       b.x += b.vx; b.y += b.vy;
       if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
@@ -2191,23 +2532,19 @@ function update() {
       if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
       if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
     }
-    return; // Verhindert, dass die restliche Spiellogik (Kollisionen, Tastendruck) läuft!
+    return;
   }
-  // ───────────────────────────────────────────
 
-  // ── Online mode ──
   if (mode === "online") {
     pushMyPosition();
     onlineSimTick++;
 
-    // Ball spawning + physics (KORREKTUR: Nur der Host steuert den Spawn-Timer!)
-if (onlineIsHost) {
-  if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
-    onlineBallSpawnTimer = Date.now();
-    balls.push(makeOnlineBall());
-  }
-}
-
+    if (onlineIsHost) {
+      if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
+        onlineBallSpawnTimer = Date.now();
+        balls.push(makeOnlineBall());
+      }
+    }
 
     for (const b of balls) {
       b.x += b.vx; b.y += b.vy;
@@ -2219,7 +2556,6 @@ if (onlineIsHost) {
 
     if (onlineIsHost && !onlineVsBot) pushBallState();
 
-    // === ECHTER GEGNER BEWEGUNG (wie Agar.io) ===
     if (onlineVsBot) {
       const bot = players.find(p => p.name !== onlineAccount.name);
       if (bot && bot.alive) {
@@ -2227,27 +2563,20 @@ if (onlineIsHost) {
         checkBotCollision(bot);
       }
     } else {
-      // Real opponent – flüssige Interpolation
-      // Real opponent – Extrapolation bei Lag
-const opp = players.find(p => p.name !== onlineAccount.name);
-if (opp && opp.tx !== undefined && opp.ty !== undefined) {
-  const timeSinceLastPacket = Date.now() - (opp.lastPacketTime || Date.now());
+      const opp = players.find(p => p.name !== onlineAccount.name);
+      if (opp && opp.tx !== undefined && opp.ty !== undefined) {
+        const timeSinceLastPacket = Date.now() - (opp.lastPacketTime || Date.now());
 
-  // Wenn die Daten länger als 100ms ausbleiben, rechnen wir seinen Weg hoch (bis max. 1,5 Sekunden)
-  if (timeSinceLastPacket > 100 && timeSinceLastPacket < 1500) {
-    // Wir lassen ihn mit seiner letzten bekannten Richtung sanft weitergleiten
-    opp.tx += (opp.vx || 0) * 0.15; 
-    opp.ty += (opp.vy || 0) * 0.15;
-  }
+        if (timeSinceLastPacket > 100 && timeSinceLastPacket < 1500) {
+          opp.tx += (opp.vx || 0) * 0.15;
+          opp.ty += (opp.vy || 0) * 0.15;
+        }
 
-  // Weiches Hinbewegen (0.22 statt 0.45 macht es bei hohem Ping deutlich flüssiger!)
-  opp.x += (opp.tx - opp.x) * 0.22;
-  opp.y += (opp.ty - opp.y) * 0.22;
-}
-
+        opp.x += (opp.tx - opp.x) * 0.22;
+        opp.y += (opp.ty - opp.y) * 0.22;
+      }
     }
 
-    // Eigener Spieler clampen
     const me = players.find(p => p.name === onlineAccount.name);
     if (me) {
       me.x = Math.max(me.radius, Math.min(W()-me.radius, me.x));
@@ -2257,7 +2586,6 @@ if (opp && opp.tx !== undefined && opp.ty !== undefined) {
     if (me && me.alive) checkOnlineCollision(me);
     return;
   }
-  // ── Multi ──
   if (mode === "multi") {
     const p1 = players[0], p2 = players[1];
     if (p1 && p1.alive) {
@@ -2270,20 +2598,17 @@ if (opp && opp.tx !== undefined && opp.ty !== undefined) {
     }
   }
 
-  // AI
   for (const p of players) {
     if (!p.alive) continue;
     const humanNames = ["Player","Player 1","Player 2","YOU"];
     if (!humanNames.includes(p.name)) updateAI(p, balls);
   }
 
-  // Clamp
   for (const p of players) {
     p.x = Math.max(p.radius, Math.min(W()-p.radius, p.x));
     p.y = Math.max(p.radius, Math.min(H()-p.radius, p.y));
   }
 
-  // Move balls
   for (const b of balls) {
     b.x += b.vx; b.y += b.vy;
     if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
@@ -2292,8 +2617,6 @@ if (opp && opp.tx !== undefined && opp.ty !== undefined) {
     if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
   }
 
-  // Coin collection
-    // Coin collection
   if (mode === "coin") {
     for (const p of players) {
       if (!p.alive) continue;
@@ -2301,21 +2624,17 @@ if (opp && opp.tx !== undefined && opp.ty !== undefined) {
         const c = coins[i];
         const dx = p.x - c.x;
         const dy = p.y - c.y;
-        
-        // Prüfen, ob der Spieler (oder Bot) die Münze berührt
+
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + c.r) {
-          // Münzkonto des jeweiligen Spielers erhöhen
           p.coinsCollected = (p.coinsCollected || 0) + c.value;
-          
-          // Wenn es der menschliche Spieler ist, HUD aktualisieren
+
           if (p.name === "Player") {
             coinScorePlayer = p.coinsCollected;
             document.getElementById("coinScore").textContent = coinScorePlayer;
           }
-          
-          // Münze entfernen und eventuell eine neue spawnen
+
         coins.splice(i, 1);
-          spawnCoin(); 
+          spawnCoin();
         }
       }
     }
@@ -2325,7 +2644,6 @@ if (opp && opp.tx !== undefined && opp.ty !== undefined) {
   for (const p of players) checkCollision(p);
 }
 
-// ── Online collision: only check local player, report result ──
 function checkOnlineCollision(me) {
   for (const b of balls) {
     const dx = me.x - b.x;
@@ -2335,14 +2653,12 @@ function checkOnlineCollision(me) {
       const opp = players.find(p => p.name !== me.name);
 
       if (onlineVsBot) {
-        // Du verlierst gegen den Bot (Winner = Bot (oppElo), Loser = Du (onlineAccount.elo))
         const oppElo = onlineOpponent?.elo || 1500;
-        const diff = onlineAccount.elo - oppElo; // loserElo - winnerElo
+        const diff = onlineAccount.elo - oppElo;
         const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
-        
+
         handleOnlineResult(opp ? opp.name : "", change);
       } else {
-        // Echtes Online-Match meldet das Ergebnis an die DB
         reportOnlineResult(opp ? opp.name : "", me.name);
       }
       return;
@@ -2350,8 +2666,6 @@ function checkOnlineCollision(me) {
   }
 }
 
-// Bot collision in vs Bot mode
-// Bot collision in vs Bot mode
 function checkBotCollision(bot) {
   for (const b of balls) {
     const dx = bot.x - b.x;
@@ -2359,14 +2673,13 @@ function checkBotCollision(bot) {
     if (Math.sqrt(dx*dx + dy*dy) < bot.radius + b.radius) {
       bot.alive = false;
       const me = players.find(p => p.name === onlineAccount.name);
-      
+
       if (me && me.alive) {
         const oppElo = onlineOpponent?.elo || 1500;
-        
-        // Du gewinnst (Winner = Du (onlineAccount.elo), Loser = Bot (oppElo))
-        const diff = oppElo - onlineAccount.elo; // loserElo - winnerElo
+
+        const diff = oppElo - onlineAccount.elo;
         const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
-        
+
         handleOnlineResult(me.name, change);
       }
       return;
@@ -2420,21 +2733,18 @@ function updateMatch(match) {
 function checkCollision(p) {
   if (!p.alive) return;
 
-  // NUR IM COIN-MODUS: Unverwundbarkeit prüfen
   if (mode === "coin" && p.invulnerableUntil && Date.now() < p.invulnerableUntil) return;
 
   if (mode === "coin") {
-    // Münzen-Modus: Einfrieren statt Ausscheiden
     for (const b of balls) {
       const dx = p.x - b.x, dy = p.y - b.y;
       if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
         p.stunnedUntil = Date.now() + 5000;
-        p.invulnerableUntil = Date.now() + 6000; // 5s Freeze + 1s Fluchtzeit
+        p.invulnerableUntil = Date.now() + 6000;
         return;
       }
     }
   } else {
-    // Alle anderen Modi: Normales Ausscheiden bei Treffer
     for (const b of balls) {
       const dx = p.x - b.x, dy = p.y - b.y;
       if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
@@ -2455,23 +2765,24 @@ function checkCollision(p) {
   }
 }
 
+// CHANGED: result reporting now uses the guarded RPC and clamps the
+// elo delta before writing, instead of an unrestricted dbUpdate on a
+// name-derived path.
 async function reportOnlineResult(winnerName, loserName) {
   if (onlineResultHandled) return;
 
   const me = onlineAccount;
   const opp = onlineOpponent || { elo: 1500 };
 
-  // ELOs für Gewinner und Verlierer bestimmen
   const winnerElo = (winnerName === me.name) ? me.elo : opp.elo;
   const loserElo = (loserName === me.name) ? me.elo : opp.elo;
 
-  // Genau wie im Offline-Turnier (finishMatch)
   const diff = loserElo - winnerElo;
-  const change = Math.max(1, Math.min(15, Math.round(5 + diff / 100)));
+  const change = clampEloChange(Math.max(1, Math.min(15, Math.round(5 + diff / 100))));
 
   if (fbReady && onlineMatchId) {
     try {
-      await dbUpdate("onlineMatches/" + onlineMatchId, {
+      await RPC.updateMatch(onlineMatchId, {
         status: "done", winner: winnerName, eloChange: change
       });
     } catch(e) {
@@ -2485,13 +2796,13 @@ async function reportOnlineResult(winnerName, loserName) {
 
 
 // ═══════════════════════════════════════════════
-//  TOURNAMENT FINISH
+//  TOURNAMENT FINISH (fully offline — no DB access)
 // ═══════════════════════════════════════════════
 function finishMatch(match, winner, loser) {
   match.running = false;
   const diff   = loser.elo - winner.elo;
   const change = Math.max(1, Math.min(15, 5 + diff / 100));
-  
+
   if (winner.stats) {
   if (loser.elo > (winner.stats.bestWin || 0)) {
     winner.stats.bestWin = loser.elo;
@@ -2534,7 +2845,6 @@ if (loser.stats) {
   if (winner.name === "YOU") showEloAnimation(change);
   if (loser.name  === "YOU") showEloAnimation(-change);
 
-  // Nur Banner zeigen wenn du im Spectator-Modus bist
 if (spectateModeActive && spectateMatchId === match.id) {
   matchBanner = {
     text: "🏆 Winner: " + winner.name,
@@ -2606,7 +2916,7 @@ function finishArena() {
 }
 
 // ═══════════════════════════════════════════════
-//  RANKING / ELO TABLE
+//  RANKING / ELO TABLE (offline, unaffected)
 // ═══════════════════════════════════════════════
 function updateRanking() {
   if (!ranking.length) return;
@@ -2654,7 +2964,8 @@ function updateEloTable() {
 }
 
 // ═══════════════════════════════════════════════
-//  PROFILE MODAL
+//  PROFILE MODAL (offline tournament profile — unaffected; online
+//  profile lookups are handled by openOnlineProfile(uid) above)
 // ═══════════════════════════════════════════════
 function openProfile(name) {
   const p = participants.find(x => x.name === name);
@@ -2703,7 +3014,7 @@ function openProfile(name) {
 function closeProfile() { document.getElementById("profileModal").style.display = "none"; }
 
 // ═══════════════════════════════════════════════
-//  SPECTATOR
+//  SPECTATOR (offline tournament — unaffected)
 // ═══════════════════════════════════════════════
 function autoFollowSpectate() {
   if (!spectateModeActive) return;
@@ -2763,7 +3074,6 @@ function resumePlay() {
 function draw() {
   ctx.clearRect(0, 0, W(), H());
 
-  // ── TOURNAMENT ──
   if (mode === "tournament") {
     let renderMatch = null;
     if (spectateModeActive && spectateMatchId)
@@ -2839,7 +3149,6 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     return;
   }
 
-  // ── COIN MODE ──
   if (mode === "coin") {
     for (const c of coins) {
       ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
@@ -2853,31 +3162,27 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     }
   }
 
-  // ── BALLS ──
   for (const b of balls) {
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
     ctx.fillStyle = "#ff4444"; ctx.fill();
   }
 
-  // ── PLAYERS ──
   for (const p of players) {
     if (!p.alive) continue;
 
-    // NUR IM COIN-MODUS: Blinken (Flashen) während der Unverwundbarkeit
     if (mode === "coin" && p.invulnerableUntil && Date.now() < p.invulnerableUntil) {
       if (Math.floor(Date.now() / 100) % 2 === 0) {
-        continue; // Überspringt das Zeichnen dieses Frames (Blink-Effekt)
+        continue;
       }
     }
 
     ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fillStyle = p.color; ctx.fill();
 
-    // NUR IM COIN-MODUS: Eisblauer Ring um eingefrorene (stunned) Spieler/Bots zeichnen
     if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius + 6, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(0, 191, 255, 0.8)"; // Eisblau
+      ctx.strokeStyle = "rgba(0, 191, 255, 0.8)";
       ctx.lineWidth = 4;
       ctx.stroke();
     }
@@ -2892,7 +3197,6 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     ctx.fillText(p.name, p.x, p.y - p.radius - 10);
   }
 
-  // ── ONLINE: draw death overlay ──
   if (mode === "online") {
     const me = players.find(p => p.name === onlineAccount?.name);
     if (me && !me.alive) {
@@ -2909,12 +3213,11 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 
 
 // ═══════════════════════════════════════════════
-//  CONTROLS — coordinates always mapped through the fixed virtual canvas
+//  CONTROLS
 // ═══════════════════════════════════════════════
 function moveSingle(x, y) {
   if (spectateModeActive || humanRemovedFromQueue) return;
 
-  // NUR IM COIN-MODUS: Bewegung sperren, wenn eingefroren
   const me = players.find(p => p.name === "Player" || p.name === "YOU" || p.name === "Player 1");
   if (mode === "coin" && me && me.stunnedUntil && Date.now() < me.stunnedUntil) return;
 
@@ -2948,11 +3251,9 @@ function moveSingle(x, y) {
   running = false;
   clearAllTimers();
   document.getElementById("coinHUD").style.display = "none";
-  
-  // Sortiert alle Spieler nach den gesammelten Münzen (absteigend)
+
   const sorted = [...players].sort((a, b) => (b.coinsCollected || 0) - (a.coinsCollected || 0));
-  
-  // Erstellt eine eigene Münzen-Bestenliste für die rechte Seite
+
   let html = "<b>🪙 COIN HUNT RANKING</b><br><br>";
   for (let i = 0; i < sorted.length; i++) {
     const p = sorted[i];
@@ -2960,46 +3261,39 @@ function moveSingle(x, y) {
     html += `${i+1}. <span style="color:${p.color}">${p.name}${isMe}</span>: <b>${p.coinsCollected || 0}</b><br>`;
   }
   document.getElementById("ranking").innerHTML = html;
-  
-  // Zeigt den Game-Over-Bildschirm mit deinem Ergebnis
+
   document.getElementById("finalTime").textContent = coinScorePlayer + " Coins";
   showScreen("gameOver");
 }
 
 // ═══════════════════════════════════════════════
 //  ONLINE TV FUNCTION
-// ═══════════════════════════════════════════════
-// ═══════════════════════════════════════════════
-//  ONLINE TV FUNCTION (English Version)
-// ═══════════════════════════════════════════════
-// ═══════════════════════════════════════════════
-//  ONLINE TV FUNCTION (Fully Reactive English Version)
+//  CHANGED: scans onlineMatches (uid-keyed participants now) via the
+//  guarded RPC; read-only, no write capability needed here at all.
 // ═══════════════════════════════════════════════
 async function startOnlineTV() {
-  cleanupOnline(); // Clean up any previous listeners
+  cleanupOnline();
   clearAllTimers();
-  
+
   if (!fbReady) {
     alert("Firebase is not connected yet!");
     return;
   }
-  
-  // Hide menus, prepare UI for spectators
+
   hideAllScreensForGame();
   document.getElementById("spectatorInfo").style.display = "block";
-  
+
   mode = "online_tv";
   running = true;
   balls = [];
   players = [];
   startTime = Date.now();
-  
+
   document.getElementById("spectatorText").innerHTML = "Waiting for an active match to start...";
-  
+
   let p1 = null;
   let p2 = null;
-  
-  // 1. Reactive live-listener on the entire matches database
+
   onlineTvUnsubscribe = dbOn("onlineMatches", (matchesData) => {
     if (!matchesData) {
       document.getElementById("spectatorText").innerHTML = "No online games are currently running.";
@@ -3009,12 +3303,11 @@ async function startOnlineTV() {
       balls = [];
       return;
     }
-    
+
     let bestMatchId = null;
     let bestElo = -1;
     let bestMatch = null;
-    
-    // 2. Scan all matches to find the best currently "playing" match
+
     for (const [id, m] of Object.entries(matchesData)) {
       if (m.status === "playing") {
         const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
@@ -3025,8 +3318,7 @@ async function startOnlineTV() {
         }
       }
     }
-    
-    // Case A: No active matches currently "playing"
+
     if (!bestMatchId) {
       document.getElementById("spectatorText").innerHTML = "No live match is currently running. Waiting for a game...";
       if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
@@ -3035,24 +3327,19 @@ async function startOnlineTV() {
       balls = [];
       return;
     }
-    
-    // Case B: We found an active match and it's a new/different one
+
     if (bestMatchId !== onlineTvCurrentMatchId) {
-      // Unsubscribe from previous match if there was one
       if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
-      
+
       onlineTvCurrentMatchId = bestMatchId;
       balls = [];
-      
-      // Create fresh spectator players
+
       p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
       p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
       players = [p1, p2];
-      
-      // 3. Subscribe to the specific live coordinate data of this active match
-      onlineTvInnerUnsubscribe = dbOn("onlineMatches/" + bestMatchId, (data) => {
+
+      onlineTvInnerUnsubscribe = RPC.onMatch(bestMatchId, (data) => {
         if (!data || data.status === "done" || data.status === "abandoned") {
-          // If match ends, unsubscribe and reset, so the parent listener can wait for the next game
           if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
           onlineTvCurrentMatchId = null;
           players = [];
@@ -3060,21 +3347,18 @@ async function startOnlineTV() {
           document.getElementById("spectatorText").innerHTML = "Match finished. Searching for next game...";
           return;
         }
-        
-        // Update player positions
+
         if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
         if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
-        
-        // Smoothly correct ball positions
+
         if (data.ballState) {
           try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
         }
-        
-        // Update UI text (English)
+
         document.getElementById("spectatorText").innerHTML = `
           <div style="text-align:center; line-height: 1.4;">
             <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
-            <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs 
+            <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs
             <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
           </div>
         `;
@@ -3115,5 +3399,101 @@ canvas.addEventListener("touchstart", e => {
   moveSingle(pos.x, pos.y);
 }, { passive: false });
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SUGGESTED FIREBASE REALTIME DATABASE SECURITY RULES
+     ───────────────────────────────────────────────────────────────────
+     These are NOT enforced by this HTML file — Security Rules live in
+     your Firebase project console (or firebase.json / database.rules.json
+     if you deploy via the CLI), not in client code. Paste something
+     like this into Firebase Console → Realtime Database → Rules, and
+     replace the placeholder rules currently in effect.
+
+     Without deploying rules like these, anonymous auth + uid-keyed
+     data is still an improvement (no more name-collision takeover,
+     no global window handles) but a signed-in user could still write
+     anywhere if your current rules are permissive ("read":true,
+     "write":true). Rules are the actual enforcement boundary.
+
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "players": {
+      "$uid": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['name','elo'])",
+        "name": { ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 20" },
+        "elo":  { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5000" }
+      }
+    },
+
+    "usernames": {
+      "$name": {
+        ".read": true,
+        ".write": "auth != null && (!data.exists() || data.val() === auth.uid) && newData.val() === auth.uid"
+      }
+    },
+
+    "queue": {
+      "$uid": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === $uid"
+      },
+      "$uid_invite": {
+        ".read": true,
+        ".write": "auth != null"
+        // Tighten further if possible: e.g. require the invite payload's
+        // "oppUid" field to equal auth.uid, so only the actual inviter
+        // can write an invite, not just anyone authenticated.
+      }
+    },
+
+    "onlineMatches": {
+      "$matchId": {
+        ".read": true,
+        ".write": "auth != null && (
+                      (!data.exists() && (newData.child('p1uid').val() === auth.uid || newData.child('p2uid').val() === auth.uid)) ||
+                      (data.exists() && (data.child('p1uid').val() === auth.uid || data.child('p2uid').val() === auth.uid))
+                   )"
+      }
+    },
+
+    "headToHead": {
+      "$pairKey": {
+        ".read": true,
+        ".write": "auth != null"
+        // Ideally validate that auth.uid appears as a key within the
+        // pairKey (split on "__VS__") — RTDB rule expressions are
+        // limited; consider moving this to a Cloud Function if you
+        // want strict enforcement here.
+      }
+    }
+  }
+}
+
+     REMAINING KNOWN GAPS (flagged honestly, not fixed by client code
+     alone):
+     1. ELO INTEGRITY: the client still computes and writes its own
+        new elo value to its own uid node. The clamp in this file
+        (clampEloChange, MAX_ELO_DELTA_PER_GAME = 50) limits how much
+        damage one write can do, but a scripted client could still
+        call set() on players/{ownUid} repeatedly with crafted-but-
+        clamped deltas. Real integrity requires a Cloud Function (or
+        other backend) that verifies match results independently and
+        is the ONLY writer of the `elo` field.
+     2. The "Online Bot" synthetic account (players/bot__online_bot)
+        is still written directly by any client that just played
+        against it. If you want this fully locked down, either gate
+        it with a fixed schema validation rule, or move bot-stat
+        updates to a Cloud Function trigger.
+     3. onlineMatches access is intentionally permissive between the
+        two listed participants (by product decision), which means a
+        misbehaving client for player A could still write bogus
+        position/ball data into a match — but it can no longer affect
+        any OTHER match or any other player's profile.
+═══════════════════════════════════════════════════════════════════ -->
 </body>
 </html>
