@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>DarkOnBalls</title>
+<script type="module">
+import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getAnalytics }     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyDKwJDGSxRDBf9ihi1-T70pC6UzY6kLYb4",
+  authDomain:        "darkonballs.firebaseapp.com",
+  databaseURL:       "https://darkonballs-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "darkonballs",
+  storageBucket:     "darkonballs.firebasestorage.app",
+  messagingSenderId: "423459139682",
+  appId:             "1:423459139682:web:62847c384d1f967a78e13b",
+  measurementId:     "G-J88EX0YX4D"
+};
+
+try {
+  const app = initializeApp(firebaseConfig); 
+  const db  = getDatabase(app);
+  try { getAnalytics(app); } catch(e) {}
+  window._firebaseDB              = db;
+  window._firebaseRef             = ref;
+  window._firebaseSet             = set;
+  window._firebaseGet             = get;
+  window._firebaseOnValue         = onValue;
+  window._firebasePush            = push;
+  window._firebaseRemove          = remove;
+  window._firebaseUpdate          = update;
+  window._firebaseServerTimestamp = serverTimestamp;
+  window._firebaseOnDisconnect    = onDisconnect;
+  window._firebaseReady           = true;
+  window.dispatchEvent(new Event("firebaseReady"));
+  console.log("Firebase connected!");
+} catch(e) {
+  console.warn("Firebase init failed", e);
+}
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{overflow:hidden;background:#000;font-family:Arial,sans-serif;width:100%;height:100%;}
+#stage{position:fixed;top:0;left:0;width:100%;height:100%;background:#111;}
+#gameWrap{position:absolute;inset:0;background:#111;overflow:hidden;}
+canvas{display:block;touch-action:none;-webkit-user-select:none;user-select:none;width:100%;height:100%;}
+#ui{position:absolute;top:20px;left:20px;color:white;font-size:18px;font-weight:bold;pointer-events:none;z-index:10;background:rgba(0,0,0,0.6);padding:12px 16px;border-radius:10px;}
+button{padding:15px 35px;font-size:20px;border:none;border-radius:12px;cursor:pointer;margin:8px;background:#333;color:#fff;transition:background .2s;}
+button:hover{background:#555;}
+#homeBtn{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#aaa;font-size:12px;padding:5px 14px;border-radius:20px;cursor:pointer;z-index:50;display:none;}
+#homeBtn:hover{background:rgba(255,255,255,0.18);color:#fff;}
+#menu,#settings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;align-items:center;background:#111;color:white;z-index:30;}
+#menu{display:flex;flex-direction:row;justify-content:center;align-items:center;gap:50px;overflow-y:auto;padding:60px 20px;-webkit-overflow-scrolling:touch;}
+h1{font-size:50px;margin-bottom:20px;}
+h2{font-size:30px;margin-bottom:20px;}
+#gameOver{background:rgba(0,0,0,0.85);z-index:40;}
+#eloResult{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);font-size:80px;font-weight:bold;text-align:center;pointer-events:none;opacity:0;text-shadow:0 0 30px currentColor;z-index:100;}
+@keyframes eloPopIn{0%{transform:translate(-50%,-50%) scale(0);opacity:0;}30%{transform:translate(-50%,-50%) scale(1.3);opacity:1;}60%{transform:translate(-50%,-50%) scale(1);opacity:1;}80%{transform:translate(-50%,-60%) scale(1);opacity:1;}100%{transform:translate(-50%,-80%) scale(0.8);opacity:0;}}
+#vsScreen{background:#0a0a0a;z-index:60;}
+.vs-name{font-size:44px;font-weight:bold;text-align:center;}
+.vs-elo{font-size:22px;color:#aaa;margin-top:6px;}
+.vs-divider{font-size:60px;font-weight:900;color:#ff4444;margin:0 30px;text-shadow:0 0 30px #ff4444;}
+#vsCountdown{font-size:36px;margin-top:40px;color:#ffd700;}
+#vsContainer{display:flex;align-items:center;justify-content:center;}
+#winnerOverlay{background:rgba(0,0,0,0.88);z-index:55;}
+#winnerOverlay h2{font-size:52px;font-weight:900;text-shadow:0 0 40px gold;}
+#winnerOverlay p{font-size:26px;color:#aaa;margin-top:10px;}
+#eloTable{position:absolute;top:20px;right:20px;background:rgba(0,0,0,0.55);padding:6px 8px;color:white;width:180px;max-height:60vh;overflow-y:auto;border-radius:8px;display:none;font-size:12px;line-height:1.2;z-index:20;}
+#profileModal{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.85);z-index:200;justify-content:center;align-items:center;}
+#profileCard{background:#1a1a2e;border:1px solid rgba(255,255,255,0.2);border-radius:16px;padding:28px 36px;color:white;min-width:300px;max-width:380px;position:relative;}
+#profileCard h2{margin-bottom:16px;font-size:26px;}
+.prof-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.08);}
+.prof-label{color:#aaa;font-size:15px;}
+.prof-val{font-size:15px;font-weight:bold;}
+#profileClose{position:absolute;top:12px;right:16px;cursor:pointer;font-size:22px;color:#aaa;}
+#coinHUD{display:none;position:absolute;top:20px;left:50%;transform:translateX(-50%);color:white;font-size:28px;font-weight:bold;background:rgba(0,0,0,0.6);padding:10px 24px;border-radius:12px;text-align:center;z-index:20;pointer-events:none;}
+#onlineStatus{font-size:18px;color:#aaa;margin-bottom:20px;}
+#lbTable{width:400px;max-height:60vh;overflow-y:auto;margin-top:14px;}
+.lb-row{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.08);font-size:16px;}
+.lb-row:first-child{font-weight:bold;color:#ffd700;}
+.lb-me{background:rgba(0,255,136,0.1);}
+input[type=text],input[type=number]{padding:12px 18px;font-size:18px;border-radius:10px;border:1px solid #555;background:#222;color:white;width:260px;margin:8px 0;}
+#accountInfo{font-size:16px;color:#aaa;margin-top:8px;}
+#opponentInfo,#spectatorInfo{position:absolute;bottom:20px;left:20px;color:white;font-size:18px;background:rgba(0,0,0,0.65);padding:15px 20px;border-radius:12px;display:none;line-height:1.6;border:1px solid rgba(255,255,255,0.15);z-index:20;}
+#pingDisplay{position:absolute;top:20px;right:210px;color:#aaa;font-size:13px;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:8px;display:none;z-index:20;pointer-events:none;}
+#onlineHUD{position:absolute;top:20px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;background:rgba(0,0,0,0.7);padding:8px 20px;border-radius:12px;color:white;font-size:16px;z-index:20;pointer-events:none;border:1px solid rgba(255,255,255,0.15);}
+.online-names{display:flex;gap:20px;font-size:20px;font-weight:bold;}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="gameWrap">
+    <button id="homeBtn" onclick="confirmHome()">🏠 Home</button>
+
+    <div id="ui">
+  Time: <span id="time">0</span>s<br>
+  Record: <span id="record">0</span>s<br>
+  Balls: <span id="balls">0</span><br>
+  Mode: <span id="mode">-</span>
+</div>
+
+    <div id="eloTable">
+      <b>ELO LIVE</b>
+      <div id="eloList"></div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+        <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('best')">BEST TV</button>
+        <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('random')">RANDOM TV</button>
+        <button style="font-size:13px;padding:6px 10px;" onclick="setTVMode('target')">TARGET TV</button>
+        <button style="font-size:13px;padding:6px 10px;" onclick="resumePlay()">▶ RESUME</button>
+      </div>
+    </div>
+
+    <div id="menu">
+      <div id="onlinePlayersPanel" style="width: 320px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 400px; overflow-y: auto; flex-shrink: 0;">
+        <b>🟢 Active Players:</b><br>
+        <span style="color: #888;">Connecting presence service...</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
+        <h1>DarkOnBalls</h1>
+        <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
+        <button onclick="startOnlineTV()">📺 Best Online TV</button>
+        <button onclick="startGame('single')">Singleplayer</button>
+        <button onclick="startGame('multi')">Multiplayer (local)</button>
+        <button onclick="startGame('ai')">AI Spectate</button>
+        <button onclick="startGame('tournament')">1vs1 Tournament (Offline)</button>
+        <button onclick="startGame('coin')">🪙 Coin Hunt</button>
+        <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
+        <button onclick="openSettings()">Settings</button>
+        <button onclick="resetRecord()" style="font-size:14px;padding:8px 20px;margin-top:10px;">Reset Record</button>
+      </div>
+    </div>
+
+    <div id="settings">
+      <h2>Settings</h2>
+      <label>Start Balls</label>
+      <input id="startBalls" type="number" value="3" min="1" max="20"><br><br>
+      <label>Spawn Time (s)</label>
+      <input id="spawnTime" type="number" value="5" min="1" max="30"><br><br>
+      <label>Ball Speed</label>
+      <select id="ballSpeed">
+        <option value="0.3">Slow</option>
+        <option value="0.5" selected>Normal</option>
+        <option value="0.8">Fast</option>
+        <option value="1">Extreme</option>
+      </select><br><br>
+      <label>AI Bots</label>
+      <input id="botCount" type="number" value="10" min="2"><br><br>
+      <label>Ranking System</label>
+      <select id="rankingMode">
+        <option value="points" selected>Points</option>
+        <option value="elo">ELO</option>
+      </select><br><br>
+      <button onclick="saveSettings()">Save</button>
+      <button onclick="backFromSettings()">← Back</button>
+    </div>
+
+    <div id="accountScreen">
+      <h2>🌐 Online Account</h2>
+      <div id="accountContent"></div>
+    </div>
+
+    <div id="leaderboardScreen">
+      <h2>🏆 Online Leaderboard</h2>
+      <div id="lbTable">
+        <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
+      </div>
+      <br><button onclick="showScreen('menu')">← Back</button>
+    </div>
+
+    <div id="onlineWait">
+      <h2>🌐 Online 1v1</h2>
+      <div id="onlineStatus">Searching for opponent…</div>
+     <div style="font-size:13px;opacity:0.8;margin-top:6px;">
+  Matchmaking may take up to 10 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.
+</div>
+      <div id="onlineSearchAnim" style="font-size:40px;margin:10px 0;">⏳</div>
+      <button onclick="cancelOnline()">Cancel</button>
+    </div>
+
+    <div id="vsScreen">
+      <div id="vsContainer">
+        <div style="text-align:center;">
+          <div class="vs-name" id="vsName1">-</div>
+          <div class="vs-elo"  id="vsElo1">ELO -</div>
+          <div id="vsRank1" style="font-size:18px;color:#ffd700;margin-top:8px;">Rank: -</div>
+        </div>
+        <div class="vs-divider">VS</div>
+        <div style="text-align:center;">
+          <div class="vs-name" id="vsName2">-</div>
+          <div class="vs-elo"  id="vsElo2">ELO -</div>
+          <div id="vsRank2" style="font-size:18px;color:#ffd700;margin-top:8px;">Rank: -</div>
+        </div>
+      </div>
+      <div id="vsCountdown">Starting in 3…</div>
+    </div>
+
+    <div id="winnerOverlay">
+      <h2 id="winnerText">🏆 Winner!</h2>
+      <p  id="winnerEloChange"></p>
+      <div style="display:flex;gap:16px;margin-top:30px;" id="winnerButtons"></div>
+    </div>
+
+    <div id="gameOver">
+      <h2>GAME OVER</h2>
+      <p>Survived: <span id="finalTime">0</span>s</p>
+      <button onclick="restartGame()">Play Again</button>
+      <button onclick="backToMenu()">🏠 Menu</button>
+      <div id="ranking" style="position:absolute;top:20px;right:20px;color:white;font-size:18px;text-align:left;max-height:90vh;overflow:auto;"></div>
+    </div>
+
+    <div id="eloResult"></div>
+    <canvas id="game"></canvas>
+    <div id="coinHUD">🪙 <span id="coinScore">0</span> &nbsp;|&nbsp; ⏱ <span id="coinTime">60</span>s</div>
+    <div id="pingDisplay">📶 -- ms</div>
+    <div id="onlineHUD">
+  <div class="online-names">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="onlineNameMe" style="color:#00ff88">Me</span>
+      <span id="onlineRankMe" style="color:#ffd700;font-size:13px;">(#-)</span>
+    </div>
+    <span style="color:#aaa">VS</span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="onlineNameOpp" style="color:#ff8844">Opp</span>
+      <span id="onlineRankOpp" style="color:#ffd700;font-size:13px;">(#-)</span>
+    </div>
+  </div>
+  <div id="onlineScoreHUD" style="font-size: 22px; font-weight: bold; margin-top: 6px; color: #ffd700; text-align: center;">0 - 0</div>
+  <div id="onlineStatusHUD" style="color:#aaa;font-size:13px;margin-top:4px;">Connecting…</div>
+</div>
+
+    <div id="opponentInfo"><div id="opponentText"></div></div>
+    <div id="spectatorInfo"><b>👁 Spectator Mode</b><br><div id="spectatorText"></div></div>
+
+    <div id="profileModal">
+      <div id="profileCard">
+        <span id="profileClose" onclick="closeProfile()">✕</span>
+        <h2  id="profileName"></h2>
+        <div id="profileStats"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  CANVAS — FIXED VIRTUAL RESOLUTION
+// ═══════════════════════════════════════════════
+const V_W = 1280;
+const V_H = 720;
+
+const stage   = document.getElementById("stage");
+const gameWrap= document.getElementById("gameWrap");
+const canvas  = document.getElementById("game");
+const ctx     = canvas.getContext("2d");
+
+let scale = 1;
+
+function W() { return V_W; }
+function H() { return V_H; }
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  gameWrap.style.width  = "100%";
+  gameWrap.style.height = "100%";
+  canvas.style.width    = "100%";
+  canvas.style.height   = "100%";
+  canvas.width  = Math.round(V_W * dpr);
+  canvas.height = Math.round(V_H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function screenToVirtual(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (clientX - rect.left) * (V_W / rect.width),
+    y: (clientY - rect.top)  * (V_H / rect.height)
+  };
+}
+
+window.addEventListener("resize", resize);
+resize();
+
+// ═══════════════════════════════════════════════
+//  ROUNDRECT POLYFILL
+// ═══════════════════════════════════════════════
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    this.beginPath();
+    this.moveTo(x + r, y);
+    this.lineTo(x + w - r, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r);
+    this.lineTo(x + w, y + h - r);
+    this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    this.lineTo(x + r, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r);
+    this.lineTo(x, y + r);
+    this.quadraticCurveTo(x, y, x + r, y);
+    this.closePath();
+  };
+}
+
+// ═══════════════════════════════════════════════
+//  FIREBASE HELPERS
+// ═══════════════════════════════════════════════
+let fbReady = false;
+window.addEventListener("firebaseReady", async () => {
+  fbReady = true;
+  if (onlineAccount) {
+    await pushAccountToFirebase();
+    const statusRef = dbRef(`players/${onlineAccount.name}/status`);
+    window._firebaseOnDisconnect(statusRef).set("offline");
+    await updatePlayerStatus("Idle in Menu");
+  }
+  startMenuPresenceListener();
+});
+
+function dbRef(path)           { return window._firebaseRef(window._firebaseDB, path); }
+async function dbGet(path)     { return (await window._firebaseGet(dbRef(path))).val(); }
+async function dbSet(path, v)  { return window._firebaseSet(dbRef(path), v); }
+async function dbUpdate(path,v){ return window._firebaseUpdate(dbRef(path), v); }
+function dbOn(path, cb) {
+  return window._firebaseOnValue(dbRef(path), snap => cb(snap.val()));
+}
+async function getHeadToHeadScore(p1, p2) {
+  const h2hKey = [p1, p2].sort().join("__VS__");
+  const score = await dbGet(`headToHead/${h2hKey}`);
+  return score || { [p1]: 0, [p2]: 0 };
+}
+
+// FIXED: Update player status in Firebase
+async function updatePlayerStatus(statusText) {
+  if (!fbReady || !onlineAccount) return;
+  await dbUpdate(`players/${onlineAccount.name}`, {
+    status: statusText,
+    lastActive: Date.now()
+  });
+}
+
+// FIXED: Enhanced online players panel with dynamic status
+let menuPresenceUnsubscribe = null;
+function startMenuPresenceListener() {
+  if (menuPresenceUnsubscribe) { menuPresenceUnsubscribe(); menuPresenceUnsubscribe = null; }
+  if (!fbReady) return;
+  menuPresenceUnsubscribe = dbOn("players", (playersData) => {
+    const panel = document.getElementById("onlinePlayersPanel");
+    if (!panel) return;
+    if (!playersData) {
+      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
+      return;
+    }
+    const activeList = Object.values(playersData).filter(p => 
+      p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
+    );
+    if (activeList.length === 0) {
+      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
+      return;
+    }
+    let html = "<b>🟢 Active Players:</b><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
+    activeList.forEach(p => {
+      const isMe = onlineAccount && p.name === onlineAccount.name;
+      
+      // ENHANCED: Dynamic status with icons and colors
+      let statusText = p.status || "Idle in Menu";
+      let statusColor = "#ffd700";
+      
+      if (statusText.includes("Searching")) {
+        statusColor = "#00bfff";
+        statusText = "🔍 Searching...";
+      } else if (statusText.includes("Playing")) {
+        statusColor = "#00ff88";
+        statusText = "⚔️ In Match";
+      } else if (statusText.includes("Spectating")) {
+        statusColor = "#ff88ff";
+        statusText = "👁 Spectating";
+      } else if (statusText.includes("Menu") || statusText.includes("Idle")) {
+        statusColor = "#ffd700";
+        statusText = "⏳ In Menu";
+      }
+      
+      html += `
+        <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${p.name}${isMe ? ' (You)' : ''}</span>
+          <span style="color: ${statusColor}; font-style: italic;">${statusText}</span>
+        </div>
+      `;
+    });
+    html += "</div>";
+    panel.innerHTML = html;
+  });
+}
+
+async function recordHeadToHeadWin(winner, loser) {
+  const h2hKey = [winner, loser].sort().join("__VS__");
+  const score = await getHeadToHeadScore(winner, loser);
+  score[winner] = (score[winner] || 0) + 1;
+  score[loser] = score[loser] || 0;
+  await dbSet(`headToHead/${h2hKey}`, score);
+  return score;
+}
+
+async function dbRemove(path)  { return window._firebaseRemove(dbRef(path)); }
+
+// ═══════════════════════════════════════════════
+//  ACCOUNT
+// ═══════════════════════════════════════════════
+function sanitizeAccount(acc) {
+  if (!acc) return null;
+  acc.elo = acc.elo ?? 1500;
+  acc.wins = acc.wins ?? 0;
+  acc.losses = acc.losses ?? 0;
+  acc.highestElo = acc.highestElo ?? acc.elo;
+  acc.lowestElo = acc.lowestElo ?? acc.elo;
+  acc.currentStreak = acc.currentStreak ?? 0;
+  acc.bestStreak = acc.bestStreak ?? 0;
+  acc.totalEloGained = acc.totalEloGained ?? 0;
+  acc.totalEloLost = acc.totalEloLost ?? 0;
+  acc.bestWinChange = acc.bestWinChange ?? 0;
+  acc.bestWinOpp = acc.bestWinOpp ?? "";
+  acc.worstLossChange = acc.worstLossChange ?? 0;
+  acc.worstLossOpp = acc.worstLossOpp ?? "";
+  return acc;
+}
+
+let onlineAccount = null;
+try { 
+  onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null"); 
+  if (onlineAccount) onlineAccount = sanitizeAccount(onlineAccount);
+} catch(e) {}
+
+function saveAccountLocal() {
+  if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
+}
+
+async function pushAccountToFirebase() {
+  if (!fbReady || !onlineAccount) return;
+  await dbSet("players/" + onlineAccount.name, {
+    name: onlineAccount.name,
+    elo: onlineAccount.elo,
+    wins: onlineAccount.wins,
+    losses: onlineAccount.losses,
+    highestElo: onlineAccount.highestElo,
+    lowestElo: onlineAccount.lowestElo,
+    currentStreak: onlineAccount.currentStreak,
+    bestStreak: onlineAccount.bestStreak,
+    totalEloGained: onlineAccount.totalEloGained,
+    totalEloLost: onlineAccount.totalEloLost,
+    bestWinChange: onlineAccount.bestWinChange,
+    bestWinOpp: onlineAccount.bestWinOpp,
+    worstLossChange: onlineAccount.worstLossChange,
+    worstLossOpp: onlineAccount.worstLossOpp,
+    updatedAt: Date.now()
+  });
+}
+
+async function changeUsername(newName) {
+  if (!fbReady || !onlineAccount) return;
+  newName = newName.trim();
+  if (newName.length < 2) { alert("Name must be at least 2 characters."); return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(newName)) { alert("Only letters, numbers, _ and - allowed."); return; }
+  const oldName = onlineAccount.name;
+  if (oldName === newName) return;
+  const existing = await dbGet("players/" + newName);
+  if (existing) { alert("This name is already taken!"); return; }
+  await dbRemove("players/" + oldName);
+  onlineAccount.name = newName;
+  saveAccountLocal();
+  await pushAccountToFirebase();
+  alert("Name successfully changed!");
+  if (document.getElementById("leaderboardScreen").style.display === "flex") {
+    loadLeaderboard();
+  }
+}
+
+window.triggerNameChange = function() {
+  if (!onlineAccount) { alert("You need to create an account first!"); return; }
+  const newName = prompt("Enter your new username:", onlineAccount.name);
+  if (newName !== null && newName.trim() !== "") {
+    changeUsername(newName);
+  }
+};
+
+// ═══════════════════════════════════════════════
+//  SETTINGS
+// ═══════════════════════════════════════════════
+let startBallCount      = 3;
+let spawnDelay          = 5000;
+let ballSpeedMultiplier = 0.5;
+let playerRadiusSetting = 18;
+let aiBotCount          = 10;
+let rankingMode         = "points";
+
+const ONLINE_START_BALLS = 0;
+const ONLINE_SPAWN_MS    = 1000;
+const ONLINE_BALL_SPEED  = 0.5;
+
+function openSettings() { showScreen("settings"); }
+function saveSettings() {
+  startBallCount      = Number(document.getElementById("startBalls").value);
+  spawnDelay          = Number(document.getElementById("spawnTime").value) * 1000;
+  ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
+  aiBotCount          = Number(document.getElementById("botCount").value);
+  rankingMode         = document.getElementById("rankingMode").value;
+  showScreen("menu");
+}
+
+// FIX: Back from settings without saving
+function backFromSettings() {
+  document.getElementById("settings").style.display = "none";
+  document.getElementById("menu").style.display = "flex";
+}
+
+// FIX: Reset record
+function resetRecord() {
+  if (confirm("Reset your survival record?")) {
+    record = 0;
+    localStorage.setItem("fingerDodgeRecord", "0");
+    document.getElementById("record").textContent = "0";
+  }
+}
+
+// FIX: Back to menu from game over
+function backToMenu() {
+  clearAllTimers();
+  if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
+  running = false;
+  balls = [];
+  players = [];
+  document.getElementById("gameOver").style.display = "none";
+  document.getElementById("menu").style.display = "flex";
+  document.getElementById("eloTable").style.display = "none";
+  document.getElementById("spectatorInfo").style.display = "none";
+  document.getElementById("coinHUD").style.display = "none";
+  document.getElementById("onlineHUD").style.display = "none";
+  if (fbReady && onlineAccount) {
+    updatePlayerStatus("Idle in Menu");
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let balls = [], players = [], ranking = [], eliminated = [];
+let running = false, startTime = 0;
+let spawnTimeoutId = null, survivalIntervalId = null, coinIntervalId = null;
+let mode = "single";
+let tournamentRounds = 100, currentRound = 1;
+let participants = [], matches = [], waitingQueue = [];
+let playerMatchMap = new Map(), recentOpponents = new Map();
+let keys = {};
+
+let spectateModeActive = false, spectateMatchId = null;
+let followMode = "none", targetName = null, humanRemovedFromQueue = false;
+
+let coins = [], coinScorePlayer = 0, coinTimeLeft = 60;
+let mirrorBot = null;
+let survivalWave = 1;
+
+// ═══════════════════════════════════════════════
+//  ONLINE STATE
+// ═══════════════════════════════════════════════
+let onlineMatchId        = null;
+let onlineRole           = null;
+let onlineOpponent       = null;
+let onlineUnsubscribes   = [];
+let onlineSearchInterval = null;
+let onlineResultHandled  = false;
+let onlineIsHost         = false;
+let onlineVsBot          = false;
+let onlineTvUnsubscribe = null;
+let onlineTvInnerUnsubscribe = null;
+let onlineTvCurrentMatchId = null;
+
+let onlineRng             = null;
+let onlineBallSpawnTimer  = 0;
+let onlineSearchStartTime = 0;
+let onlineBotMatchTimeout = null;
+let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
+let onlineSimTick = 0;
+
+let record = parseInt(localStorage.getItem("fingerDodgeRecord") || "0");
+document.getElementById("record").textContent = record;
+
+let matchBanner = null;
+
+// ═══════════════════════════════════════════════
+//  HOME / EXIT
+// ═══════════════════════════════════════════════
+function confirmHome() {
+  if (confirm("Return to main menu?")) exitToMenu();
+}
+
+function exitToMenu() {
+  cleanupOnline();
+  setTimeout(() => {
+    window.location.reload();
+  }, 150);
+}
+
+function clearAllTimers() {
+  if (spawnTimeoutId)     { clearTimeout(spawnTimeoutId);      spawnTimeoutId     = null; }
+  if (survivalIntervalId) { clearInterval(survivalIntervalId); survivalIntervalId = null; }
+  if (coinIntervalId)     { clearInterval(coinIntervalId);     coinIntervalId     = null; }
+  if (onlineBotMatchTimeout) { clear
