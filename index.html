@@ -631,6 +631,11 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 #chatPanel,#onlinePlayersPanel{width:260px!important;}
 #onlinePlayersPanel{height:400px;max-height:400px;}
 @media (max-width:980px){#menu{flex-wrap:wrap;gap:20px;}#chatPanel,#onlinePlayersPanel{width:320px!important;}}
+
+body.ingame::before,body.ingame::after{display:none;}
+body.mode-online #homeBtn{display:none!important;}
+.menuPage{display:flex;flex-direction:column;align-items:center;}
+#accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 </style>
 </head>
 <body>
@@ -659,6 +664,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
     </div>
 
          <div id="menu">
+      <button id="accountBtn" onclick="openAccountScreen()">👤 Log in / Sign up</button>
       <!-- LINKS: Global Chat -->
       <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
         <b>💬 Global Chat</b>
@@ -674,16 +680,25 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
       <!-- CENTER: main menu -->
       <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
         <h1>DarkOnBalls</h1>
-        <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
-        <button onclick="startOnlineTV()">📺 Best Online TV</button>
-        <button onclick="startGame('single')">Singleplayer</button>
-        <button onclick="startGame('multi')">Multiplayer (local)</button>
-        <button onclick="startGame('ai')">AI Spectate</button>
-        <button onclick="startGame('tournament')">1vs1 Tournament (Offline)</button>
-        <button onclick="startGame('coin')">🪙 Coin Hunt</button>
-        <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
-        <button onclick="openAccountScreen()">👤 Account</button>
-        <button onclick="openSettings()">Settings</button>
+        <div id="menuMain" class="menuPage">
+          <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
+          <button onclick="showMenuPage('menuOffline')">🎮 Offline</button>
+          <button onclick="openSettings()">⚙️ Settings</button>
+        </div>
+        <div id="menuOnline" class="menuPage" style="display:none">
+          <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
+          <button onclick="startOnlineTV()">📺 Best Online TV</button>
+          <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
+          <button onclick="showMenuPage('menuMain')">← Back</button>
+        </div>
+        <div id="menuOffline" class="menuPage" style="display:none">
+          <button onclick="startGame('single')">Singleplayer</button>
+          <button onclick="startGame('multi')">Multiplayer (local)</button>
+          <button onclick="startGame('ai')">AI Spectate</button>
+          <button onclick="startGame('tournament')">1vs1 Tournament</button>
+          <button onclick="startGame('coin')">🪙 Coin Hunt</button>
+          <button onclick="showMenuPage('menuMain')">← Back</button>
+        </div>
       </div>
 
       <!-- RECHTS: Online Players -->
@@ -777,6 +792,14 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
     <div id="winnerOverlay">
       <h2 id="winnerText">🏆 Winner!</h2>
       <p  id="winnerEloChange"></p>
+      <div id="postChat" style="display:none;flex-direction:column;width:340px;max-width:90vw;margin-top:18px;background:rgba(16,18,26,0.8);border:1px solid var(--line);border-left:3px solid var(--neon-cyan);border-radius:12px;padding:10px;font-size:13px;">
+        <b>💬 Chat with opponent <span style="color:#8b93a6;font-weight:400;">(not saved)</span></b>
+        <div id="postChatMsgs" style="height:110px;overflow-y:auto;margin:6px 0;display:flex;flex-direction:column;gap:4px;"></div>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="postChatInput" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:7px 9px;font-size:13px;">
+          <button onclick="sendPostChat()" style="margin:0;padding:7px 12px;font-size:13px;">Send</button>
+        </div>
+      </div>
       <div style="display:flex;gap:16px;margin-top:30px;" id="winnerButtons"></div>
     </div>
 
@@ -1540,6 +1563,7 @@ let onlineSearchStartTime = 0;
 let onlineBotMatchTimeout = null;
 let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
 let onlineSimTick = 0;
+let onlineRound = 0, postUnsub = null, rematchSent = false, lastPostChat = 0;
 let onlineBallIv = null;
 
 let record = parseInt(localStorage.getItem("fingerDodgeRecord") || "0");
@@ -1617,12 +1641,22 @@ const ALL_SCREENS = [
   "onlineWait","vsScreen","winnerOverlay","gameOver"
 ];
 
+function showMenuPage(id) {
+  ["menuMain","menuOnline","menuOffline"].forEach(p => { const el = document.getElementById(p); if (el) el.style.display = (p === id) ? "flex" : "none"; });
+}
+function updateAccountBtn() {
+  const b = document.getElementById("accountBtn");
+  if (b) b.textContent = onlineAccount ? "👤 " + onlineAccount.name : "👤 Log in / Sign up";
+}
+setTimeout(updateAccountBtn, 0);
 window.showScreen = function(id) {
   if (id === "onlineFlow") { showScreen_onlineFlow(); return; }
   ALL_SCREENS.forEach(s => {
     const el = document.getElementById(s);
     if (el) el.style.display = (s === id) ? "flex" : "none";
   });
+  document.body.classList.remove("ingame", "mode-online");
+  if (id === "menu") updateAccountBtn();
   const hideHome = ["menu","settings","accountScreen","leaderboardScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
 };
@@ -1834,7 +1868,7 @@ async function createAccount() {
     await updatePlayerStatus("Idle in Menu");
     startMenuPresenceListener();
 
-    enterOnlineQueue();
+    showScreen("menu");
   } catch(e) {
     if (e && e.code === "auth/email-already-in-use") info.textContent = "Name already taken.";
     else if (e && e.code === "auth/weak-password")   info.textContent = "Password is too weak (min 6 characters).";
@@ -1930,7 +1964,7 @@ function cleanupOnline() {
     RPC.removeOwnInvite().catch(() => {});
   }
   if (fbReady && onlineMatchId && !onlineVsBot) {
-    RPC.updateMatch(onlineMatchId, { status: "abandoned" }).catch(() => {});
+    RPC.updateMatch(onlineMatchId, { status: "abandoned", postChat: null }).catch(() => {});
   }
   onlineMatchId       = null;
   onlineRole          = null;
@@ -2197,6 +2231,7 @@ function joinMatch(matchId, opp, matchData) {
   onlineResultHandled = false;
   onlineVsBot         = false;
 
+  onlineRound  = matchData.round || 0;
   onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
   onlineIsHost = (onlineRole === "p1");
 
@@ -2286,6 +2321,7 @@ function makeLCG(seed) {
 function startOnlineGame(matchData) {
   hideAllScreensForGame();
   mode    = "online";
+  document.body.classList.add("mode-online");
   balls   = [];
   players = [];
   eliminated = [];
@@ -2441,7 +2477,8 @@ function startOnlineGame(matchData) {
   }).catch(() => {});
 
   const pingHistory = [];
-  const pingIv = setInterval(async () => {
+  if (window._pingIvOld) clearInterval(window._pingIvOld);
+  const pingIv = window._pingIvOld = setInterval(async () => {
     if (!running || mode !== "online") { clearInterval(pingIv); return; }
     const t0 = Date.now();
     try {
@@ -2777,25 +2814,93 @@ function showWinnerOverlay(winnerName, eloChange) {
 
   const btns = document.getElementById("winnerButtons");
   btns.innerHTML = "";
-  ["🔄 Rematch", "🔍 New Opponent"].forEach(label => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.onclick = () => {
-      document.getElementById("winnerOverlay").style.display = "none";
-      cleanupOnline();
-      enterOnlineQueue();
-    };
-    btns.appendChild(b);
-  });
-  const home = document.createElement("button");
-  home.textContent = "🏠 Home";
-  home.onclick = () => {
-    document.getElementById("winnerOverlay").style.display = "none";
-    exitToMenu();
-  };
-  btns.appendChild(home);
+  rematchSent = false;
+  const hideOverlay = () => { document.getElementById("winnerOverlay").style.display = "none"; };
+  const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; btns.appendChild(b); return b; };
+  mk("🔄 Rematch", requestRematch).id = "rematchBtn";
+  mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
+  mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
+
+  document.getElementById("postChat").style.display = onlineVsBot ? "none" : "flex";
+  document.getElementById("postChatMsgs").innerHTML = "";
   document.getElementById("winnerOverlay").style.display = "flex";
+
+  if (!onlineVsBot && fbReady && onlineMatchId) {
+    if (postUnsub) { try { postUnsub(); } catch(e) {} }
+    postUnsub = RPC.onMatch(onlineMatchId, handlePostMatch);
+    onlineUnsubscribes.push(postUnsub);
+  }
 }
+
+function requestRematch() {
+  if (onlineVsBot) {
+    document.getElementById("winnerOverlay").style.display = "none";
+    cleanupOnline();
+    startBotMatch();
+    return;
+  }
+  if (!onlineMatchId || rematchSent) return;
+  rematchSent = true;
+  RPC.updateMatch(onlineMatchId, { ["rematch_" + onlineRole]: true }).catch(() => {});
+  document.getElementById("rematchBtn").textContent = "⏳ Waiting for opponent…";
+}
+
+function handlePostMatch(d) {
+  if (!d) return;
+  const box = document.getElementById("postChatMsgs");
+  box.innerHTML = "";
+  const list = d.postChat ? Object.values(d.postChat).sort((x, y) => (x.ts || 0) - (y.ts || 0)) : [];
+  for (const m of list) {
+    const row = document.createElement("div");
+    const nm = document.createElement("b");
+    nm.textContent = m.name + ": ";
+    nm.style.color = (m.name === onlineAccount.name) ? "#00ff88" : "#ff8844";
+    const tx = document.createElement("span");
+    tx.textContent = m.text;
+    tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+    row.append(nm, tx);
+    box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
+
+  const rb = document.getElementById("rematchBtn");
+  const oppRole = onlineRole === "p1" ? "p2" : "p1";
+  if (rb) {
+    if (d.status === "abandoned") { rb.textContent = "Opponent left"; rb.disabled = true; }
+    else if (d["rematch_" + onlineRole]) rb.textContent = "⏳ Waiting for opponent…";
+    else if (d["rematch_" + oppRole]) rb.textContent = "🔄 Accept Rematch";
+  }
+  if (d.status === "abandoned") return;
+
+  // Beide wollen Rematch -> Host setzt das Match zurück (neuer Seed)
+  if (onlineIsHost && d.rematch_p1 && d.rematch_p2) {
+    RPC.updateMatch(onlineMatchId, {
+      status: "waiting", winner: null, eloChange: null,
+      p1State: null, p2State: null, ballState: null, p1Ready: null, p2Ready: null,
+      rematch_p1: null, rematch_p2: null, postChat: null,
+      seed: Math.floor(Math.random() * 1000000), round: (d.round || 0) + 1
+    }).catch(() => {});
+  }
+  if ((d.round || 0) > onlineRound && d.status === "waiting") {
+    onlineRound = d.round;
+    const u = [...onlineUnsubscribes]; onlineUnsubscribes = []; postUnsub = null;
+    u.forEach(f => { try { f(); } catch(e) {} });
+    document.getElementById("winnerOverlay").style.display = "none";
+    onlineResultHandled = false;
+    showVSScreen(onlineAccount.name, onlineAccount.elo, onlineOpponent.name, onlineOpponent.elo, () => startOnlineGame(d));
+  }
+}
+
+function sendPostChat() {
+  const inp = document.getElementById("postChatInput");
+  const text = inp.value.trim();
+  if (!text || !fbReady || !onlineMatchId || onlineVsBot || Date.now() - lastPostChat < 600) return;
+  lastPostChat = Date.now();
+  inp.value = "";
+  RPC.setMatchPath(onlineMatchId, "postChat/" + Date.now() + "_" + onlineRole,
+    { name: onlineAccount.name, text: text.slice(0, 200), ts: Date.now() }).catch(() => {});
+}
+document.getElementById("postChatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendPostChat(); });
 
 // ═══════════════════════════════════════════════
 //  AI
@@ -3061,6 +3166,7 @@ function startGame(selectedMode) {
   document.getElementById("onlineHUD").style.display     = "none";
 
   mode = selectedMode;
+  document.body.classList.remove("mode-online");
   document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
 
   if (mode === "tournament") {
@@ -3133,6 +3239,7 @@ function hideAllScreensForGame() {
     if (el) el.style.display = "none";
   });
   document.getElementById("homeBtn").style.display = "block";
+  document.body.classList.add("ingame");
 }
 
 // ═══════════════════════════════════════════════
