@@ -323,7 +323,11 @@ body::after{
 }
 canvas{
   display:block;touch-action:none;-webkit-user-select:none;user-select:none;
-  width:100%;height:100%;
+}
+#game{
+  position:absolute;left:50%;top:50%;
+  background:#0c0c14;
+  box-shadow:0 0 0 2px rgba(0,255,136,0.28), 0 0 50px rgba(0,255,136,0.08);
 }
 
 #ui{
@@ -377,7 +381,7 @@ button:active{transform:translateY(0) scale(.98);}
 }
 #homeBtn:hover{background:rgba(255,255,255,0.16);color:#fff;border-color:rgba(0,255,136,0.45);transform:translateX(-50%) translateY(-1px);}
 
-#menu,#settings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
+#menu,#settings,#offlineSettings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
   position:absolute;inset:0;display:none;flex-direction:column;
   justify-content:center;align-items:center;
   background:radial-gradient(circle at 50% 20%, #15151f, #08080c 75%);
@@ -399,7 +403,7 @@ button:active{transform:translateY(0) scale(.98);}
   touch-action:pan-y;
 }
 
-#settings{
+#settings,#offlineSettings{
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
   touch-action:pan-y;
@@ -697,6 +701,7 @@ body.mode-online #homeBtn{display:none!important;}
           <button onclick="startGame('ai')">AI Spectate</button>
           <button onclick="startGame('tournament')">1vs1 Tournament</button>
           <button onclick="startGame('coin')">🪙 Coin Hunt</button>
+          <button onclick="openOfflineSettings()">⚙️ Offline Settings</button>
           <button onclick="showMenuPage('menuMain')">← Back</button>
         </div>
       </div>
@@ -710,7 +715,35 @@ body.mode-online #homeBtn{display:none!important;}
 
 
     <div id="settings">
-      <h2>Settings</h2>
+      <h2>⚙️ Settings</h2>
+      <p style="opacity:.6;font-size:13px;margin:-6px 0 18px;">General – applies to all modes</p>
+
+      <label>Your Ball Color</label>
+      <div id="ballPreviewWrap">
+        <canvas id="ballPreviewCanvas" width="90" height="90"></canvas>
+      </div>
+      <div id="ballColorRow"></div>
+      <br>
+
+      <label>Ball Trail Effect ✨</label><br>
+      <label class="switch">
+        <input type="checkbox" id="ballTrailToggle" onchange="setBallTrail(this.checked)">
+        <span class="slider"></span>
+      </label><br><br>
+
+      <label>Portrait Display 📱 (Online, widescreen arena)</label><br>
+      <select id="portraitModeSel" onchange="setPortraitMode(this.value)">
+        <option value="fit">Fit (small, upright)</option>
+        <option value="rotate">Rotate (bigger, tilt your head)</option>
+      </select><br><br>
+
+      <button onclick="showScreen('menu'); showMenuPage('menuMain')">← Back</button>
+    </div>
+
+    <div id="offlineSettings">
+      <h2>🎮 Offline Settings</h2>
+      <p style="opacity:.6;font-size:13px;margin:-6px 0 18px;">Only applies to offline modes (online uses fixed rules)</p>
+
       <label>Start Balls</label>
       <input id="startBalls" type="number" value="3" min="1" max="20"><br><br>
       <label>Spawn Time (s)</label>
@@ -730,21 +763,8 @@ body.mode-online #homeBtn{display:none!important;}
         <option value="elo">ELO</option>
       </select><br><br>
 
-      <label>Your Ball Color</label>
-      <div id="ballPreviewWrap">
-        <canvas id="ballPreviewCanvas" width="90" height="90"></canvas>
-      </div>
-      <div id="ballColorRow"></div>
-      <br>
-
-      <label>Ball Trail Effect ✨</label><br>
-      <label class="switch">
-        <input type="checkbox" id="ballTrailToggle" onchange="setBallTrail(this.checked)">
-        <span class="slider"></span>
-      </label><br><br>
-
       <button onclick="saveSettings()">Save</button>
-      <button onclick="showScreen('menu')">← Back</button>
+      <button onclick="showScreen('menu'); showMenuPage('menuOffline')">← Back</button>
     </div>
 
     <div id="accountScreen">
@@ -851,39 +871,89 @@ body.mode-online #homeBtn{display:none!important;}
 // ═══════════════════════════════════════════════
 //  CANVAS — FIXED VIRTUAL RESOLUTION (identical on every device)
 // ═══════════════════════════════════════════════
-const V_W = 1280;
-const V_H = 720;
+// Online-Matches brauchen für beide Spieler exakt dieselbe Arena -> feste 1280x720.
+// Alle Offline-Modi nutzen dagegen den GANZEN Bildschirm (kein Balken, keine Ovale).
+const FIXED_W = 1280, FIXED_H = 720;      // Referenz (längere Seite = 1280) + Online-Querformat
+const PORT_W  = 640,  PORT_H  = 1280;      // Online-Hochformat (1:2, passt zu modernen iPhones)
+let onlineArena = "land";                  // "land" | "port" – wird pro Match festgelegt
+let arenaW = FIXED_W, arenaH = FIXED_H;
+function isPortraitScreen() { return window.innerHeight > window.innerWidth; }
 
 const stage   = document.getElementById("stage");
 const gameWrap= document.getElementById("gameWrap");
 const canvas  = document.getElementById("game");
 const ctx     = canvas.getContext("2d");
 
-let scale = 1;
+let scale = 1;   // CSS-Pixel pro virtueller Einheit
 
-function W() { return V_W; }
-function H() { return V_H; }
+function fixedArena() {
+  try { return mode === "online" || mode === "online_tv"; } catch (e) { return false; }
+}
+function W() { return fixedArena() ? (onlineArena === "port" ? PORT_W : FIXED_W) : arenaW; }
+function H() { return fixedArena() ? (onlineArena === "port" ? PORT_H : FIXED_H) : arenaH; }
+
+// Hochkant-Anzeige, nur relevant für Online (feste 16:9-Arena): "fit" oder "rotate"
+let portraitMode = localStorage.getItem("dobPortraitMode") || "fit";
+let viewRotated  = false;
+let lastLayoutKey = "";
+function layoutKey() { return fixedArena() + "|" + onlineArena + "|" + window.innerWidth + "x" + window.innerHeight; }
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  gameWrap.style.width  = "100%";
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const fixed = fixedArena();
+  lastLayoutKey = layoutKey();
+  gameWrap.style.width = "100%";
   gameWrap.style.height = "100%";
-  canvas.style.width    = "100%";
-  canvas.style.height   = "100%";
-  canvas.width  = Math.round(V_W * dpr);
-  canvas.height = Math.round(V_H * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  let cssW, cssH;
+  if (!fixed) {
+    // Voller Bildschirm, ein einziger Skalierungsfaktor -> Kreise bleiben rund.
+    // Die längere Bildschirmseite entspricht ~1280 Einheiten (wie bisher am Desktop).
+    viewRotated = false;
+    scale = Math.max(vw, vh) / FIXED_W;
+    arenaW = vw / scale;
+    arenaH = vh / scale;
+    cssW = vw; cssH = vh;
+    canvas.style.background = "transparent";
+    canvas.style.boxShadow  = "none";
+  } else {
+    const aw = W(), ah = H();
+    // Drehen nur sinnvoll: Querformat-Arena auf Hochkant-Bildschirm
+    viewRotated = (portraitMode === "rotate" && vh > vw && aw > ah);
+    scale = viewRotated ? Math.min(vh / aw, vw / ah) : Math.min(vw / aw, vh / ah);
+    cssW = Math.floor(aw * scale); cssH = Math.floor(ah * scale);
+    canvas.style.background = "#0c0c14";
+    canvas.style.boxShadow  = "0 0 0 2px rgba(0,255,136,0.28), 0 0 50px rgba(0,255,136,0.08)";
+  }
+  canvas.style.width  = cssW + "px";
+  canvas.style.height = cssH + "px";
+  canvas.style.transform = viewRotated ? "translate(-50%,-50%) rotate(90deg)" : "translate(-50%,-50%)";
+
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(canvas.width / W(), 0, 0, canvas.height / H(), 0, 0);
 }
 
 function screenToVirtual(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  return {
-    x: (clientX - rect.left) * (V_W / rect.width),
-    y: (clientY - rect.top)  * (V_H / rect.height)
-  };
+  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+  const dx = clientX - cx, dy = clientY - cy;
+  const cssW = parseFloat(canvas.style.width) || W();
+  const k = W() / cssW;                       // CSS-Pixel -> virtuelle Einheiten
+  if (viewRotated) return { x: W() / 2 + dy * k, y: H() / 2 - dx * k };
+  return { x: W() / 2 + dx * k, y: H() / 2 + dy * k };
+}
+
+function setPortraitMode(m) {
+  portraitMode = m;
+  localStorage.setItem("dobPortraitMode", m);
+  resize();
 }
 
 window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 150));
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
 resize();
 
 // ═══════════════════════════════════════════════
@@ -1513,15 +1583,42 @@ function drawBallPreview() {
   pctx.shadowBlur = 0;
 }
 
-function openSettings() { showScreen("settings"); renderBallColorUI(); }
-function saveSettings() {
-  startBallCount      = Number(document.getElementById("startBalls").value);
-  spawnDelay          = Number(document.getElementById("spawnTime").value) * 1000;
-  ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
-  aiBotCount          = Number(document.getElementById("botCount").value);
-  rankingMode         = document.getElementById("rankingMode").value;
-  showScreen("menu");
+function openSettings() { showScreen("settings"); renderBallColorUI(); const sel = document.getElementById("portraitModeSel"); if (sel) sel.value = portraitMode; }
+
+// Offline-Einstellungen (nur Offline-Modi), in localStorage gespeichert
+function openOfflineSettings() {
+  document.getElementById("startBalls").value  = startBallCount;
+  document.getElementById("spawnTime").value   = spawnDelay / 1000;
+  document.getElementById("ballSpeed").value   = String(ballSpeedMultiplier);
+  document.getElementById("botCount").value    = aiBotCount;
+  document.getElementById("rankingMode").value = rankingMode;
+  showScreen("offlineSettings");
 }
+function saveSettings() {
+  startBallCount      = Math.max(1, Number(document.getElementById("startBalls").value) || 3);
+  spawnDelay          = Math.max(1, Number(document.getElementById("spawnTime").value) || 5) * 1000;
+  ballSpeedMultiplier = Number(document.getElementById("ballSpeed").value);
+  aiBotCount          = Math.max(2, Number(document.getElementById("botCount").value) || 10);
+  rankingMode         = document.getElementById("rankingMode").value;
+  try {
+    localStorage.setItem("dobOfflineSettings", JSON.stringify({
+      startBallCount, spawnDelay, ballSpeedMultiplier, aiBotCount, rankingMode
+    }));
+  } catch(e) {}
+  showScreen("menu");
+  showMenuPage("menuOffline");
+}
+(function loadOfflineSettings() {
+  try {
+    const o = JSON.parse(localStorage.getItem("dobOfflineSettings") || "null");
+    if (!o) return;
+    if (Number.isFinite(o.startBallCount))      startBallCount      = o.startBallCount;
+    if (Number.isFinite(o.spawnDelay))          spawnDelay          = o.spawnDelay;
+    if (Number.isFinite(o.ballSpeedMultiplier)) ballSpeedMultiplier = o.ballSpeedMultiplier;
+    if (Number.isFinite(o.aiBotCount))          aiBotCount          = o.aiBotCount;
+    if (o.rankingMode === "points" || o.rankingMode === "elo") rankingMode = o.rankingMode;
+  } catch(e) {}
+})();
 
 // ═══════════════════════════════════════════════
 //  STATE
@@ -1637,7 +1734,7 @@ function clearAllTimers() {
 //  SCREEN ROUTER
 // ═══════════════════════════════════════════════
 const ALL_SCREENS = [
-  "menu","settings","accountScreen","leaderboardScreen",
+  "menu","settings","offlineSettings","accountScreen","leaderboardScreen",
   "onlineWait","vsScreen","winnerOverlay","gameOver"
 ];
 
@@ -1657,7 +1754,7 @@ window.showScreen = function(id) {
   });
   document.body.classList.remove("ingame", "mode-online");
   if (id === "menu") updateAccountBtn();
-  const hideHome = ["menu","settings","accountScreen","leaderboardScreen"].includes(id);
+  const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
 };
 
@@ -2034,7 +2131,8 @@ async function startSearchingOnline() {
   onlineSearchStartTime = Date.now();
 
   await RPC.setOwnQueueEntry({
-    uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now()
+    uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(),
+    portrait: isPortraitScreen()
   });
 
   const queueUnsub = dbOn("queue/" + myUid + "_invite", (data) => {
@@ -2101,6 +2199,8 @@ async function tryMatchmake() {
     status: "waiting",
     winner: null,
     createdAt: Date.now(),
+    // Hochformat-Arena nur, wenn BEIDE Spieler im Hochformat sind – sonst Querformat
+    arena: (isPortraitScreen() && opp.portrait === true) ? "port" : "land",
     seed: Math.floor(Math.random() * 1000000)
   };
   try {
@@ -2214,7 +2314,7 @@ async function startBotMatch() {
     "Online Bot",
     onlineOpponent.elo,
     () => {
-      startOnlineGame({ seed: Math.floor(Math.random()*1000000) });
+      startOnlineGame({ seed: Math.floor(Math.random()*1000000), arena: isPortraitScreen() ? "port" : "land" });
     }
   );
 }
@@ -2319,6 +2419,7 @@ function makeLCG(seed) {
 //  ONLINE GAME
 // ═══════════════════════════════════════════════
 function startOnlineGame(matchData) {
+  onlineArena = (matchData && matchData.arena === "port") ? "port" : "land";
   hideAllScreensForGame();
   mode    = "online";
   document.body.classList.add("mode-online");
@@ -3338,6 +3439,7 @@ const timestep = 1000 / 60;
 let accumulator = 0;
 
 function loop() {
+  if (layoutKey() !== lastLayoutKey) resize();
   const now = performance.now();
   const dt = now - lastTime;
   lastTime = now;
@@ -4278,6 +4380,8 @@ async function startOnlineTV() {
     onlineTvCurrentMatchId = bestId;
     lastPacketSeen = Date.now();
     curMeta = best;
+    onlineArena = best.arena === "port" ? "port" : "land";
+    resize();
 
     const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", best.p1);
     const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", best.p2);
