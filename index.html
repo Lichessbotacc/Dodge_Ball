@@ -1187,8 +1187,8 @@ function startMenuPresenceListener() {
       const isMe = myUid && p.uid === myUid;
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
-          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${p.name}${isMe ? ' (You)' : ''}</span>
-          <span style="color: #ffd700; font-style: italic;">${p.status}</span>
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(p.name)}${isMe ? ' (You)' : ''}</span>
+          <span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>
         </div>
       `;
     });
@@ -1258,6 +1258,16 @@ document.getElementById("chatInput").addEventListener("keydown", e => { if (e.ke
   document.addEventListener("mousemove", e => check(e.clientX, e.clientY));
   document.addEventListener("touchmove", e => { const t = e.touches[0]; if (t) check(t.clientX, t.clientY); }, { passive: true });
 })();
+
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// Heartbeat: haelt "Active Players" aktuell (Eintrag verschwindet sonst nach 2 Min) und zeigt den echten Status
+setInterval(() => {
+  if (!fbReady || !onlineAccount) return;
+  updatePlayerStatus(running ? (mode === "online" ? "In 1v1 Match" : "Playing " + mode) : "Idle in Menu").catch(() => {});
+}, 30000);
 
 function sanitizeAccount(acc) {
   if (!acc) return null;
@@ -1530,6 +1540,7 @@ let onlineSearchStartTime = 0;
 let onlineBotMatchTimeout = null;
 let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
 let onlineSimTick = 0;
+let onlineBallIv = null;
 
 let record = parseInt(localStorage.getItem("fingerDodgeRecord") || "0");
 document.getElementById("record").textContent = record;
@@ -1664,7 +1675,7 @@ async function loadLeaderboard() {
     activePlayers.forEach((p, i) => {
       const isMe = myUid && p.uid === myUid;
       lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
-        <span>#${i+1}</span><span>${p.name}</span>
+        <span>#${i+1}</span><span>${escapeHtml(p.name)}</span>
         <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
@@ -1692,7 +1703,7 @@ async function openOnlineProfile(uid) {
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
 
     document.getElementById("profileName").innerHTML =
-      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${p.name}</span>`;
+      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(p.name)}</span>`;
 
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
@@ -1707,8 +1718,8 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
 
-            <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${p.bestWinOpp || "-"}</span></div>
-      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${p.worstLossOpp || "-"}</span></div>
+            <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}</span></div>
+      <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
     `;
@@ -1907,6 +1918,7 @@ function cancelOnline() {
 
 // CHANGED: queue/invite cleanup now keyed by myUid instead of name.
 function cleanupOnline() {
+  if (onlineBallIv) { clearInterval(onlineBallIv); onlineBallIv = null; }
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
   const unsubs = [...onlineUnsubscribes];
@@ -2345,14 +2357,14 @@ function startOnlineGame(matchData) {
 
   if (onlineVsBot) {
     if (onlineIsHost) {
-      setInterval(pushBallState, 100);
+      { clearInterval(onlineBallIv); onlineBallIv = setInterval(pushBallState, 100); }
     }
     return;
   }
 
 
   if (onlineIsHost) {
-    setInterval(pushBallState, 100);
+    { clearInterval(onlineBallIv); onlineBallIv = setInterval(pushBallState, 100); }
   }
 
   // CHANGED: listens on onlineMatches/{matchId} via the guarded RPC.
@@ -2759,7 +2771,7 @@ async function dbSetBotPlayer(data) {
 
 function showWinnerOverlay(winnerName, eloChange) {
   document.getElementById("winnerText").innerHTML =
-    `🏆 Winner: <span style="color:gold">${winnerName}</span>`;
+    `🏆 Winner: <span style="color:gold">${escapeHtml(winnerName)}</span>`;
   document.getElementById("winnerEloChange").textContent =
     `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
 
@@ -4173,8 +4185,8 @@ async function startOnlineTV() {
         document.getElementById("spectatorText").innerHTML = `
           <div style="text-align:center; line-height: 1.4;">
             <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
-            <span style="color:#00ff88">${p1.name} (${Math.round(bestMatch.p1elo)})</span> vs
-            <span style="color:#ff8844">${p2.name} (${Math.round(bestMatch.p2elo)})</span>
+            <span style="color:#00ff88">${escapeHtml(p1.name)} (${Math.round(bestMatch.p1elo)})</span> vs
+            <span style="color:#ff8844">${escapeHtml(p2.name)} (${Math.round(bestMatch.p2elo)})</span>
           </div>
         `;
       });
