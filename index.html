@@ -612,6 +612,25 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
   h1{font-size:40px;}
   button{padding:13px 24px;font-size:16px;}
 }
+
+/* ── Kompakte Spiel-UI ── */
+#ui,#onlineHUD,#coinHUD,#pingDisplay,#opponentInfo,#spectatorInfo{transition:opacity .2s ease;}
+#ui{top:10px;left:10px;font-size:13px;padding:6px 10px 6px 10px;border-radius:8px;}
+#onlineHUD{top:8px;padding:5px 14px;border-radius:10px;font-size:12px;}
+.online-names{font-size:14px;gap:12px;}
+#onlineScoreHUD{font-size:15px!important;margin-top:3px!important;}
+#onlineStatusHUD{font-size:10px!important;margin-top:2px!important;}
+#onlineRankMe,#onlineRankOpp{font-size:10px!important;}
+#coinHUD{top:10px;font-size:16px;padding:5px 14px;border-radius:10px;}
+#pingDisplay{top:10px;right:10px;font-size:10px;padding:4px 9px;}
+#opponentInfo,#spectatorInfo{bottom:10px;left:10px;font-size:12px;padding:8px 12px;border-radius:10px;line-height:1.4;}
+#eloTable{top:10px;right:10px;width:150px;font-size:11px;padding:8px 10px;}
+
+/* ── Menü: Chat | Modi | Players nebeneinander ── */
+#menu{flex-wrap:nowrap;gap:24px;}
+#chatPanel,#onlinePlayersPanel{width:260px!important;}
+#onlinePlayersPanel{height:400px;max-height:400px;}
+@media (max-width:980px){#menu{flex-wrap:wrap;gap:20px;}#chatPanel,#onlinePlayersPanel{width:320px!important;}}
 </style>
 </head>
 <body>
@@ -622,7 +641,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 
     <div id="ui">
   Time: <span id="time">0</span>s<br>
-  Record: <span id="record">0</span>s<br> <!-- Hier hinzugefügt -->
+  Record: <span id="record">0</span>s<br> 
   Balls: <span id="balls">0</span><br>
   Mode: <span id="mode">-</span>
 </div>
@@ -640,13 +659,19 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
     </div>
 
          <div id="menu">
-      <!-- LINKS: Active Players Panel -->
-      <div id="onlinePlayersPanel" style="width: 320px; background: linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8)); border: 1px solid rgba(255,255,255,0.1); border-left: 3px solid var(--neon-green); padding: 16px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 400px; overflow-y: auto; flex-shrink: 0; font-family: var(--font-body); box-shadow: 0 10px 26px rgba(0,0,0,0.35); backdrop-filter: blur(8px);">
-        <b>🟢 Active Players:</b><br>
-        <span style="color: #888;">Connecting presence service...</span>
+      <!-- LINKS: Global Chat -->
+      <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
+        <b>💬 Global Chat</b>
+        <div id="chatMessages" style="flex:1;overflow-y:auto;margin:8px 0;display:flex;flex-direction:column;gap:6px;color:#8b93a6;">Connecting…</div>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="chatInput" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:8px 10px;font-size:13px;">
+          <button onclick="sendChat()" style="margin:0;padding:8px 12px;font-size:13px;">Send</button>
+        </div>
       </div>
 
-      <!-- RECHTS: Hauptmenü-Buttons und Titel (bleiben als Spalte zusammen) -->
+      
+
+      <!-- CENTER: main menu -->
       <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
         <h1>DarkOnBalls</h1>
         <button onclick="showScreen('onlineFlow')">🌐 Online 1v1</button>
@@ -659,6 +684,12 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
         <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
         <button onclick="openAccountScreen()">👤 Account</button>
         <button onclick="openSettings()">Settings</button>
+      </div>
+
+      <!-- RECHTS: Online Players -->
+      <div id="onlinePlayersPanel" style="width: 320px; background: linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8)); border: 1px solid rgba(255,255,255,0.1); border-left: 3px solid var(--neon-green); padding: 16px; border-radius: 12px; font-size: 14px; text-align: left; max-height: 400px; overflow-y: auto; flex-shrink: 0; font-family: var(--font-body); box-shadow: 0 10px 26px rgba(0,0,0,0.35); backdrop-filter: blur(8px);">
+        <b>🟢 Active Players:</b><br>
+        <span style="color: #888;">Connecting presence service...</span>
       </div>
     </div>
 
@@ -892,6 +923,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
    ═══════════════════════════════════════════════════════════════════ */
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { query, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
@@ -1021,6 +1053,13 @@ function rpcServerTimestamp() { return serverTimestamp(); }
 // one of these functions enforces an identity check INSIDE itself
 // before doing anything, and none of them accept "any path, any
 // value" the way `window._firebaseSet` did.
+async function rpcSendChat(name, text) {
+  const uid = requireUid();
+  return push(ref(db, "chat"), { uid, name, text: String(text).slice(0, 200), ts: Date.now() });
+}
+function rpcOnChat(cb) {
+  return onValue(query(ref(db, "chat"), limitToLast(50)), snap => cb(snap.val()));
+}
 window._dobRPC = {
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1032,7 +1071,8 @@ window._dobRPC = {
   removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch,
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
-  serverTimestamp: rpcServerTimestamp
+  serverTimestamp: rpcServerTimestamp,
+  sendChat: rpcSendChat, onChat: rpcOnChat
 };
 window.dispatchEvent(new Event("dobRPCReady"));
 </script>
@@ -1052,6 +1092,7 @@ function _tryActivate() {
     if (!fbReady) {
       fbReady = true;
       onFirebaseAndAuthReady();
+      startChatListener();
     }
   }
 }
@@ -1159,6 +1200,65 @@ function startMenuPresenceListener() {
 // ═══════════════════════════════════════════════
 //  ACCOUNT
 // ═══════════════════════════════════════════════
+// ═══ GLOBAL CHAT (Text wird per textContent gesetzt -> kein XSS) ═══
+let chatUnsub = null, lastChatSent = 0, chatFirst = true;
+function startChatListener() {
+  if (chatUnsub || !RPC) return;
+  chatUnsub = RPC.onChat(msgs => {
+    const box = document.getElementById("chatMessages");
+    if (!box) return;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = "";
+    const list = msgs ? Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0)) : [];
+    if (!list.length) { box.textContent = "No messages yet."; return; }
+    for (const m of list) {
+      const d = new Date(m.ts || 0);
+      const row = document.createElement("div");
+      const meta = document.createElement("div");
+      meta.style.cssText = "font-size:10px;color:#8b93a6;";
+      meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      const nm = document.createElement("b");
+      nm.textContent = m.name + ": ";
+      nm.style.color = (myUid && m.uid === myUid) ? "#00ff88" : "#00c8ff";
+      const tx = document.createElement("span");
+      tx.textContent = m.text;
+      tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+      row.append(meta, nm, tx);
+      box.appendChild(row);
+    }
+    if (atBottom || chatFirst) box.scrollTop = box.scrollHeight;
+    chatFirst = false;
+  });
+}
+async function sendChat() {
+  const inp = document.getElementById("chatInput");
+  const text = inp.value.trim();
+  if (!text) return;
+  if (!onlineAccount) { alert("You need an account to chat (👤 Account)."); return; }
+  if (!fbReady || Date.now() - lastChatSent < 1000) return;
+  lastChatSent = Date.now();
+  inp.value = "";
+  try { await RPC.sendChat(onlineAccount.name, text); } catch(e) { console.warn("chat failed", e); }
+}
+document.getElementById("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+
+// ═══ UI wird durchsichtig, wenn Maus/Finger in der Nähe ist ═══
+(function () {
+  const ids = ["ui","onlineHUD","coinHUD","pingDisplay","opponentInfo","spectatorInfo"], M = 60;
+  function check(x, y) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width) continue;
+      const near = x > r.left - M && x < r.right + M && y > r.top - M && y < r.bottom + M;
+      el.style.opacity = near ? "0.12" : "1";
+    }
+  }
+  document.addEventListener("mousemove", e => check(e.clientX, e.clientY));
+  document.addEventListener("touchmove", e => { const t = e.touches[0]; if (t) check(t.clientX, t.clientY); }, { passive: true });
+})();
+
 function sanitizeAccount(acc) {
   if (!acc) return null;
   acc.elo = acc.elo ?? 1500;
@@ -1541,10 +1641,10 @@ function showEloAnimation(change) {
 async function loadLeaderboard() {
   const lbTable = document.getElementById("lbTable");
   lbTable.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
-  if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase nicht verbunden</span></div>'; return; }
+  if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     const data = await dbGet("players");
-    if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>Keine Spieler</span></div>'; return; }
+    if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>No players</span></div>'; return; }
     
     // Holt alle Einträge und zeigt absolut jeden Account (inkl. Bot & älterer Accounts),
     // der mindestens eine Partie (Sieg oder Niederlage) absolviert hat.
@@ -1568,7 +1668,7 @@ async function loadLeaderboard() {
         <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
-  } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Fehler beim Laden</span></div>'; }
+  } catch(e) { lbTable.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 
 
@@ -1582,7 +1682,7 @@ async function openOnlineProfile(uid) {
   try {
     const p = await dbGet("players/" + uid);
     if (!p) {
-      alert("Profil nicht gefunden.");
+      alert("Profile not found.");
       return;
     }
 
@@ -1615,8 +1715,8 @@ async function openOnlineProfile(uid) {
 
     document.getElementById("profileModal").style.display = "flex";
   } catch(e) {
-    console.warn("Fehler beim Laden des Profils", e);
-    alert("Fehler beim Laden des Profils.");
+    console.warn("Error while loading profile", e);
+    alert("Error while loading profile.");
   }
 }
 
@@ -1727,7 +1827,7 @@ async function createAccount() {
   } catch(e) {
     if (e && e.code === "auth/email-already-in-use") info.textContent = "Name already taken.";
     else if (e && e.code === "auth/weak-password")   info.textContent = "Password is too weak (min 6 characters).";
-    else                                              info.textContent = "Fehler: " + (e && (e.code || e.message));
+    else                                              info.textContent = "Error: " + (e && (e.code || e.message));
     info.style.color = "#f44";
     console.warn("createAccount failed", e);
   }
@@ -1771,7 +1871,7 @@ async function loginAccount() {
     if (e && ["auth/invalid-credential","auth/wrong-password","auth/user-not-found"].includes(e.code)) {
       info.textContent = "Incorrect username or password.";
     } else {
-      info.textContent = "Fehler: " + (e && (e.code || e.message));
+      info.textContent = "Error: " + (e && (e.code || e.message));
     }
     info.style.color = "#f44";
     console.warn("loginAccount failed", e);
