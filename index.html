@@ -325,9 +325,7 @@ canvas{
   display:block;touch-action:none;-webkit-user-select:none;user-select:none;
 }
 #game{
-  position:absolute;left:50%;top:50%;
-  background:#0c0c14;
-  box-shadow:0 0 0 2px rgba(0,255,136,0.28), 0 0 50px rgba(0,255,136,0.08);
+  position:absolute;left:50%;top:50%;z-index:0;
 }
 
 #ui{
@@ -374,7 +372,7 @@ button:active{transform:translateY(0) scale(.98);}
   position:absolute;top:14px;left:50%;transform:translateX(-50%);
   background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.18);
   color:#ccc;font-size:12px;padding:7px 18px;border-radius:20px;
-  cursor:pointer;z-index:50;display:none;font-family:var(--font-display);
+  cursor:pointer;z-index:200;display:none;font-family:var(--font-display);touch-action:manipulation;
   letter-spacing:1px;text-transform:uppercase;backdrop-filter:blur(6px);margin:0;
   box-shadow:0 2px 10px rgba(0,0,0,0.3);
   transition:background .15s, color .15s, border-color .15s, transform .15s;
@@ -731,12 +729,6 @@ body.mode-online #homeBtn{display:none!important;}
         <span class="slider"></span>
       </label><br><br>
 
-      <label>Portrait Display 📱 (Online, widescreen arena)</label><br>
-      <select id="portraitModeSel" onchange="setPortraitMode(this.value)">
-        <option value="fit">Fit (small, upright)</option>
-        <option value="rotate">Rotate (bigger, tilt your head)</option>
-      </select><br><br>
-
       <button onclick="showScreen('menu'); showMenuPage('menuMain')">← Back</button>
     </div>
 
@@ -874,10 +866,20 @@ body.mode-online #homeBtn{display:none!important;}
 // Online-Matches brauchen für beide Spieler exakt dieselbe Arena -> feste 1280x720.
 // Alle Offline-Modi nutzen dagegen den GANZEN Bildschirm (kein Balken, keine Ovale).
 const FIXED_W = 1280, FIXED_H = 720;      // Referenz (längere Seite = 1280) + Online-Querformat
-const PORT_W  = 640,  PORT_H  = 1280;      // Online-Hochformat (1:2, passt zu modernen iPhones)
-let onlineArena = "land";                  // "land" | "port" – wird pro Match festgelegt
 let arenaW = FIXED_W, arenaH = FIXED_H;
-function isPortraitScreen() { return window.innerHeight > window.innerWidth; }
+let onlineH = FIXED_H;     // Online-Arena: Breite immer 1280, Höhe ergibt sich aus dem Match-Seitenverhältnis
+let viewRotated = false;
+// Seitenverhältnis des (ggf. gedrehten) Bildschirms, z.B. 1.78 (16:9) oder 2.16 (iPhone)
+function screenAspect() {
+  const a = Math.max(window.innerWidth, window.innerHeight) / Math.min(window.innerWidth, window.innerHeight);
+  return Math.round(Math.min(2.4, Math.max(1.2, a)) * 100) / 100;
+}
+function setOnlineAspect(a) {
+  a = Number(a);
+  if (!isFinite(a)) a = 16 / 9;
+  a = Math.min(2.4, Math.max(1.2, a));
+  onlineH = Math.round(FIXED_W / a);
+}   // Hochkant-Gerät: Spielfeld wird um 90° gedreht, UI bleibt aufrecht
 
 const stage   = document.getElementById("stage");
 const gameWrap= document.getElementById("gameWrap");
@@ -886,45 +888,52 @@ const ctx     = canvas.getContext("2d");
 
 let scale = 1;   // CSS-Pixel pro virtueller Einheit
 
-function fixedArena() {
+function isOnlineMode() {
   try { return mode === "online" || mode === "online_tv"; } catch (e) { return false; }
 }
-function W() { return fixedArena() ? (onlineArena === "port" ? PORT_W : FIXED_W) : arenaW; }
-function H() { return fixedArena() ? (onlineArena === "port" ? PORT_H : FIXED_H) : arenaH; }
+function fixedArena() { return isOnlineMode(); }
+function W() { return fixedArena() ? FIXED_W : arenaW; }
+function H() { return fixedArena() ? onlineH : arenaH; }
 
-// Hochkant-Anzeige, nur relevant für Online (feste 16:9-Arena): "fit" oder "rotate"
-let portraitMode = localStorage.getItem("dobPortraitMode") || "fit";
-let viewRotated  = false;
 let lastLayoutKey = "";
-function layoutKey() { return fixedArena() + "|" + onlineArena + "|" + window.innerWidth + "x" + window.innerHeight; }
+function isRunning() { try { return !!running; } catch (e) { return false; } }
+function layoutKey() { return fixedArena() + "|" + onlineH + "|" + (isRunning() ? "r" : "m") + "|" + window.innerWidth + "x" + window.innerHeight; }
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   const vw = window.innerWidth, vh = window.innerHeight;
-  const fixed = fixedArena();
   lastLayoutKey = layoutKey();
   gameWrap.style.width = "100%";
   gameWrap.style.height = "100%";
 
+  // Hochkant: Spielfeld wird wie im Querformat berechnet und dann um 90° gedreht.
+  // So sieht das Spiel hochkant exakt so aus wie quer – nur die UI bleibt aufrecht.
+  viewRotated = vh > vw;
+  const lw = viewRotated ? vh : vw;     // "logische" Breite/Höhe im Querformat
+  const lh = viewRotated ? vw : vh;
+
   let cssW, cssH;
-  if (!fixed) {
-    // Voller Bildschirm, ein einziger Skalierungsfaktor -> Kreise bleiben rund.
-    // Die längere Bildschirmseite entspricht ~1280 Einheiten (wie bisher am Desktop).
-    viewRotated = false;
-    scale = Math.max(vw, vh) / FIXED_W;
-    arenaW = vw / scale;
-    arenaH = vh / scale;
-    cssW = vw; cssH = vh;
+  if (!fixedArena() && isRunning()) {
+    // Offline-Spiel läuft: Arena bleibt eingefroren (z.B. wenn die Safari-Leiste ein-/ausfährt
+    // oder das Fenster skaliert wird) – nur die Darstellung passt sich an, das Gameplay nicht.
+    scale = Math.min(lw / arenaW, lh / arenaH);
+    cssW = Math.floor(arenaW * scale); cssH = Math.floor(arenaH * scale);
+    canvas.style.background = "transparent";
+    canvas.style.boxShadow  = "none";
+  } else if (!fixedArena()) {
+    // Offline im Menü: füllt den (gedrehten) Bildschirm, ein Skalierungsfaktor -> Kreise bleiben rund
+    scale = lw / FIXED_W;
+    arenaW = lw / scale;
+    arenaH = lh / scale;
+    cssW = lw; cssH = lh;
     canvas.style.background = "transparent";
     canvas.style.boxShadow  = "none";
   } else {
-    const aw = W(), ah = H();
-    // Drehen nur sinnvoll: Querformat-Arena auf Hochkant-Bildschirm
-    viewRotated = (portraitMode === "rotate" && vh > vw && aw > ah);
-    scale = viewRotated ? Math.min(vh / aw, vw / ah) : Math.min(vw / aw, vh / ah);
-    cssW = Math.floor(aw * scale); cssH = Math.floor(ah * scale);
-    canvas.style.background = "#0c0c14";
-    canvas.style.boxShadow  = "0 0 0 2px rgba(0,255,136,0.28), 0 0 50px rgba(0,255,136,0.08)";
+    // Online: für beide Spieler identische Arena (Form = schmalerer der beiden Bildschirme)
+    scale = Math.min(lw / W(), lh / H());
+    cssW = Math.floor(W() * scale); cssH = Math.floor(H() * scale);
+    canvas.style.background = "#0a0a10";
+    canvas.style.boxShadow  = "0 0 0 1px rgba(255,255,255,0.10)";
   }
   canvas.style.width  = cssW + "px";
   canvas.style.height = cssH + "px";
@@ -943,12 +952,6 @@ function screenToVirtual(clientX, clientY) {
   const k = W() / cssW;                       // CSS-Pixel -> virtuelle Einheiten
   if (viewRotated) return { x: W() / 2 + dy * k, y: H() / 2 - dx * k };
   return { x: W() / 2 + dx * k, y: H() / 2 + dy * k };
-}
-
-function setPortraitMode(m) {
-  portraitMode = m;
-  localStorage.setItem("dobPortraitMode", m);
-  resize();
 }
 
 window.addEventListener("resize", resize);
@@ -1583,7 +1586,7 @@ function drawBallPreview() {
   pctx.shadowBlur = 0;
 }
 
-function openSettings() { showScreen("settings"); renderBallColorUI(); const sel = document.getElementById("portraitModeSel"); if (sel) sel.value = portraitMode; }
+function openSettings() { showScreen("settings"); renderBallColorUI(); }
 
 // Offline-Einstellungen (nur Offline-Modi), in localStorage gespeichert
 function openOfflineSettings() {
@@ -1711,12 +1714,22 @@ function smoothingAlpha(dtMs, catchUpMs) {
 // ═══════════════════════════════════════════════
 //  HOME / EXIT
 // ═══════════════════════════════════════════════
+// Eigener Dialog statt window.confirm() (wird in iOS-Webviews/Home-Screen-Apps oft blockiert)
 function confirmHome() {
-  if (confirm("Return to main menu?")) exitToMenu();
+  if (document.getElementById("homeConfirm")) return;
+  const ov = document.createElement("div");
+  ov.id = "homeConfirm";
+  ov.style.cssText = "position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);";
+  ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,0.15);border-radius:14px;padding:22px 26px;text-align:center;color:#f0f0f5;font-family:var(--font-display);">' +
+    '<div style="margin-bottom:16px;font-size:17px;">Return to main menu?</div>' +
+    '<button id="homeYes" style="margin:4px 6px;">Yes</button><button id="homeNo" style="margin:4px 6px;">Cancel</button></div>';
+  document.body.appendChild(ov);
+  document.getElementById("homeYes").onclick = () => { ov.remove(); exitToMenu(); };
+  document.getElementById("homeNo").onclick  = () => ov.remove();
 }
 
 function exitToMenu() {
-  cleanupOnline();
+  try { cleanupOnline(); } catch (e) { console.warn(e); }
   setTimeout(() => {
     window.location.reload();
   }, 150);
@@ -2132,7 +2145,7 @@ async function startSearchingOnline() {
 
   await RPC.setOwnQueueEntry({
     uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(),
-    portrait: isPortraitScreen()
+    aspect: screenAspect()
   });
 
   const queueUnsub = dbOn("queue/" + myUid + "_invite", (data) => {
@@ -2199,8 +2212,8 @@ async function tryMatchmake() {
     status: "waiting",
     winner: null,
     createdAt: Date.now(),
-    // Hochformat-Arena nur, wenn BEIDE Spieler im Hochformat sind – sonst Querformat
-    arena: (isPortraitScreen() && opp.portrait === true) ? "port" : "land",
+    // Arena-Seitenverhältnis: der schmalere Bildschirm bestimmt, der andere bekommt nur kleine Ränder
+    arena: Math.min(screenAspect(), Number(opp.aspect) || 16 / 9),
     seed: Math.floor(Math.random() * 1000000)
   };
   try {
@@ -2314,7 +2327,7 @@ async function startBotMatch() {
     "Online Bot",
     onlineOpponent.elo,
     () => {
-      startOnlineGame({ seed: Math.floor(Math.random()*1000000), arena: isPortraitScreen() ? "port" : "land" });
+      startOnlineGame({ seed: Math.floor(Math.random()*1000000), arena: screenAspect() });
     }
   );
 }
@@ -2419,7 +2432,7 @@ function makeLCG(seed) {
 //  ONLINE GAME
 // ═══════════════════════════════════════════════
 function startOnlineGame(matchData) {
-  onlineArena = (matchData && matchData.arena === "port") ? "port" : "land";
+  setOnlineAspect(matchData && matchData.arena);
   hideAllScreensForGame();
   mode    = "online";
   document.body.classList.add("mode-online");
@@ -4380,8 +4393,7 @@ async function startOnlineTV() {
     onlineTvCurrentMatchId = bestId;
     lastPacketSeen = Date.now();
     curMeta = best;
-    onlineArena = best.arena === "port" ? "port" : "land";
-    resize();
+    setOnlineAspect(best.arena);
 
     const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", best.p1);
     const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", best.p2);
