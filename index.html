@@ -2525,14 +2525,14 @@ function makeOnlineBall() {
 // corrections stay gentle, while a correction after a longer gap pulls
 // harder so we don't drift indefinitely out of sync.
 let lastBallCorrectionAt = 0;
-function applyBallCorrection(authoritative) {
+function applyBallCorrection(authoritative, minPull) {
   const now = Date.now();
   const gap = lastBallCorrectionAt ? Math.min(NET_SMOOTH.MAX_INTERVAL, now - lastBallCorrectionAt) : 120;
   lastBallCorrectionAt = now;
   // Roughly: short gap -> gentle ~0.15 pull (matches old feel when
   // connection is good); long gap -> stronger pull so we catch up
   // without a hard teleport.
-  const pull = Math.min(0.6, 0.15 * (gap / 120));
+  const pull = Math.max(minPull || 0, Math.min(0.6, 0.15 * (gap / 120)));
 
   for (let i = 0; i < authoritative.length; i++) {
     const a = authoritative[i];
@@ -3388,11 +3388,21 @@ function update() {
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
   if (mode === "online_tv") {
+    const tvNow = Date.now();
     for (const p of players) {
-      if (p.tx !== undefined && p.ty !== undefined) {
-        p.x += (p.tx - p.x) * 0.45;
-        p.y += (p.ty - p.y) * 0.45;
+      if (p.tx === undefined || p.ty === undefined) continue;
+      const since = tvNow - (p.lastPacketAt || tvNow);
+      // Dead-Reckoning: Ziel entlang der letzten Netz-Geschwindigkeit weiterschieben
+      if (p.alive !== false && since > 0 && since < NET_SMOOTH.FREEZE_AFTER_MS) {
+        const sx = (p.netVX || 0) * timestep, sy = (p.netVY || 0) * timestep;
+        const drift = Math.hypot(p.tx - (p.baseTx ?? p.tx), p.ty - (p.baseTy ?? p.ty));
+        if ((sx || sy) && drift < NET_SMOOTH.MAX_EXTRAPOLATE_DIST) { p.tx += sx; p.ty += sy; }
       }
+      // Zeitbasierte (framerate-unabhängige) Glättung, passend zur Paketrate
+      const iv = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(NET_SMOOTH.MIN_INTERVAL, p.netInterval || NET_SMOOTH.MIN_INTERVAL));
+      const a = smoothingAlpha(timestep, 90 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.25);
+      p.x += (p.tx - p.x) * a;
+      p.y += (p.ty - p.y) * a;
     }
     for (const b of balls) {
       b.x += b.vx; b.y += b.vy;
@@ -4222,85 +4232,117 @@ async function startOnlineTV() {
   balls = [];
   players = [];
   startTime = Date.now();
+  lastBallCorrectionAt = 0;
 
-  document.getElementById("spectatorText").innerHTML = "Waiting for an active match to start...";
+  const specText = document.getElementById("spectatorText");
+  specText.innerHTML = "Waiting for an active match to start...";
 
-  let p1 = null;
-  let p2 = null;
+  const badMatches = new Set();      // abgebrochene / eingefrorene Matches ("Zombies")
+  let lastMatchesData = null;
+  let lastPacketSeen = 0;
+  let curMeta = null;
 
-  onlineTvUnsubscribe = dbOn("onlineMatches", (matchesData) => {
+  const stopInner = () => {
+    if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
+    onlineTvCurrentMatchId = null; curMeta = null;
+    players = []; balls = [];
+  };
+
+  // Das Parent-Listener feuert bei JEDER Positionsänderung ALLER Matches.
+  // Deshalb nur speichern und die Auswahl selten (alle 1.5s) neu berechnen.
+  const pickMatch = () => {
+    const matchesData = lastMatchesData;
     if (!matchesData) {
-      document.getElementById("spectatorText").innerHTML = "No online games are currently running.";
-      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
-      onlineTvCurrentMatchId = null;
-      players = [];
-      balls = [];
+      specText.innerHTML = "No online games are currently running.";
+      stopInner();
       return;
     }
-
-    let bestMatchId = null;
-    let bestElo = -1;
-    let bestMatch = null;
-
+    let bestId = null, bestElo = -1, best = null;
     for (const [id, m] of Object.entries(matchesData)) {
-      if (m.status === "playing") {
-        const avgElo = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
-        if (avgElo > bestElo) {
-          bestElo = avgElo;
-          bestMatchId = id;
-          bestMatch = m;
-        }
-      }
+      if (m.status !== "playing" || badMatches.has(id)) continue;
+      // Bot-/Übungsmatches laufen nur lokal und senden NIE Positionen/Bälle
+      if (id.startsWith("BOT__") || m.p2uid === ONLINE_BOT_UID || m.p1uid === ONLINE_BOT_UID) continue;
+      // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
+      if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
+      const avg = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
+      if (avg > bestElo) { bestElo = avg; bestId = id; best = m; }
     }
-
-    if (!bestMatchId) {
-      document.getElementById("spectatorText").innerHTML = "No live match is currently running. Waiting for a game...";
-      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
-      onlineTvCurrentMatchId = null;
-      players = [];
-      balls = [];
+    if (!bestId) {
+      specText.innerHTML = "No live match is currently running. Waiting for a game...";
+      stopInner();
       return;
     }
+    if (bestId === onlineTvCurrentMatchId) return;
 
-    if (bestMatchId !== onlineTvCurrentMatchId) {
-      if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
+    stopInner();
+    onlineTvCurrentMatchId = bestId;
+    lastPacketSeen = Date.now();
+    curMeta = best;
 
-      onlineTvCurrentMatchId = bestMatchId;
-      balls = [];
+    const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", best.p1);
+    const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", best.p2);
+    players = [p1, p2];
 
-      p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", bestMatch.p1);
-      p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", bestMatch.p2);
-      players = [p1, p2];
+    specText.innerHTML = `
+      <div style="text-align:center; line-height: 1.4;">
+        <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
+        <span style="color:#00ff88">${escapeHtml(p1.name)} (${Math.round(best.p1elo || 1500)})</span> vs
+        <span style="color:#ff8844">${escapeHtml(p2.name)} (${Math.round(best.p2elo || 1500)})</span>
+      </div>`;
 
-      onlineTvInnerUnsubscribe = RPC.onMatch(bestMatchId, (data) => {
-        if (!data || data.status === "done" || data.status === "abandoned") {
-          if (onlineTvInnerUnsubscribe) { onlineTvInnerUnsubscribe(); onlineTvInnerUnsubscribe = null; }
-          onlineTvCurrentMatchId = null;
-          players = [];
-          balls = [];
-          document.getElementById("spectatorText").innerHTML = "Match finished. Searching for next game...";
-          return;
-        }
+    const feed = (pl, st) => {
+      const now = Date.now();
+      const prevAt = pl.lastPacketAt || now;
+      const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(1, now - prevAt));
+      if (pl.lastPacketAt) {
+        pl.netVX = (st.x - pl.tx) / interval;
+        pl.netVY = (st.y - pl.ty) / interval;
+      } else {
+        pl.netVX = 0; pl.netVY = 0;
+        pl.x = st.x; pl.y = st.y;           // erstes Paket: direkt hinsetzen, nicht von der Mitte einfliegen
+      }
+      pl.baseTx = st.x; pl.baseTy = st.y;
+      pl.tx = st.x; pl.ty = st.y;
+      pl.alive = st.alive !== false;
+      pl.lastPacketAt = now;
+      pl.netInterval = interval;
+    };
 
-        if (data.p1State) { p1.tx = data.p1State.x; p1.ty = data.p1State.y; p1.alive = data.p1State.alive !== false; }
-        if (data.p2State) { p2.tx = data.p2State.x; p2.ty = data.p2State.y; p2.alive = data.p2State.alive !== false; }
+    const myId = bestId;
+    onlineTvInnerUnsubscribe = RPC.onMatch(myId, (data) => {
+      if (myId !== onlineTvCurrentMatchId) return;
+      if (!data || data.status === "done" || data.status === "abandoned") {
+        stopInner();
+        specText.innerHTML = "Match finished. Searching for next game...";
+        setTimeout(pickMatch, 800);
+        return;
+      }
+      if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); }
+      if (data.p2State) { feed(p2, data.p2State); lastPacketSeen = Date.now(); }
+      if (data.ballState) {
+        try { applyBallCorrection(JSON.parse(data.ballState), 0.35); lastPacketSeen = Date.now(); } catch(e) {}
+      }
+    });
+    onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
+  };
 
-        if (data.ballState) {
-          try { applyBallCorrection(JSON.parse(data.ballState)); } catch(e) {}
-        }
-
-        document.getElementById("spectatorText").innerHTML = `
-          <div style="text-align:center; line-height: 1.4;">
-            <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
-            <span style="color:#00ff88">${escapeHtml(p1.name)} (${Math.round(bestMatch.p1elo)})</span> vs
-            <span style="color:#ff8844">${escapeHtml(p2.name)} (${Math.round(bestMatch.p2elo)})</span>
-          </div>
-        `;
-      });
-      onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
-    }
+  onlineTvUnsubscribe = dbOn("onlineMatches", (d) => {
+    const first = lastMatchesData === null;
+    lastMatchesData = d || {};
+    if (first) pickMatch();
   });
   onlineUnsubscribes.push(onlineTvUnsubscribe);
+
+  // Auswahl periodisch neu bewerten + eingefrorene Matches (>8s ohne Daten) überspringen
+  const tvIv = setInterval(() => {
+    if (mode !== "online_tv" || !running) { clearInterval(tvIv); return; }
+    if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > 8000) {
+      badMatches.add(onlineTvCurrentMatchId);
+      stopInner();
+    }
+    pickMatch();
+  }, 1500);
+  onlineUnsubscribes.push(() => clearInterval(tvIv));
 }
 
 
