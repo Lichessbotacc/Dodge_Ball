@@ -1192,6 +1192,13 @@ function clampEloChange(delta) {
   return Math.max(-MAX_ELO_DELTA_PER_GAME, Math.min(MAX_ELO_DELTA_PER_GAME, d));
 }
 
+const DATA_VERSION = "2"; // bei jedem kuenftigen Reset hochzaehlen
+if (localStorage.getItem("dobDataVersion") !== DATA_VERSION) {
+  localStorage.removeItem("dobAccount");
+  localStorage.removeItem("onlineBotElo");
+  Object.keys(localStorage).filter(k => k.startsWith("h2h_bot_")).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem("dobDataVersion", DATA_VERSION);
+}
 let onlineAccount = null;
 try {
   onlineAccount = JSON.parse(localStorage.getItem("dobAccount") || "null");
@@ -1709,7 +1716,7 @@ async function createAccount() {
     const newUid = await window._dobAuth.register(name, password);
     myUid = newUid;
 
-    onlineAccount = { name, elo: 1500, wins: 0, losses: 0 };
+    onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
     saveAccountLocal();
     await pushAccountToFirebase();
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
@@ -1720,7 +1727,7 @@ async function createAccount() {
   } catch(e) {
     if (e && e.code === "auth/email-already-in-use") info.textContent = "Name already taken.";
     else if (e && e.code === "auth/weak-password")   info.textContent = "Password is too weak (min 6 characters).";
-    else                                              info.textContent = "Could not create account. Please try again.";
+    else                                              info.textContent = "Fehler: " + (e && (e.code || e.message));
     info.style.color = "#f44";
     console.warn("createAccount failed", e);
   }
@@ -1751,7 +1758,7 @@ async function loginAccount() {
     } else {
       // Password account exists but has no player record yet (edge
       // case) — start it fresh under this uid.
-      onlineAccount = { name, elo: 1500, wins: 0, losses: 0 };
+      onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
       await pushAccountToFirebase();
     }
     saveAccountLocal();
@@ -1764,7 +1771,7 @@ async function loginAccount() {
     if (e && ["auth/invalid-credential","auth/wrong-password","auth/user-not-found"].includes(e.code)) {
       info.textContent = "Incorrect username or password.";
     } else {
-      info.textContent = "Could not log in. Please try again.";
+      info.textContent = "Fehler: " + (e && (e.code || e.message));
     }
     info.style.color = "#f44";
     console.warn("loginAccount failed", e);
