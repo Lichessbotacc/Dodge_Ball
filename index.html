@@ -1453,6 +1453,15 @@ function startMenuPresenceListener() {
   if (!window._presenceTick) window._presenceTick = setInterval(() => { if (window._lastPlayersData) renderPresence(window._lastPlayersData); }, 15000);
   menuPresenceUnsubscribe = dbOn("players", (playersData) => { window._lastPlayersData = playersData; renderPresence(playersData); recolorChatNames(); });
 }
+// Haengt die Spielerliste >10 s bei "Connecting…", den Grund anzeigen statt ewig zu warten
+setTimeout(async () => {
+  const panel = document.getElementById("onlinePlayersPanel");
+  if (!panel || window._lastPlayersData) return;
+  let why;
+  if (!fbReady) why = "No connection to the server (sign-in not completed).";
+  else { try { await RPC.get("players/" + myUid); why = "Connected, but the player list does not arrive."; } catch (e) { why = "Server error: " + (e.code || e.message); } }
+  if (!window._lastPlayersData) panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#ff8844;font-size:12px;'>⚠ " + why + " Reload the page.</span>";
+}, 10000);
 function renderPresence(playersData) {
   {
     const panel = document.getElementById("onlinePlayersPanel");
@@ -2905,6 +2914,14 @@ function showCreateAccount() { showAccountAuthScreen("register"); }
 
 function showAccountAuthScreen(mode) {
   showScreen("accountScreen");
+  // Lokal "eingeloggt", aber keine Passwort-Sitzung bei Firebase (Sitzung verloren/noch nicht geladen):
+  // direkt zum Login mit vorausgefuelltem Namen statt der verwirrenden "Geraet hat schon einen Account"-Seite
+  if (mode !== "login" && onlineAccount && deviceHasAccount() && !(window._dobAuth && window._dobAuth.isPasswordAccount())) {
+    showAccountAuthScreen("login");
+    const u = document.getElementById("authUsername"); if (u) u.value = onlineAccount.name;
+    const i = document.getElementById("accountInfo"); if (i) { i.textContent = "Session expired – please log in again."; i.style.color = "#ffd700"; }
+    return;
+  }
   if (mode === "login") {
     document.getElementById("accountContent").innerHTML = `
       <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Log in to your account</p>
