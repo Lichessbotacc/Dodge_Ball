@@ -641,6 +641,59 @@ body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
+
+/* ═════ WEEKLY LEAGUE (redesign) ═════ */
+#leagueContent{width:460px;max-width:94vw;gap:14px;}
+.lg-hero{width:100%;text-align:center;padding:22px 16px 18px;border-radius:18px;border:1px solid color-mix(in srgb,var(--lc) 45%,transparent);
+  background:radial-gradient(circle at 50% 0%,color-mix(in srgb,var(--lc) 22%,transparent),rgba(255,255,255,0.02) 70%);
+  box-shadow:0 0 40px color-mix(in srgb,var(--lc) 18%,transparent) inset,0 8px 30px rgba(0,0,0,.35);}
+.lg-hero-icon{font-size:58px;line-height:1;filter:drop-shadow(0 0 18px var(--lc));animation:lgFloat 3.5s ease-in-out infinite;}
+@keyframes lgFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+.lg-hero-name{font-family:var(--font-display);font-weight:800;font-size:34px;letter-spacing:1px;color:var(--lc);margin-top:6px;}
+.lg-hero-sub{font-size:13px;color:var(--text-dim);margin-top:2px;}
+.lg-time{margin-top:14px;text-align:left;}
+.lg-time-top{display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);margin-bottom:6px;font-family:var(--font-body);}
+.lg-time-top b{color:var(--text);font-family:var(--font-hud);font-weight:600;}
+.lg-bar{height:8px;border-radius:8px;background:rgba(255,255,255,.08);overflow:hidden;}
+.lg-bar>i{display:block;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--lc),#fff8);transition:width .6s ease;}
+.lg-ladder{width:100%;display:flex;align-items:center;justify-content:space-between;gap:4px;}
+.lg-step{flex:1;text-align:center;padding:10px 4px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.03);opacity:.5;font-size:12px;font-family:var(--font-display);font-weight:700;letter-spacing:.4px;}
+.lg-step span{display:block;font-size:22px;margin-bottom:2px;}
+.lg-step.done{opacity:.8;}
+.lg-step.now{opacity:1;color:var(--c);border-color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);box-shadow:0 0 18px color-mix(in srgb,var(--c) 35%,transparent);transform:scale(1.06);}
+.lg-arrow{color:var(--text-dim);font-size:14px;}
+.lg-card{width:100%;border-radius:14px;padding:12px 16px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:14px;line-height:1.5;}
+.lg-card.up{border-color:rgba(0,255,136,.5);background:rgba(0,255,136,.08);}
+.lg-card.down{border-color:rgba(255,68,68,.5);background:rgba(255,68,68,.08);}
+.lg-card.safe{border-color:rgba(0,200,255,.4);background:rgba(0,200,255,.07);}
+.lg-card h4{margin:0 0 3px;font-family:var(--font-display);font-size:16px;letter-spacing:.4px;}
+.lg-stats{display:flex;gap:10px;width:100%;}
+.lg-stat{flex:1;text-align:center;padding:10px 4px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);}
+.lg-stat b{display:block;font-family:var(--font-hud);font-size:22px;color:var(--neon-green);}
+.lg-stat small{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;}
+.lg-table{width:100%;max-height:44vh;overflow-y:auto;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.02);}
+.lg-zone{padding:6px 14px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;font-family:var(--font-display);}
+.lg-zone.up{background:rgba(0,255,136,.14);color:var(--neon-green);}
+.lg-zone.down{background:rgba(255,68,68,.14);color:var(--neon-red);}
+.lg-zone.mid{background:rgba(255,255,255,.05);color:var(--text-dim);}
+.lg-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s;}
+.lg-row:hover{background:rgba(255,255,255,.06);}
+.lg-row.me{background:rgba(0,255,136,.12);box-shadow:inset 3px 0 0 var(--neon-green);}
+.lg-rank{width:30px;font-family:var(--font-hud);font-size:14px;color:var(--text-dim);text-align:center;}
+.lg-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-family:var(--font-display);color:#0a0a10;background:var(--lc);flex:none;}
+.lg-name{flex:1;min-width:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lg-name small{display:block;font-size:10px;color:var(--text-dim);}
+.lg-wins{font-family:var(--font-hud);font-size:15px;font-weight:700;min-width:34px;text-align:right;}
+.lg-how{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.03);overflow:hidden;}
+.lg-how summary{cursor:pointer;padding:12px 16px;font-family:var(--font-display);font-weight:700;font-size:17px;list-style:none;display:flex;justify-content:space-between;align-items:center;}
+.lg-how summary::-webkit-details-marker{display:none;}
+.lg-how summary::after{content:"▾";color:var(--text-dim);transition:transform .2s;}
+.lg-how[open] summary::after{transform:rotate(180deg);}
+.lg-steps{padding:2px 16px 14px;display:flex;flex-direction:column;gap:10px;}
+.lg-s{display:flex;gap:12px;align-items:flex-start;font-size:13.5px;line-height:1.5;color:#cfd6e4;}
+.lg-s>b{flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--neon-green),var(--neon-cyan));color:#06100c;font-family:var(--font-hud);font-size:13px;}
+.lg-s strong{color:#fff;}
+.lg-foot{font-size:12px;color:var(--text-dim);text-align:center;line-height:1.5;}
 </style>
 </head>
 <body>
@@ -1662,42 +1715,84 @@ async function showLeagueScreen() {
 async function renderLeague() {
   const box = document.getElementById("leagueContent");
   if (!box || !onlineAccount) return;
-  const tier = onlineAccount.leagueTier || 0, week = leagueWeekId();
-  let html = `<div style="font-size:28px;margin-bottom:4px;">${leagueBadgeHTML(tier)}</div>
-    <div style="font-size:13px;color:#8b93a6;margin-bottom:12px;">${leagueCountdownText()}</div>`;
+  const tier = onlineAccount.leagueTier || 0, week = leagueWeekId(), L = leagueByTier(tier);
+  const ws = leagueWeekStart(Date.now()), pct = Math.min(100, Math.max(0, (Date.now() - ws) / (7 * 86400000) * 100));
+  const grpId = onlineAccount.leagueWeek === week ? onlineAccount.leagueGroup : null;
+  let list = [], n = 0, z = leagueZones(0, tier), myIdx = -1;
+  if (grpId) {
+    const grp = (await dbGet(`weeklyLeague/${week}/${tier}/${grpId}`)) || {};
+    list = leagueSortMembers(Object.values(grp)); n = list.length; z = leagueZones(n, tier);
+    myIdx = list.findIndex(m => m.uid === myUid);
+  }
+  const myWins = myIdx >= 0 ? (list[myIdx].wins || 0) : 0;
+
+  // 1) Hero
+  let html = `<div class="lg-hero" style="--lc:${L.color}">
+    <div class="lg-hero-icon">${L.icon}</div>
+    <div class="lg-hero-name">${escapeHtml(tr(L.name))}</div>
+    <div class="lg-hero-sub">${tr("Your league this week")}${grpId ? " · " + n + "/" + LEAGUE_GROUP_SIZE + " " + tr("players") : ""}</div>
+    <div class="lg-time"><div class="lg-time-top"><span>${tr("Mon")}</span><b>${leagueCountdownText()}</b><span>${tr("Sun")}</span></div>
+      <div class="lg-bar"><i style="width:${pct.toFixed(1)}%"></i></div></div></div>`;
+
+  // 2) Ladder
+  html += `<div class="lg-ladder">` + LEAGUES.map((l, i) =>
+    `<div class="lg-step ${i < tier ? "done" : i === tier ? "now" : ""}" style="--c:${l.color}"><span>${l.icon}</span>${escapeHtml(tr(l.name))}</div>`
+  ).join('<div class="lg-arrow">›</div>') + `</div>`;
+
+  // 3) Last week
   const r = onlineAccount.leagueLastResult;
   if (r) {
-    const col = r.outcome === "up" ? "#00ff88" : r.outcome === "down" ? "#ff4444" : "#8b93a6";
+    const cls = r.outcome === "up" ? "up" : r.outcome === "down" ? "down" : "";
     const verb = r.outcome === "up" ? "⬆ " + tr("Promoted to") + " " + leagueLabel(r.to)
                : r.outcome === "down" ? "⬇ " + tr("Relegated to") + " " + leagueLabel(r.to)
                : "= " + tr("Stayed in") + " " + leagueLabel(r.to);
-    html += `<div style="font-size:13px;margin-bottom:12px;padding:8px 14px;border-radius:10px;border:1px solid ${col};color:${col};">
-      ${tr("Last week")}: #${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")} → ${verb}</div>`;
+    html += `<div class="lg-card ${cls}"><h4>${tr("Last week")}</h4>#${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")} → ${verb}</div>`;
   }
-  const grpId = onlineAccount.leagueWeek === week ? onlineAccount.leagueGroup : null;
-  if (grpId) {
-    const grp = (await dbGet(`weeklyLeague/${week}/${tier}/${grpId}`)) || {};
-    const list = leagueSortMembers(Object.values(grp));
-    const n = list.length, z = leagueZones(n, tier);
-    html += `<div style="width:420px;max-width:92vw;max-height:46vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;">
-      <div class="lb-row"><span>${tr("Rank")}</span><span>${tr("Player")}</span><span>${tr("Wins")}</span></div>`;
+
+  if (grpId && myIdx >= 0) {
+    // 4) Status
+    let cls = "safe", title, text;
+    if (myIdx < z.up) {
+      if (myWins >= LEAGUE_MIN_WINS_PROMOTE) { cls = "up"; title = "🟢 " + tr("You're in the promotion zone!"); text = tr("Keep your spot until Sunday and you move up."); }
+      else { cls = "up"; title = "🟡 " + tr("Almost there!"); text = (LEAGUE_MIN_WINS_PROMOTE - myWins) + " " + tr("more wins needed – promotion needs at least") + " " + LEAGUE_MIN_WINS_PROMOTE + " " + tr("Wins") + "."; }
+    } else if (z.down > 0 && myIdx >= n - z.down) {
+      cls = "down"; title = "🔴 " + tr("You're in the relegation zone!"); text = tr("Win a few matches to climb out before the week ends.");
+    } else if (z.up > 0) {
+      const gap = Math.max(1, (list[z.up - 1].wins || 0) - myWins + 1);
+      title = "🔵 " + tr("You're safe"); text = "~" + gap + " " + tr("more wins to reach the promotion zone") + ".";
+    } else { title = "👑 " + tr("Top league"); text = tr("You can't be promoted further – defend your place!"); }
+    html += `<div class="lg-card ${cls}"><h4>${title}</h4>${text}</div>
+      <div class="lg-stats">
+        <div class="lg-stat"><b>#${myIdx + 1}</b><small>${tr("Rank")}</small></div>
+        <div class="lg-stat"><b>${myWins}</b><small>${tr("Wins")}</small></div>
+        <div class="lg-stat"><b>${n}</b><small>${tr("players")}</small></div></div>`;
+
+    // 5) Table with zone labels
+    html += `<div class="lg-table">`;
+    if (z.up) html += `<div class="lg-zone up">⬆ ${tr("Promotion zone")} · ${tr("Top")} ${z.up} · ${tr("min.")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("Wins")}</div>`;
     list.forEach((m, i) => {
-      const o = leagueOutcome(i, n, m.wins || 0, tier);
-      const bg = o === "up" ? "rgba(0,255,136,0.10)" : o === "down" ? "rgba(255,68,68,0.10)" : "transparent";
-      const me = m.uid === myUid;
-      html += `<div class="lb-row" style="background:${bg};${me ? "outline:1px solid #00ff88;outline-offset:-1px;font-weight:700;" : ""}cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
-        <span>#${i + 1}</span><span>${escapeHtml(m.name)}</span><span>${m.wins || 0}</span></div>`;
+      if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
+      if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
+      const me = m.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+        <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
+        <span class="lg-name">${escapeHtml(m.name)}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
+        <span class="lg-wins">${m.wins || 0}</span></div>`;
     });
-    html += `</div>
-      <div style="font-size:12px;color:#8b93a6;margin-top:10px;max-width:420px;text-align:center;line-height:1.5;">
-        ${z.up ? "🟢 " + tr("Promotion zone") + " (" + tr("Top") + " " + z.up + ", " + tr("min.") + " " + LEAGUE_MIN_WINS_PROMOTE + " " + tr("Wins") + ")" : ""}
-        ${z.down ? " &nbsp; 🔴 " + tr("Relegation zone") + " (" + tr("Bottom") + " " + z.down + ")" : ""}</div>`;
+    html += `</div>`;
   } else {
-    html += `<div style="max-width:420px;text-align:center;color:#cfd6e4;font-size:15px;line-height:1.5;margin:10px 0;">
-      ${tr("Win a match to enter this week's league group.")}</div>`;
+    html += `<div class="lg-card safe"><h4>🎯 ${tr("Not in a group yet")}</h4>${tr("Win a match to enter this week's league group.")}</div>`;
   }
-  html += `<div style="font-size:12px;color:#8b93a6;margin-top:12px;max-width:420px;text-align:center;line-height:1.5;">
-    ${tr("Every win counts, including wins against the Online Bot.")}</div>`;
+
+  // 6) How it works
+  html += `<details class="lg-how" ${grpId ? "" : "open"}><summary>❓ ${tr("How does the league work?")}</summary><div class="lg-steps">
+    <div class="lg-s"><b>1</b><div><strong>${tr("Win matches")}</strong><br>${tr("Every online win this week = 1 point. Wins against the Online Bot count too.")}</div></div>
+    <div class="lg-s"><b>2</b><div><strong>${tr("Your group")}</strong><br>${tr("You compete against up to")} ${LEAGUE_GROUP_SIZE} ${tr("players of your league. Ties are won by whoever got there first.")}</div></div>
+    <div class="lg-s"><b>3</b><div><strong>${tr("Sunday = decision")}</strong><br>${tr("The week ends Sunday 24:00 UTC. A new week starts Monday with fresh groups and 0 wins.")}</div></div>
+    <div class="lg-s"><b>4</b><div><strong>${tr("Up or down")}</strong><br>${tr("Top players move up (at least")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("wins needed), the bottom ones drop a league, everyone else stays.")}</div></div>
+    <div class="lg-s"><b>🏆</b><div><strong>${LEAGUES.map(l => l.icon).join(" → ")}</strong><br>${tr("Reach Platinum – your ELO is not affected by the league.")}</div></div>
+  </div></details>
+  <div class="lg-foot">${tr("Every win counts, including wins against the Online Bot.")}</div>`;
   box.innerHTML = html;
 }
 
@@ -5035,6 +5130,8 @@ const RX = { de: [
   [/^Error: (.+)$/, "Fehler: $1"],
   [/^(\d+) ELO vs (.+)$/, "$1 ELO gegen $2"]
 ]};
+
+Object.assign(DICT.de, {"Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 UTC. A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 UTC. Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
 
 let LANG = (function () {
   try { const s = localStorage.getItem("dobLang"); if (LANGS.includes(s)) return s; } catch (e) {}
