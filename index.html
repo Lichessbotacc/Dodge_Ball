@@ -669,9 +669,10 @@ body.mode-online #homeBtn{display:none!important;}
       <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
         <b>💬 Global Chat</b>
         <div id="chatMessages" style="flex:1;overflow-y:auto;margin:8px 0;display:flex;flex-direction:column;gap:6px;color:#8b93a6;">Connecting…</div>
+        <div id="chatLockNote" style="display:none;font-size:12px;color:#ffd700;margin-bottom:6px;cursor:pointer;" onclick="openAccountScreen()">🔒 Create an account to be able to write in the chat. <u>Create account</u></div>
         <div style="display:flex;gap:6px;">
           <input type="text" id="chatInput" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:8px 10px;font-size:13px;">
-          <button onclick="sendChat()" style="margin:0;padding:8px 12px;font-size:13px;">Send</button>
+          <button id="chatSendBtn" onclick="sendChat()" style="margin:0;padding:8px 12px;font-size:13px;">Send</button>
         </div>
       </div>
 
@@ -726,6 +727,12 @@ body.mode-online #homeBtn{display:none!important;}
         <input type="checkbox" id="ballTrailToggle" onchange="setBallTrail(this.checked)">
         <span class="slider"></span>
       </label><br><br>
+
+      <label>Language / Sprache 🌍</label><br>
+      <select id="langSelect" onchange="setLanguage(this.value)">
+        <option value="en">English</option>
+        <option value="de">Deutsch</option>
+      </select><br><br>
 
       <button onclick="showScreen('menu'); showMenuPage('menuMain')">← Back</button>
     </div>
@@ -1228,7 +1235,9 @@ function renderPresence(playersData) {
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
       html += `
-        <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">
+        <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
+             onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
+             onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(p.name)}${isMe ? ' (You)' : ''}</span>
           <span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>
         </div>
@@ -1260,9 +1269,18 @@ function startChatListener() {
       meta.style.cssText = "font-size:10px;color:#8b93a6;";
       meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       const nm = document.createElement("b");
+      nm.setAttribute("translate", "no");
       nm.textContent = m.name + ": ";
       nm.style.color = (myUid && m.uid === myUid) ? "#00ff88" : "#00c8ff";
+      if (m.uid) {
+        nm.style.cursor = "pointer";
+        nm.title = "View profile";
+        nm.onmouseenter = () => nm.style.textDecoration = "underline";
+        nm.onmouseleave = () => nm.style.textDecoration = "none";
+        nm.onclick = () => openOnlineProfile(m.uid);
+      }
       const tx = document.createElement("span");
+      tx.setAttribute("translate", "no");
       tx.textContent = m.text;
       tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
       row.append(meta, nm, tx);
@@ -1276,7 +1294,7 @@ async function sendChat() {
   const inp = document.getElementById("chatInput");
   const text = inp.value.trim();
   if (!text) return;
-  if (!onlineAccount) { alert("You need an account to chat (👤 Account)."); return; }
+  if (!onlineAccount) { updateChatLock(); return; }
   if (!fbReady || Date.now() - lastChatSent < 1000) return;
   lastChatSent = Date.now();
   inp.value = "";
@@ -1750,7 +1768,19 @@ const ALL_SCREENS = [
 function showMenuPage(id) {
   ["menuMain","menuOnline","menuOffline"].forEach(p => { const el = document.getElementById(p); if (el) el.style.display = (p === id) ? "flex" : "none"; });
 }
+function updateChatLock() {
+  const inp = document.getElementById("chatInput"), btn = document.getElementById("chatSendBtn"), note = document.getElementById("chatLockNote");
+  if (!inp) return;
+  const locked = !onlineAccount;
+  inp.disabled = locked;
+  if (btn) btn.disabled = locked;
+  inp.placeholder = locked ? "Account required to write…" : "Message…";
+  if (note) note.style.display = locked ? "block" : "none";
+  if (locked) inp.value = "";
+}
+setInterval(updateChatLock, 1000);
 function updateAccountBtn() {
+  updateChatLock();
   const b = document.getElementById("accountBtn");
   if (b) b.textContent = onlineAccount ? "👤 " + onlineAccount.name : "👤 Log in / Sign up";
 }
@@ -2935,9 +2965,11 @@ function handlePostMatch(d) {
   for (const m of list) {
     const row = document.createElement("div");
     const nm = document.createElement("b");
+    nm.setAttribute("translate", "no");
     nm.textContent = m.name + ": ";
     nm.style.color = (m.name === onlineAccount.name) ? "#00ff88" : "#ff8844";
     const tx = document.createElement("span");
+    tx.setAttribute("translate", "no");
     tx.textContent = m.text;
     tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
     row.append(nm, tx);
@@ -4094,8 +4126,8 @@ function draw() {
       ctx.fillStyle = "white"; ctx.font = "30px Arial"; ctx.textAlign = "center";
       ctx.fillText(
         humanRemovedFromQueue && !spectateModeActive
-          ? "You are watching – choose a TV mode"
-          : "Waiting for next match…",
+          ? tr("You are watching – choose a TV mode")
+          : tr("Waiting for next match…"),
         W()/2, H()/2
       );
       document.getElementById("opponentInfo").style.display  = "none";
@@ -4121,7 +4153,7 @@ function draw() {
       ctx.fillStyle = "rgba(0,0,0,0.7)";
       ctx.beginPath(); ctx.roundRect(W()/2-220, H()/2-50, 440, 90, 16); ctx.fill();
       ctx.fillStyle = "#ffd700"; ctx.font = "bold 38px Arial"; ctx.textAlign = "center";
-      ctx.fillText(matchBanner.text, W()/2, H()/2+14);
+      ctx.fillText(tr(matchBanner.text), W()/2, H()/2+14);
       ctx.restore();
     } else if (matchBanner && Date.now() - matchBanner.ts >= matchBanner.duration) {
       matchBanner = null;
@@ -4229,7 +4261,7 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
       ctx.fillStyle = "rgba(255,0,0,0.18)";
       ctx.fillRect(0, 0, W(), H());
      ctx.fillStyle = "white"              ; ctx.font = "bold 48px Arial"; ctx.textAlign = "center";
-              ctx.fillText("💀 You died! Waiting for result…", W()/2, H()/2);
+              ctx.fillText(tr("💀 You died! Waiting for result…"), W()/2, H()/2);
             }
           }
         }
@@ -4551,5 +4583,162 @@ canvas.addEventListener("touchstart", e => {
         simulation problem (Cloud Function / dedicated game server)
         if you want to fully solve it.
 ═══════════════════════════════════════════════════════════════════ -->
+
+<script>
+// ═══════════════════════════════════════════════
+//  SPRACHE / LANGUAGE  (English = Originaltexte, Deutsch = Übersetzung)
+//  Neue Sprache: Eintrag in LANGS, Wörterbuch (DICT.xx) + Regex (RX.xx) ergänzen,
+//  <option> in #langSelect hinzufügen.
+// ═══════════════════════════════════════════════
+const LANGS = ["en", "de"];
+const DICT = { de: {
+  "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Survived:":"Überlebt:",
+  "ELO LIVE":"ELO LIVE","BEST TV":"BESTES TV","RANDOM TV":"ZUFALLS-TV","TARGET TV":"ZIEL-TV","▶ RESUME":"▶ WEITER",
+  "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
+  "🔒 Create an account to be able to write in the chat.":"🔒 Erstelle einen Account, um im Chat schreiben zu können.",
+  "Create account":"Account erstellen","Send":"Senden","No messages yet.":"Noch keine Nachrichten.",
+  "🌐 Online":"🌐 Online","🎮 Offline":"🎮 Offline","⚙️ Settings":"⚙️ Einstellungen","⚔️ Online 1v1":"⚔️ Online 1v1",
+  "📺 Best Online TV":"📺 Bestes Online-TV","🏆 Leaderboard":"🏆 Rangliste","← Back":"← Zurück",
+  "Singleplayer":"Einzelspieler","Multiplayer (local)":"Mehrspieler (lokal)","AI Spectate":"KI zuschauen",
+  "1vs1 Tournament":"1vs1-Turnier","🪙 Coin Hunt":"🪙 Münzjagd","⚙️ Offline Settings":"⚙️ Offline-Einstellungen",
+  "🟢 Active Players:":"🟢 Aktive Spieler:","Connecting presence service...":"Verbinde mit Spielerliste…",
+  "No active players":"Keine aktiven Spieler","No other players online":"Keine anderen Spieler online",
+  "General – applies to all modes":"Allgemein – gilt für alle Modi","Your Ball Color":"Deine Ballfarbe",
+  "Ball Trail Effect ✨":"Ball-Spureffekt ✨","Language / Sprache 🌍":"Sprache / Language 🌍",
+  "🎮 Offline Settings":"🎮 Offline-Einstellungen","Only applies to offline modes (online uses fixed rules)":"Gilt nur für Offline-Modi (Online nutzt feste Regeln)",
+  "Start Balls":"Start-Bälle","Spawn Time (s)":"Spawn-Zeit (s)","Ball Speed":"Ballgeschwindigkeit","Slow":"Langsam","Normal":"Normal","Fast":"Schnell","Extreme":"Extrem",
+  "AI Bots":"KI-Bots","Ranking System":"Ranglistensystem","Points":"Punkte","Save":"Speichern",
+  "🌐 Online Account":"🌐 Online-Account","🏆 Online Leaderboard":"🏆 Online-Rangliste","Rank":"Rang","W/L":"S/N",
+  "Log in to your account":"Melde dich an","Create your account":"Erstelle deinen Account","Username":"Benutzername","Password":"Passwort",
+  "Password (min 6 characters)":"Passwort (mind. 6 Zeichen)","Confirm password":"Passwort bestätigen","Log In":"Anmelden",
+  "Need an account? Create one":"Noch keinen Account? Erstellen","Create Account":"Account erstellen",
+  "Already have an account? Log In":"Schon einen Account? Anmelden","Logged in as":"Angemeldet als","Log Out":"Abmelden",
+  "Name must be at least 2 characters.":"Der Name muss mindestens 2 Zeichen haben.","Only letters, numbers, _ and - allowed.":"Nur Buchstaben, Zahlen, _ und - erlaubt.",
+  "Password must be at least 6 characters.":"Das Passwort muss mindestens 6 Zeichen haben.","Passwords do not match.":"Die Passwörter stimmen nicht überein.",
+  "Still connecting — please try again in a moment.":"Verbinde noch – bitte gleich nochmal versuchen.","Creating account…":"Erstelle Account…",
+  "Name already taken.":"Name bereits vergeben.","This name is already taken!":"Dieser Name ist bereits vergeben!","Name successfully changed!":"Name erfolgreich geändert!",
+  "Password is too weak (min 6 characters).":"Passwort zu schwach (mind. 6 Zeichen).","Enter your username and password.":"Gib Benutzername und Passwort ein.",
+  "Logging in…":"Melde an…","Incorrect username or password.":"Benutzername oder Passwort falsch.","You need to create an account first!":"Du musst zuerst einen Account erstellen!",
+  "Profile not found.":"Profil nicht gefunden.","Error while loading profile.":"Fehler beim Laden des Profils.","Error while loading":"Fehler beim Laden","No players":"Keine Spieler","Firebase not connected":"Nicht verbunden",
+  "🌐 Online 1v1":"🌐 Online 1v1","Searching for opponent…":"Suche Gegner…",
+  "Matchmaking may take up to 10 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.":"Die Suche kann bis zu 10 Sekunden dauern. Ist kein Gegner verfügbar, wirst du automatisch mit unserem Online-Bot gepaart.",
+  "Cancel":"Abbrechen","Yes":"Ja","Return to main menu?":"Zurück zum Hauptmenü?","Firebase not connected. Cannot play online.":"Nicht verbunden. Online spielen nicht möglich.",
+  "Firebase is not connected yet!":"Noch nicht verbunden!","Rank: Loading...":"Rang: Lädt…","Waiting for opponent…":"Warte auf Gegner…","⏳ Waiting for opponent…":"⏳ Warte auf Gegner…",
+  "🏆 Winner!":"🏆 Gewinner!","🏆 Winner:":"🏆 Gewinner:","Winner:":"Gewinner:","💬 Chat with opponent":"💬 Chat mit Gegner","(not saved)":"(wird nicht gespeichert)",
+  "🔄 Rematch":"🔄 Revanche","🔍 New Opponent":"🔍 Neuer Gegner","🔄 Accept Rematch":"🔄 Revanche annehmen","Opponent left":"Gegner hat verlassen","Practice match":"Übungsmatch",
+  "GAME OVER":"SPIEL VORBEI","Play Again":"Nochmal spielen","Me":"Ich","Opp":"Gegner","👁 Spectator Mode":"👁 Zuschauermodus","Opponent:":"Gegner:","Skill:":"Skill:","Rank:":"Rang:",
+  "Waiting for an active match to start...":"Warte auf den Start eines Matches…","No online games are currently running.":"Zurzeit laufen keine Online-Spiele.",
+  "No live match is currently running. Waiting for a game...":"Zurzeit läuft kein Live-Match. Warte auf ein Spiel…","Match finished. Searching for next game...":"Match beendet. Suche nächstes Spiel…",
+  "You are watching – choose a TV mode":"Du schaust zu – wähle einen TV-Modus","Waiting for next match…":"Warte auf das nächste Match…","💀 You died! Waiting for result…":"💀 Du bist gestorben! Warte auf das Ergebnis…",
+  "Message…":"Nachricht…","Account required to write…":"Account zum Schreiben nötig…","View profile":"Profil ansehen",
+  "Total Games":"Spiele gesamt","Wins":"Siege","Losses":"Niederlagen","Winrate":"Siegquote","Highest Elo":"Höchste Elo","Lowest Elo":"Niedrigste Elo",
+  "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
+  "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
+  "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
+  "Idle in Menu":"Im Menü","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen"
+}};
+const RX = { de: [
+  [/^Starting in (\d+)…$/, "Start in $1…"],
+  [/^Rank: (.+)$/, "Rang: $1"], [/^Rank: #(.+)$/, "Rang: #$1"],
+  [/^of (\d+)$/, "von $1"],
+  [/^Winner: (.+)$/, "Gewinner: $1"], [/^🏆 Winner: (.+)$/, "🏆 Gewinner: $1"],
+  [/^Your ELO: (.+)$/, "Dein ELO: $1"],
+  [/^Round (\d+)\/(\d+)$/, "Runde $1/$2"],
+  [/^1v1 vs (.+)$/, "1v1 gegen $1"],
+  [/^Playing (.+)$/, (m, g) => "Spielt " + (DICT.de[g] || g)],
+  [/^📺 LIVE GAME TV \(Average: (\d+) ELO\)$/, "📺 LIVE-SPIEL-TV (Durchschnitt: $1 ELO)"],
+  [/^Error: (.+)$/, "Fehler: $1"],
+  [/^(\d+) ELO vs (.+)$/, "$1 ELO gegen $2"]
+]};
+
+let LANG = (function () {
+  try { const s = localStorage.getItem("dobLang"); if (LANGS.includes(s)) return s; } catch (e) {}
+  return "en";   // Standard: Englisch
+})();
+
+function trStr(s) {
+  if (LANG === "en" || typeof s !== "string") return s;
+  const core = s.trim();
+  if (!core) return s;
+  const lead = s.slice(0, s.indexOf(core)), trail = s.slice(s.indexOf(core) + core.length);
+  const d = DICT[LANG] && DICT[LANG][core];
+  if (d !== undefined) return lead + d + trail;
+  for (const [re, rep] of (RX[LANG] || [])) if (re.test(core)) return lead + core.replace(re, rep) + trail;
+  return s;
+}
+window.tr = trStr;
+
+// alert() übersetzen
+const _alert = window.alert.bind(window);
+window.alert = m => _alert(trStr(String(m)));
+
+const SKIP = new Set(["SCRIPT", "STYLE", "TEXTAREA", "CANVAS", "OPTION_NOPE"]);
+function skipNode(n) {
+  const el = n.nodeType === 1 ? n : n.parentElement;
+  return !el || SKIP.has(el.tagName) || !!el.closest('[translate="no"]');
+}
+function doText(n) {
+  if (skipNode(n)) return;
+  const cur = n.nodeValue;
+  if (n.__de !== undefined && cur === n.__de) { if (LANG === "en") { n.nodeValue = n.__en; } return; }
+  // neuer/geänderter Originaltext
+  n.__en = cur; n.__de = undefined;
+  if (LANG === "en") return;
+  const out = trStr(cur);
+  if (out !== cur) { n.__de = out; n.nodeValue = out; }
+}
+function doAttr(el, attr) {
+  const key = "__en_" + attr, keyD = "__de_" + attr;
+  const cur = el.getAttribute(attr);
+  if (cur == null || el.closest('[translate="no"]')) return;
+  if (el[keyD] !== undefined && cur === el[keyD]) { if (LANG === "en") el.setAttribute(attr, el[key]); return; }
+  el[key] = cur; el[keyD] = undefined;
+  if (LANG === "en") return;
+  const out = trStr(cur);
+  if (out !== cur) { el[keyD] = out; el.setAttribute(attr, out); }
+}
+function walk(root) {
+  if (!root) return;
+  if (root.nodeType === 3) { doText(root); return; }
+  if (root.nodeType !== 1) return;
+  if (root.hasAttribute("placeholder")) doAttr(root, "placeholder");
+  if (root.hasAttribute("title")) doAttr(root, "title");
+  for (const c of root.childNodes) walk(c);
+}
+let _obs = null;
+function startI18n() {
+  walk(document.body);
+  _obs = new MutationObserver(muts => {
+    _obs.disconnect();
+    for (const m of muts) {
+      if (m.type === "characterData") doText(m.target);
+      else if (m.type === "attributes") doAttr(m.target, m.attributeName);
+      else m.addedNodes.forEach(walk);
+    }
+    _obs.observe(document.body, OBS_CFG);
+  });
+  _obs.observe(document.body, OBS_CFG);
+}
+const OBS_CFG = { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["placeholder", "title"] };
+
+function setLanguage(l) {
+  if (!LANGS.includes(l)) return;
+  LANG = l;
+  try { localStorage.setItem("dobLang", l); } catch (e) {}
+  document.documentElement.lang = l;
+  if (_obs) _obs.disconnect();
+  walk(document.body);
+  if (_obs) _obs.observe(document.body, OBS_CFG);
+  const sel = document.getElementById("langSelect");
+  if (sel) sel.value = l;
+  // Bereiche neu zeichnen, die ihre Texte selbst setzen
+  try { if (typeof updateChatLock === "function") updateChatLock(); } catch (e) {}
+  try { if (window._lastPlayersData && typeof renderPresence === "function") renderPresence(window._lastPlayersData); } catch (e) {}
+}
+document.documentElement.lang = LANG;
+(function () { const sel = document.getElementById("langSelect"); if (sel) sel.value = LANG; })();
+startI18n();
+</script>
 </body>
 </html>
