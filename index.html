@@ -1662,6 +1662,9 @@ function escapeHtml(v) {
 function currentPresenceStatus() {
   const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt" };
   try {
+    // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
+    const _m = document.getElementById("menu");
+    if (_m && _m.style.display === "flex") return "Idle in Menu";
     if (running) {
       if (mode === "online") {
         if (onlineVsBot) return "1v1 vs Bot";
