@@ -1253,6 +1253,21 @@ async function rpcSetLeagueMember(week, tier, group, data) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !/^\d$/.test(String(tier)) || !/^[A-Za-z0-9_-]{1,40}$/.test(group)) throw new Error("Bad league path.");
   return set(ref(db, "weeklyLeague/" + week + "/" + tier + "/" + group + "/" + uid), data);
 }
+// Name in bestehenden Eintraegen nachziehen (Liga: nur Name, nur wenn der Eintrag existiert)
+async function rpcRenameLeagueEntry(week, tier, group, uid, newName) {
+  requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !/^\d$/.test(String(tier)) || !/^[A-Za-z0-9_-]{1,40}$/.test(group)) return;
+  const r = ref(db, "weeklyLeague/" + week + "/" + tier + "/" + group + "/" + uid);
+  if (!(await get(r)).exists()) return;
+  return update(r, { name: newName });
+}
+// Chat: nur die Namen der letzten 200 Nachrichten dieser UID
+async function rpcRenameChatMessages(uid, newName) {
+  requireUid();
+  const v = (await get(query(ref(db, "chat"), limitToLast(200)))).val() || {}, up = {};
+  Object.entries(v).forEach(([id, m]) => { if (m && m.uid === uid && m.name !== newName) up["chat/" + id + "/name"] = newName; });
+  if (Object.keys(up).length) return update(ref(db), up);
+}
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
   const uid = requireUid();
@@ -1282,6 +1297,7 @@ async function rpcModRename(uid, oldName, newName) {
   return update(ref(db), up);
 }
 window._dobRPC = {
+  renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -2215,6 +2231,13 @@ async function changeUsername(newName) {
   onlineAccount.name = newName;
   saveAccountLocal();
   await pushAccountToFirebase(); // also re-creates the new username index
+
+  // Liga-Eintrag und alte Chatnachrichten auf den neuen Namen ziehen (Fehler hier brechen die Umbenennung nicht ab)
+  try {
+    if (onlineAccount.leagueWeek && onlineAccount.leagueGroup)
+      await RPC.renameLeagueEntry(onlineAccount.leagueWeek, onlineAccount.leagueTier || 0, onlineAccount.leagueGroup, myUid, newName);
+  } catch (e) { console.warn("league rename failed", e); }
+  try { await RPC.renameChatMessages(myUid, newName); } catch (e) { console.warn("chat rename failed", e); }
 
   alert("Name successfully changed!");
   if (document.getElementById("leaderboardScreen").style.display === "flex") {
@@ -6115,6 +6138,8 @@ async function _modRenameAct(uid, p) {
   if (taken && taken !== uid) { alert("Name already taken."); _modCancel(); }
   await _modRPC().modRename(uid, p.name, nn);
   await _modRPC().modSetSanction(uid, { rename: { name: nn, ts: Date.now() } });
+  try { if (p.leagueWeek && p.leagueGroup) await _modRPC().renameLeagueEntry(p.leagueWeek, p.leagueTier || 0, p.leagueGroup, uid, nn); } catch (e) { console.warn("league rename failed", e); }
+  try { await _modRPC().renameChatMessages(uid, nn); } catch (e) { console.warn("chat rename failed", e); }
 }
 async function _modMute(uid) {
   const m = Number(prompt("Mute for how many minutes? (0 = unmute)", "60")); if (isNaN(m) || m < 0) _modCancel();
