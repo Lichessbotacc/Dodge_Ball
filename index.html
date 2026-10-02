@@ -3509,7 +3509,8 @@ function handlePostMatch(d) {
       status: "waiting", winner: null, eloChange: null,
       p1State: null, p2State: null, ballState: null, p1Ready: null, p2Ready: null,
       rematch_p1: null, rematch_p2: null, postChat: null,
-      seed: Math.floor(Math.random() * 1000000), round: (d.round || 0) + 1
+      seed: Math.floor(Math.random() * 1000000), round: (d.round || 0) + 1,
+      createdAt: Date.now()
     }).catch(() => {});
   }
   if ((d.round || 0) > onlineRound && d.status === "waiting") {
@@ -4872,6 +4873,7 @@ async function startOnlineTV() {
   // Ein Match gilt als "gestartet", sobald irgendein Spieler- oder Ball-Status geschrieben wurde
   const hasStarted = (m) => !!(m && (m.p1State || m.p2State || m.ballState));
   const TV_START_GRACE_MS = 15000; // so lange darf VS-Screen/Countdown dauern, danach gilt ein Match ohne Start als tot
+  const seenPlaying = new Map();   // id -> wann das TV das Match zuerst als "playing" OHNE Status gesehen hat
   const badMatches = new Map();      // id -> Zeitpunkt, bis zu dem das Match übersprungen wird (läuft ab, wird später erneut versucht)
   let gotPacket = false;
   let lastMatchesData = null;
@@ -4924,15 +4926,17 @@ async function startOnlineTV() {
     }
     let bestId = null, bestElo = -1, best = null;
     for (const [id, m] of Object.entries(matchesData)) {
-      if (m.status !== "playing") continue;
+      if (m.status !== "playing") { seenPlaying.delete(id); continue; }
       // Nie gestartete Matches (gepaart, aber nie losgegangen): nicht anzeigen, nach kurzer Zeit löschen
       if (!hasStarted(m)) {
-        if (m.createdAt && Date.now() - m.createdAt > TV_START_GRACE_MS && !deadRemoved.has(id)) {
+        if (!seenPlaying.has(id)) seenPlaying.set(id, Date.now());
+        else if (Date.now() - seenPlaying.get(id) > TV_START_GRACE_MS && !deadRemoved.has(id)) {
           deadRemoved.add(id);
           RPC.removeMatch(id).catch(() => {});   // klappt nur, wenn die Rules es erlauben (siehe RULES)
         }
         continue;
       }
+      seenPlaying.delete(id);
       if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
       if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
@@ -5102,7 +5106,7 @@ canvas.addEventListener("touchstart", e => {
                       (data.exists() && (data.child('p1uid').val() === auth.uid || data.child('p2uid').val() === auth.uid)) ||
                       // ADDED: anyone (e.g. the TV) may delete a match that never started
                       // (no player state) and is older than 30 s
-                      (data.exists() && !newData.exists() && !data.child('p1State').exists() && !data.child('p2State').exists()
+                      (data.exists() && !newData.exists() && data.child('status').val() === 'playing' && !data.child('p1State').exists() && !data.child('p2State').exists()
                         && !data.child('ballState').exists() && data.child('createdAt').val() < now - 30000)
                    )"
       }
