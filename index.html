@@ -1274,6 +1274,29 @@ window.dispatchEvent(new Event("dobRPCReady"));
 // ═══════════════════════════════════════════════
 //  WAIT FOR AUTH + RPC BRIDGE TO BE READY
 // ═══════════════════════════════════════════════
+
+// ═══ Eigene Verbindung überwachen ═══
+(function () {
+  const bar = document.createElement("div");
+  bar.id = "connBanner";
+  bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;display:none;padding:8px;text-align:center;font:700 14px sans-serif;background:#c0392b;color:#fff;";
+  bar.textContent = "⚠ Connection lost – reconnecting… (leaving a running match counts as a forfeit)";
+  document.body.appendChild(bar);
+  let wasUp = false, downTimer = null;
+  function set(up) {
+    if (up) { clearTimeout(downTimer); downTimer = null; bar.style.display = "none"; wasUp = true; return; }
+    if (!wasUp) return;                                   // erster Status vor dem Verbinden ignorieren
+    downTimer = setTimeout(() => { bar.style.display = "block"; }, 1500);   // kurze Aussetzer nicht anzeigen
+  }
+  window.addEventListener("offline", () => set(false));
+  window.addEventListener("online", () => { /* Firebase meldet den Rest */ });
+  const iv = setInterval(() => {                        // warten bis die Firebase-Brücke bereit ist
+    if (!window._dobRPC || !window.dobIsReady || !window.dobIsReady()) return;
+    clearInterval(iv);
+    try { window._dobRPC.on(".info/connected", v => set(v === true)); } catch (e) {}
+  }, 500);
+})();
+
 let fbReady = false;     // kept for minimal diff with old code: true once we can talk to the DB AS our own uid
 let RPC = null;
 let myUid = null;
@@ -1408,7 +1431,14 @@ function renderPresence(playersData) {
 //  ACCOUNT
 // ═══════════════════════════════════════════════
 // ═══ GLOBAL CHAT (Text wird per textContent gesetzt -> kein XSS) ═══
-let chatUnsub = null, lastChatSent = 0, chatFirst = true;
+let chatUnsub = null, lastChatSent = 0, chatFirst = true, chatSentTimes = [], lastChatText = "";
+// Einfacher Wortfilter (Liste nach Bedarf erweitern) + Links werden entfernt
+const CHAT_BAD_WORDS = ["fuck","shit","bitch","nigg","fotze","hurensohn","wichser","arschloch","schlampe"];
+function chatFilter(t) {
+  t = t.replace(/(https?:\/\/|www\.)\S+/gi, "[link]");
+  for (const w of CHAT_BAD_WORDS) t = t.replace(new RegExp(w, "gi"), m => "*".repeat(m.length));
+  return t;
+}
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
 const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label überall
@@ -1510,9 +1540,17 @@ async function sendChat() {
   if (!text) return;
   if (!onlineAccount) { updateChatLock(); return; }
   if (!fbReady || Date.now() - lastChatSent < 1000) return;
-  lastChatSent = Date.now();
+  const now = Date.now();
+  chatSentTimes = chatSentTimes.filter(t => now - t < 10000);
+  if (chatSentTimes.length >= 5) { inp.placeholder = "Slow down…"; return; }        // max. 5 Nachrichten / 10 s
+  let clean = text.replace(/[\u0000-\u001f\u200b-\u200f\u202a-\u202e]/g, "").replace(/\s{3,}/g, "  ").slice(0, 200);
+  if (!clean.trim()) return;
+  if (clean === lastChatText && now - lastChatSent < 15000) return;                // gleiche Nachricht nicht wiederholen
+  clean = chatFilter(clean);
+  lastChatText = clean; chatSentTimes.push(now);
+  lastChatSent = now;
   inp.value = "";
-  try { await RPC.sendChat(onlineAccount.name, text); } catch(e) { console.warn("chat failed", e); }
+  try { await RPC.sendChat(onlineAccount.name, clean); } catch(e) { console.warn("chat failed", e); }
 }
 document.getElementById("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
 
