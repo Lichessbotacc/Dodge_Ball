@@ -661,6 +661,16 @@ body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
+#newsBtn{position:absolute;top:62px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
+#newsBtn .newsDot{display:none;width:9px;height:9px;border-radius:50%;background:#ff4d4d;margin-left:8px;vertical-align:middle;box-shadow:0 0 8px #ff4d4d;}
+#newsOverlay{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);}
+#newsBox{width:min(560px,92vw);max-height:84vh;display:flex;flex-direction:column;background:linear-gradient(160deg,rgba(16,18,26,0.98),rgba(8,9,14,0.98));border:1px solid rgba(255,255,255,0.12);border-top:3px solid var(--neon-cyan);border-radius:14px;padding:16px;text-align:left;color:#e6e9f2;box-shadow:0 20px 50px rgba(0,0,0,0.6);}
+#newsList{overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin:10px 0;}
+.newsItem{border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:10px;}
+.newsItem .nTitle{font-weight:700;font-size:15px;color:#ffd700;}
+.newsItem .nDate{font-size:11px;color:#8b93a6;margin-bottom:4px;}
+.newsItem .nText{font-size:14px;white-space:pre-wrap;word-break:break-word;}
+
 
 /* ═════ WEEKLY LEAGUE (redesign) ═════ */
 #leagueContent{width:460px;max-width:94vw;gap:14px;}
@@ -779,6 +789,7 @@ body.mode-online #homeBtn{display:none!important;}
         </a>
       </div>
       <button id="accountBtn" onclick="openAccountScreen()">👤 Log in / Sign up</button>
+      <button id="newsBtn" onclick="openNews()">📰 News<span class="newsDot" id="newsDot"></span></button>
       <!-- LINKS: Global Chat -->
       <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
         <b>💬 Global Chat</b>
@@ -1253,7 +1264,11 @@ async function rpcGetChatBefore(beforeKey, n) {
   const snap = await get(query(ref(db, "chat"), orderByKey(), endBefore(beforeKey), limitToLast(n || 50)));
   return snap.val();
 }
+// ── News: lesen darf jeder, schreiben nur der Admin (per Database Rules erzwungen!) ──
+async function rpcNewsPush(data) { requireUid(); return push(ref(db, "news"), data); }
+async function rpcNewsRemove(id) { requireUid(); return remove(ref(db, "news/" + id)); }
 window._dobRPC = {
+  newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
@@ -5681,6 +5696,98 @@ const DISCORD_URL = "https://discord.gg/w62CNMSbYd";
   const a = document.getElementById("linkDiscord");
   if (a && DISCORD_URL) { a.href = DISCORD_URL; a.style.display = "flex"; }
 })();
+</script>
+
+<script>
+// ═══════════════════════════════════════════════
+//  NEWS (Button oben rechts im Hauptmenü)
+//  Lesen: alle. Schreiben: nur NEWS_ADMIN_UID – wirklich abgesichert
+//  wird das ERST durch die Firebase Database Rules (siehe Anleitung).
+// ═══════════════════════════════════════════════
+const NEWS_ADMIN_UID = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";   // <- HIER deine UID eintragen (wird dir im News-Fenster angezeigt)
+let _newsData = null, _newsUnsub = null;
+
+function _newsMyUid() { try { return (window.dobMyUid && window.dobMyUid()) || null; } catch (e) { return null; } }
+function _newsIsAdmin() { const u = _newsMyUid(); return !!(u && NEWS_ADMIN_UID && u === NEWS_ADMIN_UID); }
+function _newsItems() {
+  return Object.entries(_newsData || {}).map(([id, n]) => ({ id, ...n }))
+    .filter(n => n && n.text).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+function _newsUpdateDot() {
+  const dot = document.getElementById("newsDot"); if (!dot) return;
+  const items = _newsItems(); let seen = 0;
+  try { seen = Number(localStorage.getItem("dob_news_seen")) || 0; } catch (e) {}
+  dot.style.display = (items.length && (items[0].ts || 0) > seen) ? "inline-block" : "none";
+}
+function _newsStart() {
+  if (_newsUnsub || !window._dobRPC) return;
+  _newsUnsub = window._dobRPC.on("news", d => {
+    _newsData = d; _newsUpdateDot();
+    const ov = document.getElementById("newsOverlay");
+    if (ov && ov.style.display === "flex") _newsRender();
+  });
+}
+if (window._dobRPC) _newsStart(); else window.addEventListener("dobRPCReady", _newsStart);
+
+function _newsRender() {
+  const list = document.getElementById("newsList"); if (!list) return;
+  list.textContent = "";
+  const items = _newsItems(), admin = _newsIsAdmin();
+  if (!items.length) {
+    const e = document.createElement("div"); e.style.color = "#8b93a6"; e.textContent = "No news yet."; list.appendChild(e);
+  }
+  items.forEach(n => {
+    const d = document.createElement("div"); d.className = "newsItem";
+    if (n.title) { const t = document.createElement("div"); t.className = "nTitle"; t.textContent = n.title; d.appendChild(t); }
+    const dt = document.createElement("div"); dt.className = "nDate"; dt.textContent = n.ts ? new Date(n.ts).toLocaleString() : ""; d.appendChild(dt);
+    const tx = document.createElement("div"); tx.className = "nText"; tx.textContent = n.text; d.appendChild(tx);
+    if (admin) {
+      const del = document.createElement("button");
+      del.textContent = "🗑 Delete"; del.style.cssText = "margin:6px 0 0;padding:4px 10px;font-size:12px;";
+      del.onclick = async () => { if (!confirm("Delete this post?")) return; try { await window._dobRPC.newsRemove(n.id); } catch (e) { alert("Failed: " + e.message); } };
+      d.appendChild(del);
+    }
+    list.appendChild(d);
+  });
+  const ed = document.getElementById("newsEditor"), hint = document.getElementById("newsUidHint");
+  ed.style.display = admin ? "block" : "none";
+  const me = _newsMyUid();
+  // Hilfe zum Einrichten: nur wenn noch keine Admin-UID gesetzt ist und du als DarkOnCrack eingeloggt bist
+  const isDevName = typeof onlineAccount !== "undefined" && onlineAccount && onlineAccount.name === "DarkOnCrack";
+  if (!NEWS_ADMIN_UID && me && isDevName) { hint.style.display = "block"; hint.textContent = "Setup: set NEWS_ADMIN_UID = \"" + me + "\" in the code."; }
+  else hint.style.display = "none";
+}
+
+function openNews() {
+  let ov = document.getElementById("newsOverlay");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "newsOverlay";
+    ov.innerHTML = '<div id="newsBox"><div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">📰 News</b><button onclick="closeNews()" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+      + '<div id="newsList"></div>'
+      + '<div id="newsUidHint" style="display:none;font-size:11px;color:#ffd700;word-break:break-all;margin-bottom:6px;"></div>'
+      + '<div id="newsEditor" style="display:none;border-top:1px solid rgba(255,255,255,0.1);padding-top:10px;">'
+      + '<input type="text" id="newsTitleIn" maxlength="80" placeholder="Title (optional)" style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:8px;font-size:13px;">'
+      + '<textarea id="newsTextIn" maxlength="2000" rows="4" placeholder="Write an update…" style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:8px;font-size:13px;resize:vertical;background:rgba(255,255,255,0.05);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;"></textarea>'
+      + '<button onclick="publishNews()" style="margin:0;padding:8px 16px;font-size:13px;">Publish</button></div></div>';
+    ov.addEventListener("click", e => { if (e.target === ov) closeNews(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  _newsStart(); _newsRender();
+  const items = _newsItems();
+  try { if (items.length) localStorage.setItem("dob_news_seen", String(items[0].ts || 0)); } catch (e) {}
+  _newsUpdateDot();
+}
+function closeNews() { const ov = document.getElementById("newsOverlay"); if (ov) ov.style.display = "none"; }
+async function publishNews() {
+  if (!_newsIsAdmin()) return;
+  const t = document.getElementById("newsTitleIn"), x = document.getElementById("newsTextIn");
+  const text = x.value.trim(); if (!text) return;
+  try {
+    await window._dobRPC.newsPush({ title: t.value.trim(), text, ts: Date.now() });
+    t.value = ""; x.value = "";
+  } catch (e) { alert("Failed (Database Rules gesetzt?): " + e.message); }
+}
 </script>
 </body>
 </html>
