@@ -1654,6 +1654,61 @@ async function forfeitOpponent() {
 }
 
 // ═══════════════════════════════════════════════
+//  ANTI CORNER-CAMPING (online 1v1)
+//  • "Deep corner" = player centre inside a square of CAMP_ZONE * min(W,H) in any of the 4 corners.
+//  • Meter: +1 s per second in a corner (switching corners counts), only CAMP_DECAY s lost per second outside.
+//  • Warning from 50 %, at CAMP_LIMIT_MS the player has LOST the match (normal ELO loss) + message.
+//  • Every client checks itself (instant message) AND the opponent (+1.5 s grace) so it cannot be switched off.
+// ═══════════════════════════════════════════════
+const CAMP_ZONE = 0.14, CAMP_LIMIT_MS = 8000, CAMP_DECAY = 0.25;
+let campState = null, onlineMatchStatus = null;
+function campReset() { campState = { me: { m: 0 }, opp: { m: 0 }, last: Date.now(), done: false }; campWarn(false); }
+function inDeepCorner(p) {
+  const z = Math.min(W(), H()) * CAMP_ZONE;
+  return (p.x < z || p.x > W() - z) && (p.y < z || p.y > H() - z);
+}
+function campBanner(id, text, color, ms) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div"); el.id = id;
+    el.style.cssText = "position:fixed;left:50%;top:14%;transform:translateX(-50%);z-index:180;pointer-events:none;text-align:center;max-width:90vw;" +
+      "padding:12px 22px;border-radius:14px;font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:.4px;" +
+      "background:rgba(12,12,18,.92);backdrop-filter:blur(6px);box-shadow:0 8px 30px rgba(0,0,0,.5);";
+    document.body.appendChild(el);
+  }
+  el.style.border = "1px solid " + color; el.style.color = color; el.textContent = text;
+  if (ms) { clearTimeout(el._t); el._t = setTimeout(() => el.remove(), ms); }
+}
+function campWarn(on, secLeft) {
+  const el = document.getElementById("campWarn");
+  if (!on) { if (el) el.remove(); return; }
+  campBanner("campWarn", "⚠ " + tr("No corner camping!") + " " + tr("Move out in") + " " + secLeft + "s", "#ffb020");
+}
+function campTick() {
+  if (!campState || campState.done || onlineResultHandled || !running || mode !== "online" || !onlineAccount) return;
+  const now = Date.now(), dt = Math.min(250, now - campState.last);
+  campState.last = now;
+  if (!(onlineVsBot || onlineMatchStatus === "playing")) return;      // not before the real start
+  const me  = players.find(p => p.name === onlineAccount.name);
+  const opp = players.find(p => p.name !== onlineAccount.name);
+  const upd = (st, p) => { if (!p || p.alive === false) return; st.m = inDeepCorner(p) ? st.m + dt : Math.max(0, st.m - dt * CAMP_DECAY); };
+  upd(campState.me, me);
+  if (!onlineVsBot) upd(campState.opp, opp);
+  const m = campState.me.m;
+  if (m > CAMP_LIMIT_MS * 0.5) campWarn(true, Math.max(0, Math.ceil((CAMP_LIMIT_MS - m) / 1000))); else campWarn(false);
+  if (m >= CAMP_LIMIT_MS) { campState.done = true; campDisqualify(true); }
+  else if (!onlineVsBot && campState.opp.m >= CAMP_LIMIT_MS + 1500) { campState.done = true; campDisqualify(false); }
+}
+function campDisqualify(selfCamped) {
+  const meName = onlineAccount.name, oppName = onlineOpponent ? onlineOpponent.name : "Online Bot";
+  campWarn(false);
+  if (selfCamped) campBanner("campMsg", "🚫 " + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000);
+  else campBanner("campMsg", "🚫 " + tr("Opponent was disqualified for corner camping – you win!"), "#00ff88", 8000);
+  if (!onlineVsBot && fbReady && onlineMatchId) RPC.updateMatch(onlineMatchId, { dq: "camp" }).catch(() => {});
+  if (selfCamped) reportOnlineResult(oppName, meName); else reportOnlineResult(meName, oppName);
+}
+
+// ═══════════════════════════════════════════════
 //  WEEKLY LEAGUE (Duolingo style) – independent of ELO
 //  • Each week (Mon 00:00 UTC to Sun 24:00 UTC) active players of a league are placed in groups
 //    of max. 20 players. Only wins of the current week count.
@@ -3139,6 +3194,7 @@ function startOnlineGame(matchData) {
   running = true;
   startTime = Date.now();
   onlineResultHandled = false;
+  campReset(); onlineMatchStatus = null;
   onlineSimTick = 0;
   myTrail = [];
 
@@ -3235,6 +3291,9 @@ function startOnlineGame(matchData) {
     if (!data) return;
 
     // Opponent heartbeat: any change of their ping / position / (as host) ball counts as "alive"
+    onlineMatchStatus = data.status;
+    if (data.dq === "camp" && data.winner && data.winner !== myName && !document.getElementById("campMsg"))
+      campBanner("campMsg", "🚫 " + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000);
     if (data.status !== wdStatus) { wdStatus = data.status; wdLastBeat = Date.now(); }
     const wdNow = String(data["ping_" + wdOppRole]) + "|" + JSON.stringify(data[wdOppRole + "State"] || null) + "|" + (!onlineIsHost ? data.ballState : "");
     if (wdNow !== wdSig) { wdSig = wdNow; wdLastBeat = Date.now(); }
@@ -3426,6 +3485,7 @@ async function handleOnlineResult(winnerName, change) {
   onlineResultHandled = true;
   clearActiveMatchMarker();
   armOnlineDisconnect(false);
+  campWarn(false);
   running = false;
   clearAllTimers();
   document.getElementById("onlineHUD").style.display = "none";
@@ -4233,6 +4293,7 @@ function update() {
   }
 
   if (mode === "online") {
+    campTick();
     pushMyPosition();
     onlineSimTick++;
 
@@ -5419,6 +5480,8 @@ Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen 
 Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
 
 Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein."});
+
+Object.assign(DICT.de, {"No corner camping!": "Kein Ecken-Campen!", "Move out in": "Verlasse die Ecke in", "Corner camping is not allowed – you lost the match.": "Ecken-Campen ist nicht erlaubt – du hast das Match verloren.", "Opponent was disqualified for corner camping – you win!": "Gegner wurde wegen Ecken-Campens disqualifiziert – du gewinnst!"});
 
 let LANG = (function () {
   try { const s = localStorage.getItem("dobLang"); if (LANGS.includes(s)) return s; } catch (e) {}
