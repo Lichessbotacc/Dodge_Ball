@@ -1267,7 +1267,22 @@ async function rpcGetChatBefore(beforeKey, n) {
 // ── News: lesen darf jeder, schreiben nur der Admin (per Database Rules erzwungen!) ──
 async function rpcNewsPush(data) { requireUid(); return push(ref(db, "news"), data); }
 async function rpcNewsRemove(id) { requireUid(); return remove(ref(db, "news/" + id)); }
+// ── Mod/Admin: nur mit Admin-UID (die Database Rules erzwingen das zusätzlich serverseitig) ──
+const MOD_ADMIN_UID_RPC = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";
+function requireAdmin() { const u = requireUid(); if (u !== MOD_ADMIN_UID_RPC) throw new Error("Admin only."); return u; }
+async function rpcModSetSanction(uid, data) { requireAdmin(); return update(ref(db, "sanctions/" + uid), data); }
+async function rpcModClearSanction(uid)     { requireAdmin(); return remove(ref(db, "sanctions/" + uid)); }
+async function rpcModDeleteChat(id)         { requireAdmin(); return remove(ref(db, "chat/" + id)); }
+async function rpcModRename(uid, oldName, newName) {
+  requireAdmin();
+  const up = {};
+  up["players/" + uid + "/name"] = newName;
+  if (oldName) up["usernames/" + String(oldName).toLowerCase()] = null;
+  up["usernames/" + String(newName).toLowerCase()] = uid;
+  return update(ref(db), up);
+}
 window._dobRPC = {
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1465,6 +1480,14 @@ function chatFilter(t) {
   for (const w of CHAT_BAD_WORDS) t = t.replace(new RegExp(w, "gi"), m => "*".repeat(m.length));
   return t;
 }
+// Verbotene Namen (leicht erweiterbar). Leetspeak (h1tl3r, h!tler …) wird erkannt.
+const NAME_BLOCK = ["hitler","nazi","hakenkreuz","goebbels","himmler","1488","nigg"];
+function nameIsBlocked(n) {
+  const raw = String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const norm = String(n || "").toLowerCase().replace(/[@4]/g, "a").replace(/3/g, "e").replace(/[1!|]/g, "i")
+    .replace(/0/g, "o").replace(/[5$]/g, "s").replace(/7/g, "t").replace(/[^a-z0-9]/g, "");
+  return NAME_BLOCK.some(w => raw.includes(w) || norm.includes(w));
+}
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
 const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label überall
@@ -1486,7 +1509,7 @@ function renderChat(keepScroll) {
   const prevH = box.scrollHeight, prevTop = box.scrollTop;
   const atBottom = prevH - prevTop - box.clientHeight < 40;
   box.innerHTML = "";
-  const list = Object.entries(chatAll).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0) || (a[0] < b[0] ? -1 : 1)).map(e => e[1]);
+  const list = Object.entries(chatAll).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0) || (a[0] < b[0] ? -1 : 1));
   if (!list.length) { box.textContent = "No messages yet."; return; }
   if (chatNoMoreOlder) {
     const top = document.createElement("div");
@@ -1495,7 +1518,7 @@ function renderChat(keepScroll) {
     box.appendChild(top);
   }
   let prevSender = null;
-  for (const m of list) {
+  for (const [mkey, m] of list) {
     const d = new Date(m.ts || 0);
     const row = document.createElement("div");
     // thin separator line between messages, but not between consecutive messages of the same user
@@ -1530,6 +1553,13 @@ function renderChat(keepScroll) {
       tag.style.cssText = "color:#ff4d6d;text-shadow:0 0 8px rgba(255,77,109,0.55);letter-spacing:.5px;";
       row.append(meta, tag, nm, tx);
     } else row.append(meta, nm, tx);
+    if (typeof _modIsAdmin === "function" && _modIsAdmin()) {
+      const mb = document.createElement("button"); mb.textContent = "🛡"; mb.title = "Mod actions for this player";
+      mb.style.cssText = "margin:0 0 0 8px;padding:0 5px;font-size:11px;"; mb.onclick = () => openModPanel(m.name);
+      const db_ = document.createElement("button"); db_.textContent = "🗑"; db_.title = "Delete message";
+      db_.style.cssText = "margin:0 0 0 4px;padding:0 5px;font-size:11px;"; db_.onclick = () => modDeleteChatMsg(mkey);
+      row.append(mb, db_);
+    }
     box.appendChild(row);
   }
   if (keepScroll) box.scrollTop = prevTop + (box.scrollHeight - prevH);   // beim Nachladen oben: Position halten
@@ -1556,6 +1586,10 @@ function startChatListener() {
   const box = document.getElementById("chatMessages");
   if (box) box.addEventListener("scroll", () => { if (box.scrollTop < 30) loadOlderChat(); });
   chatUnsub = RPC.onChat(msgs => {
+    { // vom Mod gelöschte Nachrichten auch aus dem lokalen Verlauf entfernen
+      const cur = msgs || {}, ks = Object.keys(cur).sort(), minK = ks.length >= 50 ? ks[0] : "";
+      for (const k of Object.keys(chatAll)) if (!(k in cur) && k >= minK) delete chatAll[k];
+    }
     if (msgs) Object.assign(chatAll, msgs);    // Live-Fenster (letzte 50) in den Gesamtverlauf mischen
     renderChat(false);
   });
@@ -1565,6 +1599,7 @@ async function sendChat() {
   const text = inp.value.trim();
   if (!text) return;
   if (!onlineAccount) { updateChatLock(); return; }
+  if (typeof _modChatBlock === "function" && _modChatBlock()) { _modChatLock(); return; }
   if (!fbReady || Date.now() - lastChatSent < 1000) return;
   const now = Date.now();
   chatSentTimes = chatSentTimes.filter(t => now - t < 10000);
@@ -2162,6 +2197,10 @@ async function changeUsername(newName) {
     alert("Only letters, numbers, _ and - allowed.");
     return;
   }
+  if (nameIsBlocked(newName)) {
+    alert("This name is not allowed.");
+    return;
+  }
 
   const oldName = onlineAccount.name;
   if (oldName === newName) return;
@@ -2742,6 +2781,7 @@ async function createAccount() {
   if (deviceHasAccount()) { showAccountAuthScreen("register"); return; }   // one account per device
   if (!name || name.length < 2)          { info.textContent = "Name must be at least 2 characters."; info.style.color="#f44"; return; }
   if (!/^[a-zA-Z0-9_-]+$/.test(name))    { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
+  if (nameIsBlocked(name))               { info.textContent = "This name is not allowed."; info.style.color="#f44"; return; }
   if (!password || password.length < 6)  { info.textContent = "Password must be at least 6 characters."; info.style.color="#f44"; return; }
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
   if (!fbReady || !window._dobAuth)      { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
@@ -5787,6 +5827,283 @@ async function publishNews() {
     await window._dobRPC.newsPush({ title: t.value.trim(), text, ts: Date.now() });
     t.value = ""; x.value = "";
   } catch (e) { alert("Failed (Database Rules gesetzt?): " + e.message); }
+}
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  MOD-SYSTEM (nur für dich als Admin)
+//  Echte Durchsetzung passiert in den Firebase Database Rules
+//  (Node "sanctions"): Ban/Mute/Chat-Ban werden serverseitig geprüft.
+//  Dieser Code zeigt nur die Pop-ups an und enthält das Mod-Panel.
+// ═══════════════════════════════════════════════════════════════════
+const MOD_ADMIN_UID = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";
+const MOD_DEFAULT_TEXT = "A Dev/Mod has checked your account. You have to change your username or delete that account. If you don't do so within the next 24 hours, your account will be banned permanently!";
+let _modState = null, _modUnsub = null, _modUid = null, _modSnoozeUntil = 0, _modMode = null;
+
+function _modMyUid() { try { return (window.dobMyUid && window.dobMyUid()) || null; } catch (e) { return null; } }
+function _modIsAdmin() { return _modMyUid() === MOD_ADMIN_UID; }
+function _modCurName() { return (typeof onlineAccount !== "undefined" && onlineAccount && onlineAccount.name) ? String(onlineAccount.name) : ""; }
+function _modRPC() { return window._dobRPC; }
+function _modFmtLeft(ms) {
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h + "h " + String(m).padStart(2, "0") + "m " + String(x).padStart(2, "0") + "s";
+}
+
+// ── Sanktionen des eigenen Accounts live mitlesen ──
+function _modWatch() {
+  const uid = _modMyUid();
+  if (uid === _modUid && (_modUnsub || !uid)) return;
+  if (_modUnsub) { try { _modUnsub(); } catch (e) {} _modUnsub = null; }
+  _modUid = uid; _modState = null;
+  if (uid && _modRPC()) _modUnsub = _modRPC().on("sanctions/" + uid, d => { _modState = d || null; _modRender(); });
+  _modRender();
+}
+window.addEventListener("dobAuthReady", _modWatch);
+window.addEventListener("dobRPCReady", _modWatch);
+
+// ── Hat der Admin den Namen geändert? Dann lokalen Account angleichen (sonst würde der alte Name zurückgeschrieben) ──
+function _modApplyRename() {
+  const r = _modState && _modState.rename;
+  if (!r || !r.ts || !r.name || typeof onlineAccount === "undefined" || !onlineAccount || !_modUid) return;
+  let last = 0; try { last = Number(localStorage.getItem("dob_mod_rn_" + _modUid)) || 0; } catch (e) {}
+  if (r.ts <= last) return;
+  try { localStorage.setItem("dob_mod_rn_" + _modUid, String(r.ts)); } catch (e) {}
+  onlineAccount.name = r.name;
+  try { saveAccountLocal(); } catch (e) {}
+  try { pushAccountToFirebase().catch(() => {}); } catch (e) {}
+}
+
+// ── Status-Auswertung ──
+function _modWarnActive(w) {
+  const n = _modCurName().toLowerCase();
+  return !!w && !!n && (!w.forName || n === String(w.forName).toLowerCase());
+}
+function _modBanInfo() {
+  const s = _modState || {};
+  if (s.banned) return { reason: s.banReason || "" };
+  const w = s.warning;
+  if (w && w.deadline && Date.now() > w.deadline && _modWarnActive(w)) return { reason: "You did not change your username in time." };
+  return null;
+}
+function _modWarnInfo() {
+  const s = _modState || {}, w = s.warning;
+  if (w && _modWarnActive(w)) return { text: w.text || MOD_DEFAULT_TEXT, deadline: w.deadline || 0 };
+  const n = _modCurName();
+  if (!_modIsAdmin() && n && typeof nameIsBlocked === "function" && nameIsBlocked(n))
+    return { text: "Your username is not allowed. Please choose a different one or delete your account.", deadline: 0 };
+  return null;
+}
+function _modChatBlock() {
+  const s = _modState || {};
+  if (s.banned) return "You are banned.";
+  if (s.chatBanned) return "You are banned from the chat.";
+  if (s.muteUntil && s.muteUntil > Date.now()) return "Muted until " + new Date(s.muteUntil).toLocaleString();
+  return "";
+}
+function _modChatLock() {
+  const inp = document.getElementById("chatInput"), btn = document.getElementById("chatSendBtn");
+  if (!inp) return;
+  const b = _modChatBlock();
+  if (b) {
+    if (inp._modPh === undefined) inp._modPh = inp.placeholder;
+    inp.disabled = true; if (btn) btn.disabled = true; inp.placeholder = b; inp._modLocked = true;
+  } else if (inp._modLocked) {
+    inp._modLocked = false; inp.placeholder = inp._modPh || ""; if (btn) btn.disabled = false;
+    if (typeof updateChatLock === "function") updateChatLock(); else inp.disabled = false;
+  }
+}
+
+// ── Großes Pop-up (Ban / Warnung) ──
+function _modEnsureOv() {
+  let ov = document.getElementById("modOverlay");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "modOverlay";
+    ov.style.cssText = "position:fixed;inset:0;z-index:30000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.9);padding:16px;box-sizing:border-box;";
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function _modBuild(ov, mode) {
+  const box = 'width:min(560px,94vw);background:#0d0f16;border-radius:16px;padding:26px;text-align:center;color:#eaf2fb;box-shadow:0 0 60px rgba(255,68,68,0.35);';
+  if (mode === "ban") {
+    ov.innerHTML = '<div style="' + box + 'border:2px solid #ff4444;">'
+      + '<div style="font-size:54px;">🔨</div>'
+      + '<div style="font-size:26px;font-weight:800;color:#ff4444;margin:6px 0 10px;">Your account has been banned</div>'
+      + '<div id="modBanReason" style="font-size:15px;margin-bottom:18px;word-break:break-word;"></div>'
+      + '<button id="modLogoutBtn" style="margin:0;padding:10px 22px;font-size:15px;">Log out</button></div>';
+    ov.querySelector("#modLogoutBtn").onclick = async () => {
+      try { await window._dobAuth.logout(); } catch (e) {}
+      try { localStorage.removeItem("dobAccount"); } catch (e) {}
+      location.reload();
+    };
+  } else {
+    ov.innerHTML = '<div style="' + box + 'border:2px solid #ffd700;">'
+      + '<div style="font-size:54px;">⚠️</div>'
+      + '<div style="font-size:26px;font-weight:800;color:#ffd700;margin:6px 0 10px;">Moderator notice</div>'
+      + '<div id="modWarnText" style="font-size:16px;line-height:1.5;margin-bottom:12px;word-break:break-word;"></div>'
+      + '<div id="modCount" style="font-size:20px;font-weight:700;color:#ff6b6b;margin-bottom:14px;"></div>'
+      + '<input id="modNewName" type="text" maxlength="20" placeholder="New username" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:10px;font-size:15px;">'
+      + '<div id="modMsg" style="min-height:18px;font-size:13px;color:#ff8a8a;margin-bottom:8px;"></div>'
+      + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'
+      + '<button id="modRenameBtn" style="margin:0;padding:10px 20px;font-size:15px;">Change username</button>'
+      + '<button id="modDeleteBtn" style="margin:0;padding:10px 20px;font-size:15px;">Delete my account</button></div></div>';
+    ov.querySelector("#modRenameBtn").onclick = _modDoRename;
+    ov.querySelector("#modNewName").addEventListener("keydown", e => { if (e.key === "Enter") _modDoRename(); });
+    ov.querySelector("#modDeleteBtn").onclick = () => {
+      _modSnoozeUntil = Date.now() + 120000;   // Pop-up kurz ausblenden, damit der Konto-Bildschirm benutzbar ist
+      _modRender();
+      try { openAccountScreen(); } catch (e) {}
+    };
+  }
+}
+async function _modDoRename() {
+  const inp = document.getElementById("modNewName"), msg = document.getElementById("modMsg");
+  if (!inp || !msg) return;
+  const v = inp.value.trim();
+  if (v.length < 2 || !/^[a-zA-Z0-9_-]+$/.test(v)) { msg.textContent = "At least 2 characters; only letters, numbers, _ and -."; return; }
+  if (typeof nameIsBlocked === "function" && nameIsBlocked(v)) { msg.textContent = "This name is not allowed."; return; }
+  if (v.toLowerCase() === _modCurName().toLowerCase()) { msg.textContent = "Please choose a different name."; return; }
+  msg.textContent = "Saving…";
+  try { await changeUsername(v); } catch (e) { msg.textContent = "Error: " + (e && e.message); return; }
+  if (_modCurName() === v) { msg.textContent = ""; inp.value = ""; _modRender(); }
+  else msg.textContent = "Name could not be changed (already taken?).";
+}
+function _modRender() {
+  _modApplyRename();
+  _modChatLock();
+  const ov = _modEnsureOv();
+  const ban = _modBanInfo(), warn = ban ? null : _modWarnInfo();
+  const mode = ban ? "ban" : (warn && Date.now() > _modSnoozeUntil ? "warn" : null);
+  if (!mode) { ov.style.display = "none"; _modMode = null; return; }
+  if (mode !== _modMode) { _modBuild(ov, mode); _modMode = mode; }
+  ov.style.display = "flex";
+  if (mode === "ban") ov.querySelector("#modBanReason").textContent = ban.reason ? "Reason: " + ban.reason : "";
+  else {
+    ov.querySelector("#modWarnText").textContent = warn.text;
+    ov.querySelector("#modCount").textContent = warn.deadline ? "Time left: " + _modFmtLeft(warn.deadline - Date.now()) : "";
+  }
+}
+setInterval(_modRender, 1000);
+setInterval(() => { _modWatch(); _modAdminBtn(); }, 3000);
+if (_modRPC()) _modWatch();
+
+// ═══ ADMIN: Button im Menü + Mod-Panel ═══
+function _modAdminBtn() {
+  const ex = document.getElementById("modBtn");
+  if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
+  if (ex) return;
+  const nb = document.getElementById("newsBtn"); if (!nb) return;
+  const b = document.createElement("button"); b.id = "modBtn"; b.textContent = "🛡 Mod";
+  b.style.cssText = "position:absolute;top:104px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;";
+  b.onclick = () => openModPanel();
+  nb.insertAdjacentElement("afterend", b);
+}
+
+let _modPlayers = {}, _modSanc = {};
+function closeModPanel() { const ov = document.getElementById("modPanelOv"); if (ov) ov.style.display = "none"; }
+async function openModPanel(prefill) {
+  if (!_modIsAdmin()) return;
+  let ov = document.getElementById("modPanelOv");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "modPanelOv";
+    ov.style.cssText = "position:fixed;inset:0;z-index:15000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);";
+    ov.innerHTML = '<div style="width:min(760px,95vw);max-height:88vh;display:flex;flex-direction:column;background:#0d0f16;border:1px solid rgba(255,255,255,0.12);border-top:3px solid #ff4d6d;border-radius:14px;padding:16px;color:#e6e9f2;text-align:left;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🛡 Mod Panel</b><button id="modPanelX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+      + '<div style="display:flex;gap:8px;margin:10px 0;"><input id="modSearch" type="text" placeholder="Search name or UID…" style="flex:1;margin:0;padding:8px;font-size:13px;"><button id="modReload" style="margin:0;padding:6px 12px;font-size:13px;">↻</button></div>'
+      + '<div id="modList" style="overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div></div>';
+    ov.addEventListener("click", e => { if (e.target === ov) closeModPanel(); });
+    document.body.appendChild(ov);
+    ov.querySelector("#modPanelX").onclick = closeModPanel;
+    ov.querySelector("#modReload").onclick = _modPanelLoad;
+    ov.querySelector("#modSearch").addEventListener("input", _modPanelRender);
+  }
+  ov.style.display = "flex";
+  if (typeof prefill === "string") ov.querySelector("#modSearch").value = prefill;
+  await _modPanelLoad();
+}
+async function _modPanelLoad() {
+  const list = document.getElementById("modList"); if (!list) return;
+  try {
+    const [p, s] = await Promise.all([_modRPC().get("players"), _modRPC().get("sanctions")]);
+    _modPlayers = p || {}; _modSanc = s || {};
+    _modPanelRender();
+  } catch (e) { list.textContent = "Failed to load: " + (e && e.message) + " (Database Rules updated?)"; }
+}
+function _modBadges(uid, p) {
+  const s = _modSanc[uid] || {}, out = [], now = Date.now();
+  if (s.banned) out.push("🔨 BANNED");
+  if (s.chatBanned) out.push("🚫 chat ban");
+  if (s.muteUntil && s.muteUntil > now) out.push("🔇 muted until " + new Date(s.muteUntil).toLocaleString());
+  if (s.warning) {
+    const same = p && s.warning.forName && String(p.name).toLowerCase() === String(s.warning.forName).toLowerCase();
+    if (same && s.warning.deadline && s.warning.deadline < now) out.push("⏰ WARNING OVERDUE");
+    else if (same) out.push("⚠ warned, " + _modFmtLeft(s.warning.deadline - now) + " left");
+    else out.push("✔ warning resolved");
+  }
+  return out;
+}
+function _modPanelRender() {
+  const list = document.getElementById("modList"); if (!list) return;
+  const q = (document.getElementById("modSearch").value || "").trim().toLowerCase();
+  const rows = Object.entries(_modPlayers).filter(([uid, p]) => p && p.name && uid !== "bot__online_bot"
+      && (!q || String(p.name).toLowerCase().includes(q) || uid.toLowerCase().includes(q)))
+    .sort((a, b) => (_modBadges(b[0], b[1]).length - _modBadges(a[0], a[1]).length) || String(a[1].name).localeCompare(String(b[1].name)));
+  list.textContent = "";
+  if (!rows.length) { list.textContent = "No players found."; return; }
+  rows.slice(0, 80).forEach(([uid, p]) => {
+    const s = _modSanc[uid] || {};
+    const row = document.createElement("div");
+    row.style.cssText = "border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:8px 10px;";
+    const top = document.createElement("div");
+    const nm = document.createElement("b"); nm.textContent = p.name; nm.setAttribute("translate", "no");
+    const meta = document.createElement("span"); meta.style.cssText = "font-size:11px;color:#8b93a6;margin-left:8px;"; meta.textContent = "Elo " + (p.elo ?? "?") + " · " + uid;
+    top.append(nm, meta); row.appendChild(top);
+    const bd = _modBadges(uid, p);
+    if (bd.length) { const b = document.createElement("div"); b.style.cssText = "font-size:12px;color:#ffd700;margin-top:3px;"; b.textContent = bd.join("  ·  "); row.appendChild(b); }
+    const bar = document.createElement("div"); bar.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;";
+    const mk = (label, fn) => { const x = document.createElement("button"); x.textContent = label; x.style.cssText = "margin:0;padding:4px 9px;font-size:12px;"; x.onclick = () => _modAct(fn); bar.appendChild(x); };
+    mk("⚠ Warn", () => _modWarn(uid, p));
+    mk("✏ Rename", () => _modRenameAct(uid, p));
+    mk("🔇 Mute", () => _modMute(uid));
+    mk(s.chatBanned ? "💬 Allow chat" : "🚫 Chat ban", () => _modRPC().modSetSanction(uid, { chatBanned: s.chatBanned ? null : true }));
+    mk(s.banned ? "♻ Unban" : "🔨 Ban", () => _modBan(uid, s));
+    mk("🧹 Clear all", () => _modRPC().modClearSanction(uid));
+    row.appendChild(bar); list.appendChild(row);
+  });
+}
+async function _modAct(fn) {
+  try { await fn(); await _modPanelLoad(); }
+  catch (e) { if (e && e.message === "__cancel") return; alert("Failed: " + (e && e.message) + "\n(Database Rules updated?)"); }
+}
+const _modCancel = () => { throw new Error("__cancel"); };
+async function _modWarn(uid, p) {
+  const text = prompt("Message to show to " + p.name + " (empty = default text):", ""); if (text === null) _modCancel();
+  const hrs = Number(prompt("Deadline in hours:", "24")); if (!(hrs > 0)) _modCancel();
+  await _modRPC().modSetSanction(uid, { warning: { text: text.trim(), deadline: Date.now() + hrs * 3600000, forName: p.name, ts: Date.now() } });
+}
+async function _modRenameAct(uid, p) {
+  const nn = (prompt("New name for " + p.name + ":", "") || "").trim(); if (!nn) _modCancel();
+  if (!/^[a-zA-Z0-9_ -]{2,20}$/.test(nn)) { alert("2–20 characters: letters, numbers, space, _ and -"); _modCancel(); }
+  if (typeof nameIsBlocked === "function" && nameIsBlocked(nn)) { alert("That name is on the block list."); _modCancel(); }
+  const taken = await _modRPC().get("usernames/" + nn.toLowerCase());
+  if (taken && taken !== uid) { alert("Name already taken."); _modCancel(); }
+  await _modRPC().modRename(uid, p.name, nn);
+  await _modRPC().modSetSanction(uid, { rename: { name: nn, ts: Date.now() } });
+}
+async function _modMute(uid) {
+  const m = Number(prompt("Mute for how many minutes? (0 = unmute)", "60")); if (isNaN(m) || m < 0) _modCancel();
+  await _modRPC().modSetSanction(uid, { muteUntil: m > 0 ? Date.now() + m * 60000 : null });
+}
+async function _modBan(uid, s) {
+  if (s.banned) { await _modRPC().modSetSanction(uid, { banned: null, banReason: null }); return; }
+  const reason = prompt("Ban reason (shown to the player):", "Inappropriate username"); if (reason === null) _modCancel();
+  await _modRPC().modSetSanction(uid, { banned: true, banReason: reason.trim(), bannedAt: Date.now() });
+}
+async function modDeleteChatMsg(key) {
+  if (!confirm("Delete this chat message?")) return;
+  try { await _modRPC().modDeleteChat(key); delete chatAll[key]; renderChat(true); }
+  catch (e) { alert("Failed: " + (e && e.message)); }
 }
 </script>
 </body>
