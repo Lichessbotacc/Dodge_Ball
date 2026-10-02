@@ -1665,7 +1665,7 @@ function currentPresenceStatus() {
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
-    if (running) {
+    if (running && !(mode === "online" && onlineResultHandled)) {
       if (mode === "online") {
         if (onlineVsBot) return "1v1 vs Bot";
         return onlineOpponent && onlineOpponent.name ? "1v1 vs " + onlineOpponent.name : "In 1v1 Match";
@@ -1673,7 +1673,8 @@ function currentPresenceStatus() {
       if (mode === "online_tv") return "Watching Online TV";
       return "Playing " + (modeNames[mode] || mode);
     }
-    if (onlineMatchId) return onlineVsBot ? "1v1 vs Bot" : "In 1v1 Match";   // VS-Screen / Ergebnis
+    // VS-Screen vor dem Start zaehlt noch als Match; nach dem Ergebnis (onlineResultHandled) nicht mehr
+    if (onlineMatchId && !onlineResultHandled) return onlineVsBot ? "1v1 vs Bot" : "In 1v1 Match";
     if (onlineSearchInterval) return "Searching for match";
   } catch (e) {}
   return "Idle in Menu";
@@ -1688,6 +1689,38 @@ function syncPresence(force) {
 }
 setInterval(() => syncPresence(false), 2000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); });
+
+// ═══ Auto-Update: alle bekommen die neue Version ═══
+// Bei jedem Release BUILD_ID hier UND in version.json auf denselben neuen Wert setzen und beide Dateien hochladen.
+const BUILD_ID = "2026-10-03-1";
+let _updateShown = false;
+function _inSafeScreen() {
+  const m = document.getElementById("menu"), a = document.activeElement;
+  const typing = a && /^(INPUT|TEXTAREA)$/.test(a.tagName);
+  return !!(m && m.style.display === "flex") && !running && !typing;
+}
+function _reloadFresh() { location.replace(location.pathname + "?v=" + Date.now()); }
+async function checkForUpdate() {
+  try {
+    const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const live = String((await r.json()).v || "");
+    if (!live || live === BUILD_ID) return;
+    if (_inSafeScreen()) { _reloadFresh(); return; }       // im Menue: sofort neu laden
+    if (_updateShown) return;                               // sonst (Match, Eingabe): Hinweis, Match wird nie unterbrochen
+    _updateShown = true;
+    const b = document.createElement("div");
+    b.style.cssText = "position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9000;background:#14141e;border:1px solid #00ff88;color:#f0f0f5;border-radius:12px;padding:10px 14px;font:14px system-ui,sans-serif;display:flex;gap:10px;align-items:center;";
+    b.innerHTML = '<span>🔄 New version available</span><button style="margin:0;padding:6px 12px;font-size:13px;">Reload</button>';
+    b.querySelector("button").onclick = _reloadFresh;
+    document.body.appendChild(b);
+    // Sobald der Spieler wieder im Menue ist, automatisch laden
+    setInterval(() => { if (_inSafeScreen()) _reloadFresh(); }, 3000);
+  } catch (e) {}
+}
+setTimeout(checkForUpdate, 3000);
+setInterval(checkForUpdate, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
 
 function sanitizeAccount(acc) {
   if (!acc) return null;
@@ -2532,7 +2565,7 @@ function confirmHome() {
 function exitToMenu() {
   try { cleanupOnline(); } catch (e) { console.warn(e); }
   setTimeout(() => {
-    window.location.reload();
+    location.replace(location.pathname + "?v=" + Date.now());
   }, 150);
 }
 
@@ -4741,6 +4774,10 @@ async function reportOnlineResult(winnerName, loserName) {
 
   const diff = loserElo - winnerElo;
   const change = clampEloChange(Math.max(1, Math.min(15, Math.round(5 + diff / 100))));
+
+  // Bot-Match: es gibt keinen Match-Listener, der "done" verarbeitet -> Ergebnis direkt behandeln
+  // (sonst laeuft das Spiel nach der Camping-Disqualifikation einfach weiter)
+  if (onlineVsBot) { handleOnlineResult(winnerName, change); return; }
 
   if (fbReady && onlineMatchId) {
     try {
