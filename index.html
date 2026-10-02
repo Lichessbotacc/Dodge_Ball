@@ -1399,11 +1399,22 @@ function renderPresence(playersData) {
       return;
     }
 
-    const activeList = Object.entries(playersData)
+    // Dedupe: gleicher Name = ein Eintrag (eigene UID hat Vorrang, sonst der aktuellste)
+    const _seen = new Map();
+    Object.entries(playersData)
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p =>
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
-      );
+      )
+      .forEach(p => {
+        const key = String(p.name || "").toLowerCase();
+        const prev = _seen.get(key);
+        const better = !prev
+          || p.uid === myUid
+          || (prev.uid !== myUid && (p.lastActive || 0) > (prev.lastActive || 0));
+        if (better) _seen.set(key, p);
+      });
+    const activeList = [..._seen.values()];
 
     if (activeList.length === 0) {
       panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
