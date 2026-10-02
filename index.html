@@ -5296,6 +5296,13 @@ async function startOnlineTV() {
 
 
 
+// Browser-Zoom sperren (Strg+Mausrad, Strg +/-/0, Pinch am Trackpad). Das Browsermenü-Zoomen lässt sich nicht verhindern.
+window.addEventListener("wheel", e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+window.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "_", "0", "add", "subtract"].includes(e.key.toLowerCase())) e.preventDefault();
+}, { capture: true });
+["gesturestart", "gesturechange", "gestureend"].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+
 document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
 document.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
 
