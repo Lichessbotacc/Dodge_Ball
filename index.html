@@ -794,7 +794,7 @@ body.mode-online #homeBtn{display:none!important;}
         <h1>DarkOnBalls</h1>
         <div id="menuMain" class="menuPage">
           <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
-          <button onclick="showMenuPage('menuOffline')">🎮 Offline</button>
+          <button onclick="showMenuPage('menuOffline')" style="display:none" id="btnOfflineMenu">🎮 Offline</button> <!-- Offline vorübergehend ausgeblendet: style="display:none" entfernen zum Einblenden -->
           <button onclick="openSettings()">⚙️ Settings</button>
         </div>
         <div id="menuOnline" class="menuPage" style="display:none">
@@ -1732,6 +1732,7 @@ const LEAGUES = [
 ];
 const LEAGUE_GROUP_SIZE        = 20;       // max. players per group
 const LEAGUE_PROMOTE_TOP       = 5;        // max. promoted players per group
+const LEAGUE_PROMOTE_TOP_BRONZE = 10;       // Bronze: top half moves up (higher leagues are still empty)
 const LEAGUE_RELEGATE_BOTTOM   = 5;        // max. relegated players per group
 const LEAGUE_MIN_GROUP_PROMOTE = 5;        // groups with fewer players promote nobody
 const LEAGUE_KEEP_WEEKS        = 4;        // own entries of older weeks get cleaned up
@@ -1765,7 +1766,9 @@ function leagueSortMembers(list) {
     (a.uid < b.uid ? -1 : 1));
 }
 function leagueZones(n, tier) {
-  const up   = (tier < LEAGUES.length - 1 && n >= LEAGUE_MIN_GROUP_PROMOTE) ? Math.max(1, Math.min(LEAGUE_PROMOTE_TOP, Math.floor(n / 3))) : 0;
+  const up   = (tier < LEAGUES.length - 1 && n >= LEAGUE_MIN_GROUP_PROMOTE)
+    ? (tier === 0 ? Math.max(1, Math.min(LEAGUE_PROMOTE_TOP_BRONZE, Math.floor(n / 2)))
+                  : Math.max(1, Math.min(LEAGUE_PROMOTE_TOP, Math.floor(n / 3)))) : 0;
   const down = tier > 0 ? Math.min(LEAGUE_RELEGATE_BOTTOM, Math.floor(n / 4)) : 0;
   return { up, down };
 }
