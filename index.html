@@ -2531,12 +2531,22 @@ async function loadLeaderboard() {
     
     // Holt alle Einträge und zeigt absolut jeden Account (inkl. Bot & älterer Accounts),
     // der mindestens eine Partie (Sieg oder Niederlage) absolviert hat.
-    const activePlayers = Object.entries(data)
+    // Dedupe: gleicher Name = ein Eintrag (eigene UID hat Vorrang, sonst der mit den meisten Partien)
+    const _lbSeen = new Map();
+    Object.entries(data)
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p => {
         const totalGames = (Number(p.wins) || 0) + (Number(p.losses) || 0);
         return totalGames >= 1;
       })
+      .forEach(p => {
+        const key = String(p.name || "").toLowerCase();
+        const prev = _lbSeen.get(key);
+        const games = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
+        const better = !prev || p.uid === myUid || (prev.uid !== myUid && games(p) > games(prev));
+        if (better) _lbSeen.set(key, p);
+      });
+    const activePlayers = [..._lbSeen.values()]
       .sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
 
     if (activePlayers.length === 0) {
