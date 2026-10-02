@@ -323,9 +323,7 @@ body::after{
 }
 canvas{
   display:block;touch-action:none;-webkit-user-select:none;user-select:none;
-}
-#game{
-  position:absolute;left:50%;top:50%;z-index:0;
+  width:100%;height:100%;
 }
 
 #ui{
@@ -863,100 +861,44 @@ body.mode-online #homeBtn{display:none!important;}
 // ═══════════════════════════════════════════════
 //  CANVAS — FIXED VIRTUAL RESOLUTION (identical on every device)
 // ═══════════════════════════════════════════════
-// Online-Matches brauchen für beide Spieler exakt dieselbe Arena -> feste 1280x720.
-// Alle Offline-Modi nutzen dagegen den GANZEN Bildschirm (kein Balken, keine Ovale).
-const FIXED_W = 1280, FIXED_H = 720;      // Referenz (längere Seite = 1280) + Online-Querformat
-let arenaW = FIXED_W, arenaH = FIXED_H;
-let onlineH = FIXED_H;     // Online-Arena: Breite immer 1280, Höhe ergibt sich aus dem Match-Seitenverhältnis
-let viewRotated = false;
-// Seitenverhältnis des (ggf. gedrehten) Bildschirms, z.B. 1.78 (16:9) oder 2.16 (iPhone)
-function screenAspect() {
-  const a = Math.max(window.innerWidth, window.innerHeight) / Math.min(window.innerWidth, window.innerHeight);
-  return Math.round(Math.min(2.4, Math.max(1.2, a)) * 100) / 100;
-}
-function setOnlineAspect(a) {
-  a = Number(a);
-  if (!isFinite(a)) a = 16 / 9;
-  a = Math.min(2.4, Math.max(1.2, a));
-  onlineH = Math.round(FIXED_W / a);
-}   // Hochkant-Gerät: Spielfeld wird um 90° gedreht, UI bleibt aufrecht
+// Arena ist wieder überall fix 1280x720 (exakt wie Version 18, kein Rand)
+function screenAspect() { return 16 / 9; }
+function setOnlineAspect() {}
+function isRunning() { try { return !!running; } catch (e) { return false; } }
+
+const V_W = 1280;
+const V_H = 720;
 
 const stage   = document.getElementById("stage");
 const gameWrap= document.getElementById("gameWrap");
 const canvas  = document.getElementById("game");
 const ctx     = canvas.getContext("2d");
 
-let scale = 1;   // CSS-Pixel pro virtueller Einheit
+let scale = 1;
 
-function isOnlineMode() {
-  try { return mode === "online" || mode === "online_tv"; } catch (e) { return false; }
-}
-function fixedArena() { return isOnlineMode(); }
-function W() { return fixedArena() ? FIXED_W : arenaW; }
-function H() { return fixedArena() ? onlineH : arenaH; }
-
-let lastLayoutKey = "";
-function isRunning() { try { return !!running; } catch (e) { return false; } }
-function layoutKey() { return fixedArena() + "|" + onlineH + "|" + (isRunning() ? "r" : "m") + "|" + window.innerWidth + "x" + window.innerHeight; }
+function W() { return V_W; }
+function H() { return V_H; }
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  const vw = window.innerWidth, vh = window.innerHeight;
-  lastLayoutKey = layoutKey();
-  gameWrap.style.width = "100%";
+  gameWrap.style.width  = "100%";
   gameWrap.style.height = "100%";
-
-  // Hochkant: Spielfeld wird wie im Querformat berechnet und dann um 90° gedreht.
-  // So sieht das Spiel hochkant exakt so aus wie quer – nur die UI bleibt aufrecht.
-  viewRotated = vh > vw;
-  const lw = viewRotated ? vh : vw;     // "logische" Breite/Höhe im Querformat
-  const lh = viewRotated ? vw : vh;
-
-  let cssW, cssH;
-  if (!fixedArena() && isRunning()) {
-    // Offline-Spiel läuft: Arena bleibt eingefroren (z.B. wenn die Safari-Leiste ein-/ausfährt
-    // oder das Fenster skaliert wird) – nur die Darstellung passt sich an, das Gameplay nicht.
-    scale = Math.min(lw / arenaW, lh / arenaH);
-    cssW = Math.floor(arenaW * scale); cssH = Math.floor(arenaH * scale);
-    canvas.style.background = "transparent";
-    canvas.style.boxShadow  = "none";
-  } else if (!fixedArena()) {
-    // Offline im Menü: füllt den (gedrehten) Bildschirm, ein Skalierungsfaktor -> Kreise bleiben rund
-    scale = lw / FIXED_W;
-    arenaW = lw / scale;
-    arenaH = lh / scale;
-    cssW = lw; cssH = lh;
-    canvas.style.background = "transparent";
-    canvas.style.boxShadow  = "none";
-  } else {
-    // Online: für beide Spieler identische Arena (Form = schmalerer der beiden Bildschirme)
-    scale = Math.min(lw / W(), lh / H());
-    cssW = Math.floor(W() * scale); cssH = Math.floor(H() * scale);
-    canvas.style.background = "#0a0a10";
-    canvas.style.boxShadow  = "0 0 0 1px rgba(255,255,255,0.10)";
-  }
-  canvas.style.width  = cssW + "px";
-  canvas.style.height = cssH + "px";
-  canvas.style.transform = viewRotated ? "translate(-50%,-50%) rotate(90deg)" : "translate(-50%,-50%)";
-
-  canvas.width  = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  ctx.setTransform(canvas.width / W(), 0, 0, canvas.height / H(), 0, 0);
+  canvas.style.width    = "100%";
+  canvas.style.height   = "100%";
+  canvas.width  = Math.round(V_W * dpr);
+  canvas.height = Math.round(V_H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 function screenToVirtual(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-  const dx = clientX - cx, dy = clientY - cy;
-  const cssW = parseFloat(canvas.style.width) || W();
-  const k = W() / cssW;                       // CSS-Pixel -> virtuelle Einheiten
-  if (viewRotated) return { x: W() / 2 + dy * k, y: H() / 2 - dx * k };
-  return { x: W() / 2 + dx * k, y: H() / 2 + dy * k };
+  return {
+    x: (clientX - rect.left) * (V_W / rect.width),
+    y: (clientY - rect.top)  * (V_H / rect.height)
+  };
 }
 
 window.addEventListener("resize", resize);
-window.addEventListener("orientationchange", () => setTimeout(resize, 150));
-if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
 resize();
 
 // ═══════════════════════════════════════════════
@@ -3452,7 +3394,6 @@ const timestep = 1000 / 60;
 let accumulator = 0;
 
 function loop() {
-  if (layoutKey() !== lastLayoutKey) resize();
   const now = performance.now();
   const dt = now - lastTime;
   lastTime = now;
