@@ -424,6 +424,9 @@ button:active{transform:translateY(0) scale(.98);}
   padding:60px 20px;
 }
 
+/* Fix: buttons have overflow:hidden → flex min-height collapses to 0 and they got squashed in scrolling column screens */
+#settings > *,#offlineSettings > *,#leagueScreen > *,#accountScreen > *,#leaderboardScreen > *,#leagueContent > *,.menuPage > *{flex-shrink:0;}
+
 h1{
   font-size:58px;margin-bottom:26px;font-family:var(--font-display);font-weight:800;
   letter-spacing:1.5px;background:linear-gradient(90deg,#00ff88,#00c8ff 55%,#ff4444);
