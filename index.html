@@ -1200,7 +1200,11 @@ function startMenuPresenceListener() {
   if (menuPresenceUnsubscribe) { menuPresenceUnsubscribe(); menuPresenceUnsubscribe = null; }
   if (!fbReady) return;
 
-  menuPresenceUnsubscribe = dbOn("players", (playersData) => {
+  if (!window._presenceTick) window._presenceTick = setInterval(() => { if (window._lastPlayersData) renderPresence(window._lastPlayersData); }, 15000);
+  menuPresenceUnsubscribe = dbOn("players", (playersData) => { window._lastPlayersData = playersData; renderPresence(playersData); });
+}
+function renderPresence(playersData) {
+  {
     const panel = document.getElementById("onlinePlayersPanel");
     if (!panel) return;
 
@@ -1232,7 +1236,7 @@ function startMenuPresenceListener() {
     });
     html += "</div>";
     panel.innerHTML = html;
-  });
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1301,11 +1305,34 @@ function escapeHtml(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
-// Heartbeat: haelt "Active Players" aktuell (Eintrag verschwindet sonst nach 2 Min) und zeigt den echten Status
-setInterval(() => {
+// Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
+// (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
+function currentPresenceStatus() {
+  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt" };
+  try {
+    if (running) {
+      if (mode === "online") {
+        if (onlineVsBot) return "1v1 vs Bot";
+        return onlineOpponent && onlineOpponent.name ? "1v1 vs " + onlineOpponent.name : "In 1v1 Match";
+      }
+      if (mode === "online_tv") return "Watching Online TV";
+      return "Playing " + (modeNames[mode] || mode);
+    }
+    if (onlineMatchId) return onlineVsBot ? "1v1 vs Bot" : "In 1v1 Match";   // VS-Screen / Ergebnis
+    if (onlineSearchInterval) return "Searching for match";
+  } catch (e) {}
+  return "Idle in Menu";
+}
+let _lastPresence = "", _lastPresenceAt = 0;
+function syncPresence(force) {
   if (!fbReady || !onlineAccount) return;
-  updatePlayerStatus(running ? (mode === "online" ? "In 1v1 Match" : "Playing " + mode) : "Idle in Menu").catch(() => {});
-}, 30000);
+  const s = currentPresenceStatus(), now = Date.now();
+  if (!force && s === _lastPresence && now - _lastPresenceAt < 30000) return;
+  _lastPresence = s; _lastPresenceAt = now;
+  updatePlayerStatus(s).catch(() => {});
+}
+setInterval(() => syncPresence(false), 2000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); });
 
 function sanitizeAccount(acc) {
   if (!acc) return null;
@@ -1639,6 +1666,33 @@ const NET_SMOOTH = {
   // just hold position (still alive-looking, just paused).
   FREEZE_AFTER_MS: 1200
 };
+
+// Gemeinsame Paket-Verarbeitung für Online-Gegner UND Online TV (identisch sauber)
+function feedNetPlayer(pl, st) {
+  const now = Date.now();
+  // Jedes Match-Update (Ball, anderer Spieler ...) liefert den Spielerstand erneut.
+  // Unveränderte Daten sind KEIN neues Paket -> ignorieren (sonst Geschwindigkeit=0 / Zittern).
+  if (pl.lastPacketAt && st.x === pl.baseTx && st.y === pl.baseTy && (st.alive !== false) === pl.alive) return;
+  if (pl.lastPacketAt) {
+    const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(30, now - pl.lastPacketAt));
+    let vx = (st.x - pl.baseTx) / interval, vy = (st.y - pl.baseTy) / interval;
+    const sp = Math.hypot(vx, vy), MAXV = 0.5;   // px/ms
+    if (sp > MAXV) { vx *= MAXV / sp; vy *= MAXV / sp; }
+    pl.netVX = 0.5 * (pl.netVX || 0) + 0.5 * vx;
+    pl.netVY = 0.5 * (pl.netVY || 0) + 0.5 * vy;
+    pl.netInterval = interval;
+    if (Math.hypot(st.x - pl.baseTx, st.y - pl.baseTy) > 400) { pl.x = st.x; pl.y = st.y; pl.netVX = 0; pl.netVY = 0; }
+  } else {
+    pl.netVX = 0; pl.netVY = 0;
+    pl.x = st.x; pl.y = st.y;
+    pl.netInterval = NET_SMOOTH.MIN_INTERVAL;
+  }
+  pl.baseTx = st.x; pl.baseTy = st.y;
+  pl.tx = st.x; pl.ty = st.y;
+  pl.alive = st.alive !== false;
+  pl.lastPacketAt = now;
+  pl.lastPacketTime = now;
+}
 
 // Returns an exponential-smoothing alpha for a given dt (ms) and a
 // target "time to mostly catch up" (ms). This makes the catch-up
@@ -2475,33 +2529,7 @@ function startOnlineGame(matchData) {
     if (oppState) {
       const op = players.find(p => p.name !== myName);
       if (op) {
-        // NEW: measure the ACTUAL elapsed time since the opponent's
-        // previous packet (not a fixed assumption). This is the key
-        // piece of data that lets us tell "their connection is fine
-        // right now" apart from "their connection just hiccuped" and
-        // react with an appropriately fast or slow catch-up.
-        const now = Date.now();
-        const prevAt = op.lastPacketAt || now;
-        const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(1, now - prevAt));
-
-        if (op.tx !== undefined && op.ty !== undefined) {
-          // Velocity derived from real elapsed time (px/ms), not a
-          // hardcoded per-frame guess — this stays correct whether
-          // packets are arriving every 50ms or every 600ms.
-          op.netVX = (oppState.x - op.tx) / interval;
-          op.netVY = (oppState.y - op.ty) / interval;
-        } else {
-          op.netVX = 0;
-          op.netVY = 0;
-        }
-
-        op.prevPacketAt = prevAt;
-        op.tx = oppState.x;
-        op.ty = oppState.y;
-        op.alive = oppState.alive !== false;
-        op.lastPacketTime = now;
-        op.lastPacketAt = now;
-        op.netInterval = interval;
+        feedNetPlayer(op, oppState);
       }
     }
 
@@ -4346,32 +4374,7 @@ async function startOnlineTV() {
         <span style="color:#ff8844">${escapeHtml(p2.name)} (${Math.round(best.p2elo || 1500)})</span>
       </div>`;
 
-    const feed = (pl, st) => {
-      const now = Date.now();
-      // Jedes Match-Update (Ball, anderer Spieler ...) liefert den Spielerstand erneut.
-      // Unveränderte Daten sind KEIN neues Paket -> ignorieren (sonst Geschwindigkeit=0 / Zittern).
-      if (pl.lastPacketAt && st.x === pl.baseTx && st.y === pl.baseTy && (st.alive !== false) === pl.alive) return;
-      if (pl.lastPacketAt) {
-        const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(30, now - pl.lastPacketAt));
-        // Geschwindigkeit aus den ROHEN Paketen (nicht aus dem extrapolierten Ziel), geglättet + begrenzt
-        let vx = (st.x - pl.baseTx) / interval, vy = (st.y - pl.baseTy) / interval;
-        const sp = Math.hypot(vx, vy), MAXV = 0.5;   // px/ms
-        if (sp > MAXV) { vx *= MAXV / sp; vy *= MAXV / sp; }
-        pl.netVX = 0.5 * (pl.netVX || 0) + 0.5 * vx;
-        pl.netVY = 0.5 * (pl.netVY || 0) + 0.5 * vy;
-        pl.netInterval = interval;
-        // Riesiger Sprung (Respawn/Rundenstart) -> direkt setzen statt quer durch die Arena zu fliegen
-        if (Math.hypot(st.x - pl.baseTx, st.y - pl.baseTy) > 400) { pl.x = st.x; pl.y = st.y; pl.netVX = 0; pl.netVY = 0; }
-      } else {
-        pl.netVX = 0; pl.netVY = 0;
-        pl.x = st.x; pl.y = st.y;           // erstes Paket: direkt hinsetzen
-        pl.netInterval = NET_SMOOTH.MIN_INTERVAL;
-      }
-      pl.baseTx = st.x; pl.baseTy = st.y;
-      pl.tx = st.x; pl.ty = st.y;
-      pl.alive = st.alive !== false;
-      pl.lastPacketAt = now;
-    };
+    const feed = feedNetPlayer;
 
     const myId = bestId;
     onlineTvInnerUnsubscribe = RPC.onMatch(myId, (data) => {
