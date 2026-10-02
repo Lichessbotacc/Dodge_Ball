@@ -1324,9 +1324,16 @@ function renderChat(keepScroll) {
     top.textContent = "— Beginning of chat —";
     box.appendChild(top);
   }
+  let prevSender = null;
   for (const m of list) {
     const d = new Date(m.ts || 0);
     const row = document.createElement("div");
+    // thin separator line between messages, but not between consecutive messages of the same user
+    const sender = m.uid || m.name;
+    if (prevSender !== null && sender !== prevSender) {
+      row.style.cssText = "border-top:1px solid rgba(255,255,255,0.10);padding-top:6px;";
+    }
+    prevSender = sender;
     const meta = document.createElement("div");
     meta.style.cssText = "font-size:10px;color:#8b93a6;";
     meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
