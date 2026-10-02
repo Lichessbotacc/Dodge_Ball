@@ -109,7 +109,8 @@ import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/fir
 import {
   getAuth, signInAnonymously, onAuthStateChanged,
   setPersistence, browserLocalPersistence,
-  createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+  EmailAuthProvider, reauthenticateWithCredential, deleteUser
 }                            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -248,6 +249,20 @@ async function dobLogout() {
   await signOut(_auth); // onAuthStateChanged (above) picks this up and re-signs-in anonymously
 }
 
+// Account deletion: step 1 = prove the password (re-authentication), step 2 = delete the auth user.
+// The caller removes the database data in between (it needs the still-valid sign-in for that).
+async function dobReauth(password) {
+  const user = _auth && _auth.currentUser;
+  if (!user || user.isAnonymous || !user.email) throw new Error("No password account.");
+  const cred = EmailAuthProvider.credential(user.email, password);
+  await reauthenticateWithCredential(user, cred);
+}
+async function dobDeleteAuthUser() {
+  const user = _auth && _auth.currentUser;
+  if (!user) throw new Error("Not signed in.");
+  await deleteUser(user);   // onAuthStateChanged (above) then falls back to an anonymous session
+}
+
 function dobIsPasswordAccount() {
   return !!(_auth && _auth.currentUser && !_auth.currentUser.isAnonymous);
 }
@@ -258,6 +273,8 @@ window._dobAuth = {
   register: dobRegisterWithPassword,
   login: dobLoginWithPassword,
   logout: dobLogout,
+  reauth: dobReauth,
+  deleteAuthUser: dobDeleteAuthUser,
   isPasswordAccount: dobIsPasswordAccount
 };
 </script>
@@ -1191,6 +1208,15 @@ function rpcOnDisconnectSetOwnStatus(value) {
   return onDisconnect(ref(db, "players/" + uid)).update(value);
 }
 
+// Disconnect penalty: Firebase itself writes this to the match as soon as OUR connection drops
+// (tab closed, network lost). Rules: only works because we are a listed participant.
+function rpcArmMatchDisconnect(matchId, payload) {
+  requireUid();
+  const od = onDisconnect(ref(db, "onlineMatches/" + matchId));
+  od.update(payload).catch(() => {});
+  return od;
+}
+
 function rpcServerTimestamp() { return serverTimestamp(); }
 
 // Expose the guarded surface (functions only — no raw db/ref handles,
@@ -1236,7 +1262,7 @@ window._dobRPC = {
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
-  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember
+  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
 };
 window.dispatchEvent(new Event("dobRPCReady"));
 </script>
@@ -1272,6 +1298,13 @@ async function onFirebaseAndAuthReady() {
   // CHANGED: we now have a real, server-verified uid (myUid) instead
   // of trusting a client-chosen name as the database key.
   if (onlineAccount) {
+    if (window._dobAuth && window._dobAuth.isPasswordAccount()) markDeviceAccount(onlineAccount.name);
+    if (readActiveMatchMarker()) {      // last session ended in the middle of an online match
+      const mk0 = readActiveMatchMarker();
+      clearActiveMatchMarker();
+      const loss = applyForfeitLoss(mk0 && mk0.loss);
+      try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + loss + " ELO)", "#ff4444"); } catch (e) {}
+    }
     await pushAccountToFirebase();
 
     // Automatically go offline if the connection drops or tab closes —
@@ -1558,6 +1591,66 @@ const MAX_ELO_DELTA_PER_GAME = 50;
 function clampEloChange(delta) {
   const d = Number(delta) || 0;
   return Math.max(-MAX_ELO_DELTA_PER_GAME, Math.min(MAX_ELO_DELTA_PER_GAME, d));
+}
+
+// ═══════════════════════════════════════════════
+//  DISCONNECT PENALTY (online 1v1 vs. real players)
+//  • Opponent sends no sign of life for 8 s (20 s before the start) -> forfeit: they lose, you win.
+//  • Leaving mid-match (menu / reload) -> the leaver loses exactly the ELO of a normal loss.
+//  • Tab closed / connection lost -> Firebase marks the match as forfeited instantly (onDisconnect);
+//    the penalty is applied at the latest on the next start (marker in localStorage).
+// ═══════════════════════════════════════════════
+// A forfeit counts exactly like a normal result: same ELO formula as reportOnlineResult()
+function normalEloChange(winnerElo, loserElo) {
+  const diff = (Number(loserElo) || 1500) - (Number(winnerElo) || 1500);
+  return clampEloChange(Math.max(1, Math.min(15, Math.round(5 + diff / 100))));
+}
+// iAmWinner = true -> what I would gain if the opponent forfeits; false -> what I lose if I forfeit
+function forfeitChange(iAmWinner) {
+  const me = onlineAccount ? onlineAccount.elo : 1500, opp = onlineOpponent ? onlineOpponent.elo : 1500;
+  return iAmWinner ? normalEloChange(me, opp) : normalEloChange(opp, me);
+}
+const OPP_TIMEOUT_PLAYING_MS  = 8000;
+const OPP_TIMEOUT_WAITING_MS  = 20000;
+let onlineDisarm = null;
+function readActiveMatchMarker() { try { return JSON.parse(localStorage.getItem("dobActiveMatch") || "null"); } catch (e) { return null; } }
+function setActiveMatchMarker(id, loss) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, ts: Date.now() })); } catch (e) {} }
+function clearActiveMatchMarker() { try { localStorage.removeItem("dobActiveMatch"); } catch (e) {} }
+function disarmOnlineDisconnect() {
+  if (onlineDisarm) { try { onlineDisarm.cancel().catch(() => {}); } catch (e) {} onlineDisarm = null; }
+}
+function armOnlineDisconnect(forfeit) {
+  disarmOnlineDisconnect();
+  if (!fbReady || !onlineMatchId || onlineVsBot) return;
+  try { onlineDisarm = RPC.armMatchDisconnect(onlineMatchId, forfeit ? { status: "abandoned", forfeitBy: myUid, eloChange: forfeitChange(false) } : { status: "abandoned" }); } catch (e) {}
+}
+// Applies the forfeit loss to the OWN account (synchronous part; caller pushes to Firebase)
+function applyForfeitLoss(change) {
+  if (!onlineAccount) return 0;
+  const loss = Math.abs(clampEloChange(Number(change) || 10));
+  onlineAccount = sanitizeAccount(onlineAccount);
+  onlineAccount.elo = Math.max(100, onlineAccount.elo - loss);
+  onlineAccount.losses++;
+  onlineAccount.currentStreak = 0;
+  onlineAccount.totalEloLost += loss;
+  if (onlineAccount.elo < onlineAccount.lowestElo) onlineAccount.lowestElo = onlineAccount.elo;
+  saveAccountLocal();
+  try { updateAccountBtn(); } catch (e) {}
+  return loss;
+}
+// Called when the opponent stopped sending signs of life
+async function forfeitOpponent() {
+  if (onlineResultHandled || !onlineMatchId || onlineVsBot || !fbReady) return;
+  const id = onlineMatchId;
+  try {   // if the match was already finished / forfeited by someone else, let the normal listener handle it
+    const cur = await RPC.getMatch(id);
+    if (!cur || cur.status === "abandoned" || cur.status === "done") return;
+  } catch (e) {}
+  if (onlineResultHandled || onlineMatchId !== id) return;
+  disarmOnlineDisconnect();
+  const change = forfeitChange(true);
+  RPC.updateMatch(id, { status: "abandoned", forfeitBy: (onlineOpponent && onlineOpponent.uid) || null, eloChange: change }).catch(() => {});
+  handleOnlineResult(onlineAccount.name, change);
 }
 
 // ═══════════════════════════════════════════════
@@ -2429,6 +2522,13 @@ function showAccountAuthScreen(mode) {
       <button onclick="showAccountAuthScreen('register')">Need an account? Create one</button>
       <button onclick="showScreen('menu')">← Back</button>
     `;
+  } else if (deviceHasAccount()) {
+    document.getElementById("accountContent").innerHTML = `
+      <p style="color:#ffd700;font-size:18px;font-weight:700;margin-bottom:8px;">🔒 ${tr("This device already has an account")}</p>
+      <p style="color:#cfd6e4;font-size:13px;max-width:340px;margin:0 auto 16px;line-height:1.5;">${tr("Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.")}</p>
+      <button onclick="showAccountAuthScreen('login')">${tr("Log In")}</button>
+      <button onclick="showScreen('menu')">← Back</button>
+    `;
   } else {
     document.getElementById("accountContent").innerHTML = `
       <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Create your account</p>
@@ -2454,8 +2554,23 @@ function showLoggedInAccountScreen() {
     <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:10px;">${escapeHtml(onlineAccount.name)}</p>
     <div style="font-size:20px;margin-bottom:14px;">${leagueBadgeHTML(onlineAccount.leagueTier)} <span style="color:#8b93a6;font-size:14px;">· ${Math.round(onlineAccount.elo)} ELO</span></div>
     <button onclick="showLeagueScreen()">🏅 Weekly League</button>
-    <button onclick="logoutAccount()">Log Out</button>
+    <p style="color:#8b93a6;font-size:12px;max-width:340px;margin:6px auto 14px;line-height:1.5;">${tr("One account per player. To use a different account you have to delete this one first.")}</p>
+    <button onclick="showDeleteAccountScreen()" style="border-color:rgba(255,68,68,.5);color:#ff6666;">🗑 ${tr("Delete Account")}</button>
     <button onclick="showScreen('menu')">← Back</button>
+  `;
+}
+
+function showDeleteAccountScreen() {
+  showScreen("accountScreen");
+  document.getElementById("accountContent").innerHTML = `
+    <p style="color:#ff6666;font-size:20px;font-weight:700;margin-bottom:8px;">⚠ ${tr("Delete account permanently?")}</p>
+    <p style="color:#cfd6e4;font-size:13px;max-width:340px;margin:0 auto 14px;line-height:1.5;">${tr("Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.")}</p>
+    <input type="password" id="deletePassword" placeholder="${tr("Password")}" autocomplete="current-password">
+    <br>
+    <div id="accountInfo"></div>
+    <br>
+    <button id="deleteAccountBtn" onclick="deleteAccount()" style="background:#a22;border-color:#f44;color:#fff;">${tr("Delete permanently")}</button>
+    <button onclick="showLoggedInAccountScreen()">${tr("Cancel")}</button>
   `;
 }
 
@@ -2481,6 +2596,7 @@ async function createAccount() {
   const passwordConfirm  = document.getElementById("authPasswordConfirm").value;
   const info = document.getElementById("accountInfo");
 
+  if (deviceHasAccount()) { showAccountAuthScreen("register"); return; }   // one account per device
   if (!name || name.length < 2)          { info.textContent = "Name must be at least 2 characters."; info.style.color="#f44"; return; }
   if (!/^[a-zA-Z0-9_-]+$/.test(name))    { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
   if (!password || password.length < 6)  { info.textContent = "Password must be at least 6 characters."; info.style.color="#f44"; return; }
@@ -2498,6 +2614,7 @@ async function createAccount() {
     myUid = newUid;
 
     onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
+    markDeviceAccount(name);
     saveAccountLocal();
     await pushAccountToFirebase();
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
@@ -2542,6 +2659,7 @@ async function loginAccount() {
       onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
       await pushAccountToFirebase();
     }
+    markDeviceAccount(onlineAccount.name);
     saveAccountLocal();
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
     await updatePlayerStatus("Idle in Menu");
@@ -2559,19 +2677,54 @@ async function loginAccount() {
   }
 }
 
-// ADDED: log out and drop back to guest/anonymous mode. Local account
-// data is cleared so the account screen doesn't show stale info.
-async function logoutAccount() {
+// ── One account per device ──
+// Best effort on the client: a marker in localStorage remembers that this browser already has an account.
+// (It cannot stop someone who clears their browser data or uses another device – that would need a backend.)
+function deviceHasAccount() {
+  if (onlineAccount && window._dobAuth && window._dobAuth.isPasswordAccount()) return true;
+  try { return !!localStorage.getItem("dobDeviceAccount"); } catch (e) { return false; }
+}
+function markDeviceAccount(name) { try { localStorage.setItem("dobDeviceAccount", String(name || "1")); } catch (e) {} }
+
+// Deletes the account for good (password required). Log out no longer exists.
+async function deleteAccount() {
+  const pw   = document.getElementById("deletePassword").value;
+  const info = document.getElementById("accountInfo");
+  const btn  = document.getElementById("deleteAccountBtn");
+  if (!pw) { info.textContent = tr("Enter your password."); info.style.color = "#f44"; return; }
+  if (!fbReady || !window._dobAuth || !onlineAccount || !myUid) { info.textContent = tr("Still connecting — please try again in a moment."); info.style.color = "#f44"; return; }
+  btn.disabled = true;
+  info.style.color = "#aaa"; info.textContent = tr("Deleting…");
   try {
-    cleanupOnline();
-    if (fbReady && myUid) { RPC.updateOwnPlayer({ status: "offline" }).catch(() => {}); }
-    if (window._dobAuth) await window._dobAuth.logout();
-  } catch(e) {
-    console.warn("logoutAccount failed", e);
+    await window._dobAuth.reauth(pw);                         // wrong password -> error, nothing is deleted
+  } catch (e) {
+    btn.disabled = false;
+    info.textContent = (e && ["auth/invalid-credential", "auth/wrong-password"].includes(e.code)) ? tr("Incorrect password.")
+                     : (e && e.code === "auth/too-many-requests") ? tr("Too many attempts. Try again later.") : "Error: " + (e && (e.code || e.message));
+    info.style.color = "#f44";
+    return;
   }
-  onlineAccount = null;
-  localStorage.removeItem("dobAccount");
-  showScreen("menu");
+  const name = onlineAccount.name, week = onlineAccount.leagueWeek, grp = onlineAccount.leagueGroup, tier = onlineAccount.leagueTier || 0;
+  try { cleanupOnline(); } catch (e) {}
+  const tasks = [
+    RPC.removeOwnQueueEntry(), RPC.removeOwnInvite(),
+    RPC.removeUsernameIndex(name)
+  ];
+  if (week && grp) tasks.push(RPC.removeLeagueMember(week, tier, grp));
+  for (const e of leagueHistoryGet()) tasks.push(RPC.removeLeagueMember(e.w, e.t, e.g));
+  await Promise.allSettled(tasks);
+  onlineAccount = null;                                       // stop presence / pushes from re-creating the player node
+  try { await RPC.removeOwnPlayer(); } catch (e) { console.warn("player delete failed", e); }
+  try {
+    await window._dobAuth.deleteAuthUser();
+  } catch (e) {
+    console.warn("auth delete failed", e);
+    info.textContent = "Error: " + (e && (e.code || e.message)); info.style.color = "#f44"; btn.disabled = false;
+    return;
+  }
+  Object.keys(localStorage).filter(k => k === "dobAccount" || k === "dobDeviceAccount" || k === "dobLeagueHistory" || k === "dobLeagueSeen" || k === "dobActiveMatch" || k === "onlineBotElo" || k.startsWith("h2h_bot_"))
+    .forEach(k => localStorage.removeItem(k));
+  window.location.reload();                                   // clean state, new account can be created now
 }
 
 function enterOnlineQueue() {
@@ -2600,7 +2753,19 @@ function cleanupOnline() {
     RPC.removeOwnInvite().catch(() => {});
   }
   if (fbReady && onlineMatchId) {
-    RPC.updateMatch(onlineMatchId, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
+    const mk = readActiveMatchMarker();
+    const leftMidMatch = !onlineVsBot && !onlineResultHandled && mk && mk.id === onlineMatchId;
+    disarmOnlineDisconnect();
+    if (leftMidMatch) {
+      clearActiveMatchMarker();
+      onlineResultHandled = true;
+      const loss = forfeitChange(false);
+      applyForfeitLoss(loss);
+      pushAccountToFirebase().catch(() => {});
+      RPC.updateMatch(onlineMatchId, { status: "abandoned", forfeitBy: myUid, eloChange: loss, postChat: null }).catch(() => {});
+    } else {
+      RPC.updateMatch(onlineMatchId, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
+    }
   }
   onlineMatchId       = null;
   onlineRole          = null;
@@ -3049,11 +3214,30 @@ function startOnlineGame(matchData) {
     { clearInterval(onlineBallIv); onlineBallIv = setInterval(pushBallState, 100); }
   }
 
+  // ── Disconnect protection (real players only) ──
+  setActiveMatchMarker(onlineMatchId, forfeitChange(false));
+  armOnlineDisconnect(true);
+  const wdOppRole = onlineRole === "p1" ? "p2" : "p1";
+  const wdMatchId = onlineMatchId;
+  let wdStatus = null, wdSig = "", wdLastBeat = Date.now();
+  const wdIv = setInterval(() => {
+    if (onlineMatchId !== wdMatchId || onlineResultHandled) { clearInterval(wdIv); return; }
+    if (mode !== "online" || !running) return;
+    const limit = wdStatus === "playing" ? OPP_TIMEOUT_PLAYING_MS : OPP_TIMEOUT_WAITING_MS;
+    if (Date.now() - wdLastBeat > limit) { clearInterval(wdIv); forfeitOpponent(); }
+  }, 1000);
+  onlineUnsubscribes.push(() => clearInterval(wdIv));
+
   // CHANGED: listens on onlineMatches/{matchId} via the guarded RPC.
   // Both p1 and p2 may write to this doc (per the security model — see
   // RULES.txt), since both are listed participant uids.
   const matchUnsub = RPC.onMatch(onlineMatchId, (data) => {
     if (!data) return;
+
+    // Opponent heartbeat: any change of their ping / position / (as host) ball counts as "alive"
+    if (data.status !== wdStatus) { wdStatus = data.status; wdLastBeat = Date.now(); }
+    const wdNow = String(data["ping_" + wdOppRole]) + "|" + JSON.stringify(data[wdOppRole + "State"] || null) + "|" + (!onlineIsHost ? data.ballState : "");
+    if (wdNow !== wdSig) { wdSig = wdNow; wdLastBeat = Date.now(); }
 
     if (onlineIsHost && data.status === "waiting" && data.p1Ready && data.p2Ready) {
       RPC.updateMatch(onlineMatchId, { status: "playing" }).catch(() => {});
@@ -3080,9 +3264,9 @@ function startOnlineGame(matchData) {
       handleOnlineResult(data.winner, data.eloChange || 10);
     }
     if (data.status === "abandoned" && !onlineResultHandled) {
-      onlineResultHandled = true;
       running = false;
-      handleOnlineResult(myName, 5);
+      if (data.forfeitBy && data.forfeitBy === myUid) handleOnlineResult(oppName, data.eloChange || forfeitChange(false));   // I was the one who dropped out
+      else handleOnlineResult(myName, data.eloChange || forfeitChange(true));                                              // opponent left / timed out
     }
     if (data.status === "waiting") {
       document.getElementById("onlineStatusHUD").textContent = "Waiting for opponent…";
@@ -3240,6 +3424,8 @@ function pushBallState() {
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
   onlineResultHandled = true;
+  clearActiveMatchMarker();
+  armOnlineDisconnect(false);
   running = false;
   clearAllTimers();
   document.getElementById("onlineHUD").style.display = "none";
@@ -5227,6 +5413,12 @@ const RX = { de: [
 ]};
 
 Object.assign(DICT.de, {"Group too small": "Gruppe zu klein", "Groups under": "Gruppen mit weniger als", "players can't promote anyone this week.": "Spielern lassen diese Woche niemanden aufsteigen.", "Promotion eligibility": "Aufstiegsberechtigung", "Promoted!": "Aufgestiegen!", "Relegated": "Abgestiegen", "Welcome to the next league – new week, new goals!": "Willkommen in der nächsten Liga – neue Woche, neue Ziele!", "New week, new chance – win your way back up!": "Neue Woche, neue Chance – kämpf dich wieder hoch!","Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 UTC. A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 UTC. Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
+
+Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen – Strafe angewendet"});
+
+Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
+
+Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein."});
 
 let LANG = (function () {
   try { const s = localStorage.getItem("dobLang"); if (LANGS.includes(s)) return s; } catch (e) {}
