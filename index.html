@@ -1391,7 +1391,7 @@ function renderPresence(playersData) {
         <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
-          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(p.name)}${isMe ? ' (You)' : ''}</span>
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
           <span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>
         </div>
       `;
@@ -1408,7 +1408,8 @@ function renderPresence(playersData) {
 let chatUnsub = null, lastChatSent = 0, chatFirst = true;
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
-const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label im Chat
+const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label überall
+function dn(name) { return name === CHAT_DEV_NAME ? "[DEV] " + name : name; }
 
 // Chat name color = exact color of the sender's current league (own league from the account, others from the live players data)
 function chatLeagueColor(uid) {
@@ -1981,7 +1982,7 @@ async function renderLeague() {
       const me = m.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
       html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
         <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
-        <span class="lg-name">${escapeHtml(m.name)}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
+        <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
         <span class="lg-wins">${m.wins || 0}</span></div>`;
     });
     html += `</div>`;
@@ -2428,7 +2429,7 @@ setInterval(updateChatLock, 1000);
 function updateAccountBtn() {
   updateChatLock();
   const b = document.getElementById("accountBtn");
-  if (b) b.textContent = onlineAccount ? leagueByTier(onlineAccount.leagueTier).icon + " " + onlineAccount.name : "👤 Log in / Sign up";
+  if (b) b.textContent = onlineAccount ? leagueByTier(onlineAccount.leagueTier).icon + " " + dn(onlineAccount.name) : "👤 Log in / Sign up";
 }
 setTimeout(updateAccountBtn, 0);
 window.showScreen = function(id) {
@@ -2491,7 +2492,7 @@ async function loadLeaderboard() {
     activePlayers.forEach((p, i) => {
       const isMe = myUid && p.uid === myUid;
       lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
-        <span>#${i+1}</span><span>${leagueByTier(p.leagueTier).icon} ${escapeHtml(p.name)}</span>
+        <span>#${i+1}</span><span>${leagueByTier(p.leagueTier).icon} ${escapeHtml(dn(p.name))}</span>
         <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
@@ -2524,7 +2525,7 @@ async function openOnlineProfile(uid) {
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
 
     document.getElementById("profileName").innerHTML =
-      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(p.name)}</span>`;
+      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(dn(p.name))}</span>`;
 
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
@@ -2613,7 +2614,7 @@ function showLoggedInAccountScreen() {
   showScreen("accountScreen");
   document.getElementById("accountContent").innerHTML = `
     <p style="color:#aaa;margin-bottom:8px;font-size:16px;">Logged in as</p>
-    <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:10px;">${escapeHtml(onlineAccount.name)}</p>
+    <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:10px;">${escapeHtml(dn(onlineAccount.name))}</p>
     <div style="font-size:20px;margin-bottom:14px;">${leagueBadgeHTML(onlineAccount.leagueTier)} <span style="color:#8b93a6;font-size:14px;">· ${Math.round(onlineAccount.elo)} ELO</span></div>
     <button onclick="showLeagueScreen()">🏅 Weekly League</button>
     <p style="color:#8b93a6;font-size:12px;max-width:340px;margin:6px auto 14px;line-height:1.5;">${tr("One account per player. To use a different account you have to delete this one first.")}</p>
@@ -3141,11 +3142,11 @@ async function getPlayerRanks(p1Name, p2Name) {
 }
 
 function showVSScreen(n1, e1, n2, e2, callback) {
-  document.getElementById("vsName1").textContent = n1;
+  document.getElementById("vsName1").textContent = dn(n1);
   document.getElementById("vsElo1").textContent  = "ELO " + Math.round(e1);
   document.getElementById("vsRank1").textContent = "Rank: Loading...";
 
-  document.getElementById("vsName2").textContent = n2;
+  document.getElementById("vsName2").textContent = dn(n2);
   document.getElementById("vsElo2").textContent  = "ELO " + Math.round(e2);
   document.getElementById("vsRank2").textContent = "Rank: Loading...";
 
@@ -3259,8 +3260,8 @@ function startOnlineGame(matchData) {
 
   players.push(mePlayer, oppPlayer);
 
-  document.getElementById("onlineNameMe").textContent  = myName;
-  document.getElementById("onlineNameOpp").textContent = oppName;
+  document.getElementById("onlineNameMe").textContent  = dn(myName);
+  document.getElementById("onlineNameOpp").textContent = dn(oppName);
   document.getElementById("onlineHUD").style.display   = "flex";
   document.getElementById("pingDisplay").style.display = "block";
   document.getElementById("onlineStatusHUD").textContent = onlineVsBot ? "Practice match" : "";
@@ -3689,7 +3690,7 @@ async function dbSetBotPlayer(data) {
 
 function showWinnerOverlay(winnerName, eloChange) {
   document.getElementById("winnerText").innerHTML =
-    `🏆 Winner: <span style="color:gold">${escapeHtml(winnerName)}</span>`;
+    `🏆 Winner: <span style="color:gold">${escapeHtml(dn(winnerName))}</span>`;
   document.getElementById("winnerEloChange").textContent =
     `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
   updateWinnerLeagueLine();
@@ -3736,7 +3737,7 @@ function handlePostMatch(d) {
     const row = document.createElement("div");
     const nm = document.createElement("b");
     nm.setAttribute("translate", "no");
-    nm.textContent = m.name + ": ";
+    nm.textContent = dn(m.name) + ": ";
     nm.style.color = (m.name === onlineAccount.name) ? "#00ff88" : "#ff8844";
     const tx = document.createElement("span");
     tx.setAttribute("translate", "no");
@@ -4916,7 +4917,7 @@ function draw() {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
       ctx.fillStyle = p.color; ctx.fill();
       ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
-      ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+      ctx.fillText(dn(p.name), p.x, p.y - p.radius - 10);
     }
 
     if (matchBanner && Date.now() - matchBanner.ts < matchBanner.duration) {
@@ -5024,7 +5025,7 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     }
 
     ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
-    ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+    ctx.fillText(dn(p.name), p.x, p.y - p.radius - 10);
   }
 
   if (mode === "online") {
@@ -5220,7 +5221,7 @@ async function startOnlineTV() {
     {
       const hud = document.getElementById("onlineHUD");
       const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
-      setT("onlineNameMe", best.p1); setT("onlineNameOpp", best.p2);
+      setT("onlineNameMe", dn(best.p1)); setT("onlineNameOpp", dn(best.p2));
       setT("onlineRankMe", "(" + Math.round(best.p1elo || 1500) + ")");
       setT("onlineRankOpp", "(" + Math.round(best.p2elo || 1500) + ")");
       setT("onlineStatusHUD", "📺 Live");
@@ -5237,8 +5238,8 @@ async function startOnlineTV() {
     specText.innerHTML = `
       <div style="text-align:center; line-height: 1.4;">
         <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
-        <span style="color:#00ff88">${escapeHtml(p1.name)} (${Math.round(best.p1elo || 1500)})</span> vs
-        <span style="color:#ff8844">${escapeHtml(p2.name)} (${Math.round(best.p2elo || 1500)})</span>
+        <span style="color:#00ff88">${escapeHtml(dn(p1.name))} (${Math.round(best.p1elo || 1500)})</span> vs
+        <span style="color:#ff8844">${escapeHtml(dn(p2.name))} (${Math.round(best.p2elo || 1500)})</span>
       </div>`;
 
     const feed = feedNetPlayer;
