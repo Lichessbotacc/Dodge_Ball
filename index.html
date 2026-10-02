@@ -1657,10 +1657,10 @@ async function forfeitOpponent() {
 //  ANTI CORNER-CAMPING (online 1v1)
 //  • "Deep corner" = player centre inside a square of CAMP_ZONE * min(W,H) in any of the 4 corners.
 //  • Meter: +1 s per second in a corner (switching corners counts), only CAMP_DECAY s lost per second outside.
-//  • Warning from 50 %, at CAMP_LIMIT_MS the player has LOST the match (normal ELO loss) + message.
+//  • Warning from CAMP_WARN_MS (3 s), at CAMP_LIMIT_MS (6 s) the player has LOST the match (normal ELO loss) + message.
 //  • Every client checks itself (instant message) AND the opponent (+1.5 s grace) so it cannot be switched off.
 // ═══════════════════════════════════════════════
-const CAMP_ZONE = 0.07, CAMP_LIMIT_MS = 8000, CAMP_DECAY = 0.25;
+const CAMP_ZONE = 0.07, CAMP_WARN_MS = 3000, CAMP_LIMIT_MS = 6000, CAMP_DECAY = 0.25;
 let campState = null, onlineMatchStatus = null;
 function campReset() { campState = { me: { m: 0 }, opp: { m: 0 }, last: Date.now(), done: false }; campWarn(false); }
 function inDeepCorner(p) {
@@ -1695,7 +1695,7 @@ function campTick() {
   upd(campState.me, me);
   if (!onlineVsBot) upd(campState.opp, opp);
   const m = campState.me.m;
-  if (m > CAMP_LIMIT_MS * 0.5) campWarn(true, Math.max(0, Math.ceil((CAMP_LIMIT_MS - m) / 1000))); else campWarn(false);
+  if (m >= CAMP_WARN_MS) campWarn(true, Math.max(0, Math.ceil((CAMP_LIMIT_MS - m) / 1000))); else campWarn(false);
   if (m >= CAMP_LIMIT_MS) { campState.done = true; campDisqualify(true); }
   else if (!onlineVsBot && campState.opp.m >= CAMP_LIMIT_MS + 1500) { campState.done = true; campDisqualify(false); }
 }
@@ -5159,6 +5159,7 @@ async function startOnlineTV() {
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
     onlineTvCurrentMatchId = null; curMeta = null;
     players = []; balls = [];
+    const h = document.getElementById("onlineHUD"); if (h) h.style.display = "none";
   };
 
   // Das Parent-Listener feuert bei JEDER Positionsänderung ALLER Matches.
@@ -5208,6 +5209,24 @@ async function startOnlineTV() {
     const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", best.p2);
     players = [p1, p2];
 
+    // Score-HUD oben für Zuschauer
+    {
+      const hud = document.getElementById("onlineHUD");
+      const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+      setT("onlineNameMe", best.p1); setT("onlineNameOpp", best.p2);
+      setT("onlineRankMe", "(" + Math.round(best.p1elo || 1500) + ")");
+      setT("onlineRankOpp", "(" + Math.round(best.p2elo || 1500) + ")");
+      setT("onlineStatusHUD", "📺 Live");
+      setT("onlineScoreHUD", "0 - 0");
+      if (hud) hud.style.display = "flex";
+      const tvId = bestId;
+      if (best.p1uid && best.p2uid) {
+        getHeadToHeadScore(best.p1uid, best.p2uid).then(sc => {
+          if (tvId !== onlineTvCurrentMatchId) return;
+          setT("onlineScoreHUD", (sc[best.p1uid] || 0) + " - " + (sc[best.p2uid] || 0));
+        }).catch(() => {});
+      }
+    }
     specText.innerHTML = `
       <div style="text-align:center; line-height: 1.4;">
         <b style="color: gold;">📺 LIVE GAME TV (Average: ${Math.round(bestElo)} ELO)</b><br>
@@ -5226,6 +5245,10 @@ async function startOnlineTV() {
         const winner = data && data.status === "done" && data.winner ? data.winner : null;
         const sc = data && Number.isFinite(data.p1Score) && Number.isFinite(data.p2Score) ? data.p1Score + " - " + data.p2Score : "";
         showWinner(winner, sc);
+        if (winner && curMeta && curMeta.p1uid && curMeta.p2uid) {
+          const m0 = curMeta, hh = document.getElementById("onlineScoreHUD");
+          getHeadToHeadScore(m0.p1uid, m0.p2uid).then(r => { if (hh) hh.textContent = (r[m0.p1uid] || 0) + " - " + (r[m0.p2uid] || 0); }).catch(() => {});
+        }
         specText.innerHTML = "Match finished. Searching for next game...";
         holdUntil = Date.now() + 6000;
         clearTimeout(holdTimer);
