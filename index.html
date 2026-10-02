@@ -656,6 +656,11 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 #chatPanel,#onlinePlayersPanel{width:260px!important;}
 #onlinePlayersPanel{height:400px;max-height:400px;}
 @media (max-width:980px){#menu{flex-wrap:wrap;gap:20px;}#chatPanel,#onlinePlayersPanel{width:320px!important;}}
+/* Handy/schmale Fenster: Social-Buttons ans Ende des Menues (im Fluss), nicht mehr ueber den Chat gelegt */
+@media (max-width:980px){
+  #socialBar{position:static;transform:none;order:99;flex:0 0 100%;justify-content:center;flex-wrap:wrap;margin-top:6px;}
+  #menu{padding-bottom:calc(40px + env(safe-area-inset-bottom,0px));}
+}
 
 body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
