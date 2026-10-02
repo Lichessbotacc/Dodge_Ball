@@ -992,7 +992,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
    ═══════════════════════════════════════════════════════════════════ */
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { query, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { query, limitToLast, orderByKey, endBefore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
@@ -1129,6 +1129,11 @@ async function rpcSendChat(name, text) {
 function rpcOnChat(cb) {
   return onValue(query(ref(db, "chat"), limitToLast(50)), snap => cb(snap.val()));
 }
+// Ältere Chat-Nachrichten nachladen (vor dem gegebenen Push-Key), nur lesend
+async function rpcGetChatBefore(beforeKey, n) {
+  const snap = await get(query(ref(db, "chat"), orderByKey(), endBefore(beforeKey), limitToLast(n || 50)));
+  return snap.val();
+}
 window._dobRPC = {
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1141,7 +1146,7 @@ window._dobRPC = {
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
-  sendChat: rpcSendChat, onChat: rpcOnChat
+  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore
 };
 window.dispatchEvent(new Event("dobRPCReady"));
 </script>
@@ -1277,41 +1282,73 @@ function renderPresence(playersData) {
 // ═══════════════════════════════════════════════
 // ═══ GLOBAL CHAT (Text wird per textContent gesetzt -> kein XSS) ═══
 let chatUnsub = null, lastChatSent = 0, chatFirst = true;
+let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
+let chatLoadingOlder = false, chatNoMoreOlder = false;
+
+function renderChat(keepScroll) {
+  const box = document.getElementById("chatMessages");
+  if (!box) return;
+  const prevH = box.scrollHeight, prevTop = box.scrollTop;
+  const atBottom = prevH - prevTop - box.clientHeight < 40;
+  box.innerHTML = "";
+  const list = Object.entries(chatAll).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0) || (a[0] < b[0] ? -1 : 1)).map(e => e[1]);
+  if (!list.length) { box.textContent = "No messages yet."; return; }
+  if (chatNoMoreOlder) {
+    const top = document.createElement("div");
+    top.style.cssText = "font-size:10px;color:#8b93a6;text-align:center;";
+    top.textContent = "— Beginning of chat —";
+    box.appendChild(top);
+  }
+  for (const m of list) {
+    const d = new Date(m.ts || 0);
+    const row = document.createElement("div");
+    const meta = document.createElement("div");
+    meta.style.cssText = "font-size:10px;color:#8b93a6;";
+    meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const nm = document.createElement("b");
+    nm.setAttribute("translate", "no");
+    nm.textContent = m.name + ": ";
+    nm.style.color = (myUid && m.uid === myUid) ? "#00ff88" : "#00c8ff";
+    if (m.uid) {
+      nm.style.cursor = "pointer";
+      nm.title = "View profile";
+      nm.onmouseenter = () => nm.style.textDecoration = "underline";
+      nm.onmouseleave = () => nm.style.textDecoration = "none";
+      nm.onclick = () => openOnlineProfile(m.uid);
+    }
+    const tx = document.createElement("span");
+    tx.setAttribute("translate", "no");
+    tx.textContent = m.text;
+    tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+    row.append(meta, nm, tx);
+    box.appendChild(row);
+  }
+  if (keepScroll) box.scrollTop = prevTop + (box.scrollHeight - prevH);   // beim Nachladen oben: Position halten
+  else if (atBottom || chatFirst) box.scrollTop = box.scrollHeight;
+  chatFirst = false;
+}
+
+async function loadOlderChat() {
+  if (chatLoadingOlder || chatNoMoreOlder || !RPC) return;
+  const keys = Object.keys(chatAll).sort();
+  if (!keys.length) return;
+  chatLoadingOlder = true;
+  try {
+    const older = await RPC.getChatBefore(keys[0], 50);
+    if (!older || !Object.keys(older).length) chatNoMoreOlder = true;
+    else Object.assign(chatAll, older);
+    renderChat(true);
+  } catch (e) { console.warn("older chat failed", e); }
+  chatLoadingOlder = false;
+}
+
 function startChatListener() {
   if (chatUnsub || !RPC) return;
+  const box = document.getElementById("chatMessages");
+  if (box) box.addEventListener("scroll", () => { if (box.scrollTop < 30) loadOlderChat(); });
   chatUnsub = RPC.onChat(msgs => {
-    const box = document.getElementById("chatMessages");
-    if (!box) return;
-    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-    box.innerHTML = "";
-    const list = msgs ? Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0)) : [];
-    if (!list.length) { box.textContent = "No messages yet."; return; }
-    for (const m of list) {
-      const d = new Date(m.ts || 0);
-      const row = document.createElement("div");
-      const meta = document.createElement("div");
-      meta.style.cssText = "font-size:10px;color:#8b93a6;";
-      meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-      const nm = document.createElement("b");
-      nm.setAttribute("translate", "no");
-      nm.textContent = m.name + ": ";
-      nm.style.color = (myUid && m.uid === myUid) ? "#00ff88" : "#00c8ff";
-      if (m.uid) {
-        nm.style.cursor = "pointer";
-        nm.title = "View profile";
-        nm.onmouseenter = () => nm.style.textDecoration = "underline";
-        nm.onmouseleave = () => nm.style.textDecoration = "none";
-        nm.onclick = () => openOnlineProfile(m.uid);
-      }
-      const tx = document.createElement("span");
-      tx.setAttribute("translate", "no");
-      tx.textContent = m.text;
-      tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
-      row.append(meta, nm, tx);
-      box.appendChild(row);
-    }
-    if (atBottom || chatFirst) box.scrollTop = box.scrollHeight;
-    chatFirst = false;
+    if (msgs) Object.assign(chatAll, msgs);    // Live-Fenster (letzte 50) in den Gesamtverlauf mischen
+    renderChat(false);
   });
 }
 async function sendChat() {
