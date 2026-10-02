@@ -1891,6 +1891,11 @@ async function openOnlineProfile(uid) {
       return;
     }
 
+    // Bot: "Elo gewonnen" nie kleiner als Netto-Elo + verlorene Elo (Start 1500)
+    if (uid === ONLINE_BOT_UID && (p.wins ?? 0) > 0) {
+      const minGained = Math.max(0, Math.round((p.elo ?? 1500) - 1500 + (p.totalEloLost ?? 0)));
+      if (!(p.totalEloGained >= minGained)) p.totalEloGained = Math.max(minGained, p.wins);
+    }
     const wins = p.wins ?? 0;
     const losses = p.losses ?? 0;
     const totalGames = wins + losses;
@@ -2887,8 +2892,9 @@ async function handleOnlineResult(winnerName, change) {
     }
 
     // Reparatur für alte Daten: Netto-Elo = gewonnen - verloren (Start 1500) -> fehlenden Wert nachrechnen
-    if ((onlineOpponent.wins ?? 0) > 0 && !(onlineOpponent.totalEloGained > 0)) {
-      onlineOpponent.totalEloGained = Math.max(0, Math.round(onlineOpponent.elo - 1500 + (onlineOpponent.totalEloLost ?? 0)));
+    if ((onlineOpponent.wins ?? 0) > 0) {
+      const minGained = Math.max(0, Math.round(onlineOpponent.elo - 1500 + (onlineOpponent.totalEloLost ?? 0)));
+      if (!(onlineOpponent.totalEloGained >= minGained)) onlineOpponent.totalEloGained = Math.max(minGained, onlineOpponent.wins);
     }
 
     onlineBotElo = onlineOpponent.elo;
