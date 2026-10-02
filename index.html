@@ -2870,6 +2870,7 @@ async function handleOnlineResult(winnerName, change) {
       }
     } else {
       onlineOpponent.elo += eloChange;
+      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained ?? 0) + eloChange;   // fehlte -> Bot hatte nie "Elo gewonnen"
       onlineOpponent.wins = (onlineOpponent.wins ?? 0) + 1;
       onlineOpponent.currentStreak = (onlineOpponent.currentStreak ?? 0) + 1;
       if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak ?? 0)) {
@@ -2883,6 +2884,11 @@ async function handleOnlineResult(winnerName, change) {
         onlineOpponent.bestWinChange = myOriginalElo;
         onlineOpponent.bestWinOpp = onlineAccount.name;
       }
+    }
+
+    // Reparatur für alte Daten: Netto-Elo = gewonnen - verloren (Start 1500) -> fehlenden Wert nachrechnen
+    if ((onlineOpponent.wins ?? 0) > 0 && !(onlineOpponent.totalEloGained > 0)) {
+      onlineOpponent.totalEloGained = Math.max(0, Math.round(onlineOpponent.elo - 1500 + (onlineOpponent.totalEloLost ?? 0)));
     }
 
     onlineBotElo = onlineOpponent.elo;
