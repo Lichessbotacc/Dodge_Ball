@@ -1660,7 +1660,7 @@ async function forfeitOpponent() {
 //  • Warning from 50 %, at CAMP_LIMIT_MS the player has LOST the match (normal ELO loss) + message.
 //  • Every client checks itself (instant message) AND the opponent (+1.5 s grace) so it cannot be switched off.
 // ═══════════════════════════════════════════════
-const CAMP_ZONE = 0.14, CAMP_LIMIT_MS = 8000, CAMP_DECAY = 0.25;
+const CAMP_ZONE = 0.07, CAMP_LIMIT_MS = 8000, CAMP_DECAY = 0.25;
 let campState = null, onlineMatchStatus = null;
 function campReset() { campState = { me: { m: 0 }, opp: { m: 0 }, last: Date.now(), done: false }; campWarn(false); }
 function inDeepCorner(p) {
