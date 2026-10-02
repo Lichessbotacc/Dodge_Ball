@@ -377,7 +377,7 @@ button:active{transform:translateY(0) scale(.98);}
 }
 #homeBtn:hover{background:rgba(255,255,255,0.16);color:#fff;border-color:rgba(0,255,136,0.45);transform:translateX(-50%) translateY(-1px);}
 
-#menu,#settings,#offlineSettings,#accountScreen,#leaderboardScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
+#menu,#settings,#offlineSettings,#accountScreen,#leaderboardScreen,#leagueScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
   position:absolute;inset:0;display:none;flex-direction:column;
   justify-content:center;align-items:center;
   background:radial-gradient(circle at 50% 20%, #15151f, #08080c 75%);
@@ -399,7 +399,7 @@ button:active{transform:translateY(0) scale(.98);}
   touch-action:pan-y;
 }
 
-#settings,#offlineSettings{
+#settings,#offlineSettings,#leagueScreen{
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
   touch-action:pan-y;
@@ -713,6 +713,7 @@ body.mode-online #homeBtn{display:none!important;}
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
+          <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
           <button onclick="showMenuPage('menuMain')">← Back</button>
         </div>
@@ -793,6 +794,12 @@ body.mode-online #homeBtn{display:none!important;}
       <div id="accountContent"></div>
     </div>
 
+    <div id="leagueScreen">
+      <h2>🏅 Weekly League</h2>
+      <div id="leagueContent" style="display:flex;flex-direction:column;align-items:center;"></div>
+      <br><button onclick="showScreen('menu'); showMenuPage('menuOnline')">← Back</button>
+    </div>
+
     <div id="leaderboardScreen">
       <h2>🏆 Online Leaderboard</h2>
       <div id="lbTable">
@@ -833,6 +840,7 @@ body.mode-online #homeBtn{display:none!important;}
     <div id="winnerOverlay">
       <h2 id="winnerText">🏆 Winner!</h2>
       <p  id="winnerEloChange"></p>
+      <div id="winnerLeague" style="margin-top:10px;font-size:22px;font-family:var(--font-display);font-weight:700;"></div>
       <div id="postChat" style="display:none;flex-direction:column;width:340px;max-width:90vw;margin-top:18px;background:rgba(16,18,26,0.8);border:1px solid var(--line);border-left:3px solid var(--neon-cyan);border-radius:12px;padding:10px;font-size:13px;">
         <b>💬 Chat with opponent <span style="color:#8b93a6;font-weight:400;">(not saved)</span></b>
         <div id="postChatMsgs" style="height:110px;overflow-y:auto;margin:6px 0;display:flex;flex-direction:column;gap:4px;"></div>
@@ -1129,6 +1137,12 @@ async function rpcSendChat(name, text) {
 function rpcOnChat(cb) {
   return onValue(query(ref(db, "chat"), limitToLast(50)), snap => cb(snap.val()));
 }
+// Weekly league: writes ONLY the own entry (path always contains the own uid)
+async function rpcSetLeagueMember(week, tier, group, data) {
+  const uid = requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !/^\d$/.test(String(tier)) || !/^[A-Za-z0-9_-]{1,40}$/.test(group)) throw new Error("Bad league path.");
+  return set(ref(db, "weeklyLeague/" + week + "/" + tier + "/" + group + "/" + uid), data);
+}
 // Ältere Chat-Nachrichten nachladen (vor dem gegebenen Push-Key), nur lesend
 async function rpcGetChatBefore(beforeKey, n) {
   const snap = await get(query(ref(db, "chat"), orderByKey(), endBefore(beforeKey), limitToLast(n || 50)));
@@ -1146,7 +1160,7 @@ window._dobRPC = {
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
-  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore
+  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember
 };
 window.dispatchEvent(new Event("dobRPCReady"));
 </script>
@@ -1189,6 +1203,7 @@ async function onFirebaseAndAuthReady() {
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
 
     await updatePlayerStatus("Idle in Menu");
+    leagueResolvePrevious().catch(() => {});
   }
   startMenuPresenceListener();
 }
@@ -1237,7 +1252,7 @@ function startMenuPresenceListener() {
   if (!fbReady) return;
 
   if (!window._presenceTick) window._presenceTick = setInterval(() => { if (window._lastPlayersData) renderPresence(window._lastPlayersData); }, 15000);
-  menuPresenceUnsubscribe = dbOn("players", (playersData) => { window._lastPlayersData = playersData; renderPresence(playersData); });
+  menuPresenceUnsubscribe = dbOn("players", (playersData) => { window._lastPlayersData = playersData; renderPresence(playersData); recolorChatNames(); });
 }
 function renderPresence(playersData) {
   {
@@ -1285,6 +1300,16 @@ let chatUnsub = null, lastChatSent = 0, chatFirst = true;
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
 
+// Chat name color = exact color of the sender's current league (own league from the account, others from the live players data)
+function chatLeagueColor(uid) {
+  let t = 0;
+  if (uid && myUid && uid === myUid && onlineAccount) t = onlineAccount.leagueTier || 0;
+  else if (uid && window._lastPlayersData && window._lastPlayersData[uid]) t = window._lastPlayersData[uid].leagueTier || 0;
+  return leagueByTier(t).color;
+}
+function recolorChatNames() {
+  document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { el.style.color = chatLeagueColor(el.dataset.uid); });
+}
 function renderChat(keepScroll) {
   const box = document.getElementById("chatMessages");
   if (!box) return;
@@ -1308,7 +1333,8 @@ function renderChat(keepScroll) {
     const nm = document.createElement("b");
     nm.setAttribute("translate", "no");
     nm.textContent = m.name + ": ";
-    nm.style.color = (myUid && m.uid === myUid) ? "#00ff88" : "#00c8ff";
+    nm.dataset.uid = m.uid || "";
+    nm.style.color = chatLeagueColor(m.uid);
     if (m.uid) {
       nm.style.cursor = "pointer";
       nm.title = "View profile";
@@ -1428,6 +1454,11 @@ function sanitizeAccount(acc) {
   acc.bestWinOpp = acc.bestWinOpp ?? "";
   acc.worstLossChange = acc.worstLossChange ?? 0;
   acc.worstLossOpp = acc.worstLossOpp ?? "";
+  acc.leagueTier = acc.leagueTier ?? 0;
+  acc.leagueBest = acc.leagueBest ?? acc.leagueTier;
+  acc.leagueWeek = acc.leagueWeek ?? null;
+  acc.leagueGroup = acc.leagueGroup ?? null;
+  acc.leagueLastResult = acc.leagueLastResult ?? null;
   return acc;
 }
 
@@ -1444,6 +1475,223 @@ const MAX_ELO_DELTA_PER_GAME = 50;
 function clampEloChange(delta) {
   const d = Number(delta) || 0;
   return Math.max(-MAX_ELO_DELTA_PER_GAME, Math.min(MAX_ELO_DELTA_PER_GAME, d));
+}
+
+// ═══════════════════════════════════════════════
+//  WEEKLY LEAGUE (Duolingo style) – independent of ELO
+//  • Each week (Mon 00:00 UTC to Sun 24:00 UTC) active players of a league are placed in groups
+//    of max. 20 players. Only wins of the current week count.
+//  • Top players move up, bottom players move down, the rest stay. ELO stays a pure matchmaking/ranking system.
+//  • No server job: every client evaluates its OWN previous week from the (public) group data
+//    and only ever writes its own entry (see Rules).
+// ═══════════════════════════════════════════════
+const LEAGUES = [
+  { name: "Bronze",   color: "#cd7f32", icon: "🥉" },
+  { name: "Silver",   color: "#c0c8d4", icon: "🥈" },
+  { name: "Gold",     color: "#ffd700", icon: "🥇" },
+  { name: "Platinum", color: "#4fe0d0", icon: "💠" }
+];
+const LEAGUE_GROUP_SIZE        = 20;       // max. players per group
+const LEAGUE_PROMOTE_TOP       = 5;        // max. promoted players per group
+const LEAGUE_RELEGATE_BOTTOM   = 5;        // max. relegated players per group
+const LEAGUE_MIN_WINS_PROMOTE  = 3;        // fewer than 3 weekly wins = no promotion
+
+function leagueByTier(t) { return LEAGUES[Math.max(0, Math.min(LEAGUES.length - 1, Number(t) || 0))]; }
+function leagueLabel(t) { const l = leagueByTier(t); return l.icon + " " + tr(l.name); }
+function leagueBadgeHTML(t) {
+  const l = leagueByTier(t);
+  return `<span style="color:${l.color};font-weight:700;white-space:nowrap;">${l.icon} <span>${l.name}</span></span>`;
+}
+// Week = Monday 00:00 UTC; the id is the date of that Monday (e.g. "2026-09-28")
+function leagueWeekStart(ts) {
+  const d = new Date(ts || Date.now());
+  const day = (d.getUTCDay() + 6) % 7;                       // Mon=0 … Sun=6
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day);
+}
+function leagueWeekId(ts) {
+  const d = new Date(leagueWeekStart(ts));
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+}
+function leagueCountdownText() {
+  const ms = Math.max(0, leagueWeekStart(Date.now()) + 7 * 86400000 - Date.now());
+  const d = Math.floor(ms / 86400000), h = Math.floor((ms % 86400000) / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return tr("Week ends in") + " " + (d ? d + "d " : "") + h + "h " + m + "m";
+}
+function leagueSortMembers(list) {
+  return [...list].filter(m => m && m.uid).sort((a, b) =>
+    (b.wins || 0) - (a.wins || 0) ||
+    (a.lastWinAt || Infinity) - (b.lastWinAt || Infinity) ||      // tie-break: whoever reached the wins earlier ranks higher
+    (a.uid < b.uid ? -1 : 1));
+}
+function leagueZones(n, tier) {
+  const up   = tier < LEAGUES.length - 1 ? Math.max(1, Math.min(LEAGUE_PROMOTE_TOP, Math.floor(n / 3))) : 0;
+  const down = tier > 0 ? Math.min(LEAGUE_RELEGATE_BOTTOM, Math.floor(n / 4)) : 0;
+  return { up, down };
+}
+function leagueOutcome(rankIdx, n, wins, tier) {
+  const z = leagueZones(n, tier);
+  if (rankIdx < z.up && wins >= LEAGUE_MIN_WINS_PROMOTE) return "up";
+  if (z.down > 0 && rankIdx >= n - z.down) return "down";
+  return "stay";
+}
+
+let lastLeagueNote = "";      // note about the last match shown in the winner overlay
+let _leagueBusy = null, leagueTimer = null;
+
+function updateWinnerLeagueLine() {
+  const wl = document.getElementById("winnerLeague");
+  if (!wl || !onlineAccount) return;
+  const l = leagueByTier(onlineAccount.leagueTier);
+  wl.style.color = l.color;
+  wl.textContent = l.icon + " " + tr(l.name) + (lastLeagueNote ? " · " + lastLeagueNote : "");
+}
+function leagueToast(text, color) {
+  const t = document.createElement("div");
+  t.style.cssText = "position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:900;padding:12px 22px;border-radius:12px;" +
+    "background:rgba(16,18,26,0.95);border:1px solid " + (color || "#ffd700") + ";color:#fff;font-family:var(--font-display);font-size:18px;box-shadow:0 10px 30px rgba(0,0,0,0.5);";
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 6000);
+}
+
+// Evaluate the previous week (only the OWN account is modified)
+async function leagueResolvePrevious() {
+  if (!fbReady || !onlineAccount || !myUid) return;
+  const w = onlineAccount.leagueWeek, g = onlineAccount.leagueGroup;
+  if (!w || !g || w === leagueWeekId()) return;
+  const tier = onlineAccount.leagueTier || 0;
+  let grp;
+  try { grp = await dbGet(`weeklyLeague/${w}/${tier}/${g}`); }
+  catch (e) { console.warn("league resolve read failed", e); return; }      // try again later
+  let outcome = "stay", rank = 0, size = 0, wins = 0;
+  if (grp) {
+    const list = leagueSortMembers(Object.values(grp));
+    size = list.length;
+    const idx = list.findIndex(m => m.uid === myUid);
+    if (idx >= 0) { rank = idx + 1; wins = list[idx].wins || 0; outcome = leagueOutcome(idx, size, wins, tier); }
+  }
+  let newTier = tier;
+  if (outcome === "up")   newTier = Math.min(LEAGUES.length - 1, tier + 1);
+  if (outcome === "down") newTier = Math.max(0, tier - 1);
+  onlineAccount.leagueTier = newTier;
+  onlineAccount.leagueBest = Math.max(onlineAccount.leagueBest || 0, newTier);
+  onlineAccount.leagueLastResult = { week: w, rank, size, wins, outcome, from: tier, to: newTier };
+  onlineAccount.leagueWeek = null;
+  onlineAccount.leagueGroup = null;
+  saveAccountLocal();
+  updateAccountBtn();
+  try { await pushAccountToFirebase(); } catch (e) { console.warn(e); }
+  if (outcome !== "stay") {
+    const l = leagueByTier(newTier);
+    leagueToast((outcome === "up" ? "⬆ " + tr("Promoted to") : "⬇ " + tr("Relegated to")) + " " + l.icon + " " + tr(l.name), l.color);
+  }
+}
+
+// Join a group of the current week (happens with the first counted win)
+async function leagueJoinCurrent() {
+  if (!fbReady || !onlineAccount || !myUid) return;
+  const week = leagueWeekId();
+  if (onlineAccount.leagueWeek === week && onlineAccount.leagueGroup) return;
+  const tier = onlineAccount.leagueTier || 0;
+  const groups = (await dbGet(`weeklyLeague/${week}/${tier}`)) || {};
+  let gid = null;
+  for (const [id, g] of Object.entries(groups)) if (g && g[myUid]) { gid = id; break; }     // already a member (e.g. other device)
+  if (!gid) {
+    let bestCount = -1;
+    for (const [id, g] of Object.entries(groups)) {
+      const c = g ? Object.keys(g).length : 0;
+      if (c < LEAGUE_GROUP_SIZE && c > bestCount) { bestCount = c; gid = id; }                // fill the fullest group that still has room
+    }
+  }
+  if (!gid) gid = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  if (!(groups[gid] && groups[gid][myUid])) {
+    await RPC.setLeagueMember(week, tier, gid, { uid: myUid, name: onlineAccount.name, wins: 0, joinedAt: Date.now() });
+  }
+  onlineAccount.leagueWeek = week;
+  onlineAccount.leagueGroup = gid;
+  saveAccountLocal();
+  await pushAccountToFirebase();
+}
+function leagueEnsureJoined() {
+  if (_leagueBusy) return _leagueBusy;
+  _leagueBusy = (async () => {
+    try { await leagueResolvePrevious(); await leagueJoinCurrent(); }
+    finally { _leagueBusy = null; }
+  })();
+  return _leagueBusy;
+}
+
+// Counts one online win (including wins against the Online Bot) for the weekly league
+async function leagueRecordWin() {
+  if (!fbReady || !onlineAccount || !myUid) return;
+  await leagueEnsureJoined();
+  const week = onlineAccount.leagueWeek, gid = onlineAccount.leagueGroup, tier = onlineAccount.leagueTier || 0;
+  if (!week || !gid) return;
+  const cur = (await dbGet(`weeklyLeague/${week}/${tier}/${gid}/${myUid}`)) || { joinedAt: Date.now() };
+  const wins = (cur.wins || 0) + 1;
+  await RPC.setLeagueMember(week, tier, gid, { uid: myUid, name: onlineAccount.name, wins, lastWinAt: Date.now(), joinedAt: cur.joinedAt || Date.now() });
+  lastLeagueNote = tr("+1 league win") + " (" + wins + ")";
+  updateWinnerLeagueLine();
+}
+
+// ── Weekly league screen ──
+async function showLeagueScreen() {
+  if (!onlineAccount) { showCreateAccount(); return; }
+  showScreen("leagueScreen");
+  const box = document.getElementById("leagueContent");
+  box.textContent = tr("Loading league…");
+  if (!fbReady) { box.textContent = tr("Firebase not connected"); return; }
+  try {
+    await leagueResolvePrevious();
+    await renderLeague();
+  } catch (e) { console.warn("league screen failed", e); box.textContent = tr("Error while loading"); return; }
+  clearInterval(leagueTimer);
+  leagueTimer = setInterval(async () => {
+    const scr = document.getElementById("leagueScreen");
+    if (!scr || scr.style.display !== "flex") { clearInterval(leagueTimer); leagueTimer = null; return; }
+    try { await renderLeague(); } catch (e) {}
+  }, 20000);
+}
+async function renderLeague() {
+  const box = document.getElementById("leagueContent");
+  if (!box || !onlineAccount) return;
+  const tier = onlineAccount.leagueTier || 0, week = leagueWeekId();
+  let html = `<div style="font-size:28px;margin-bottom:4px;">${leagueBadgeHTML(tier)}</div>
+    <div style="font-size:13px;color:#8b93a6;margin-bottom:12px;">${leagueCountdownText()}</div>`;
+  const r = onlineAccount.leagueLastResult;
+  if (r) {
+    const col = r.outcome === "up" ? "#00ff88" : r.outcome === "down" ? "#ff4444" : "#8b93a6";
+    const verb = r.outcome === "up" ? "⬆ " + tr("Promoted to") + " " + leagueLabel(r.to)
+               : r.outcome === "down" ? "⬇ " + tr("Relegated to") + " " + leagueLabel(r.to)
+               : "= " + tr("Stayed in") + " " + leagueLabel(r.to);
+    html += `<div style="font-size:13px;margin-bottom:12px;padding:8px 14px;border-radius:10px;border:1px solid ${col};color:${col};">
+      ${tr("Last week")}: #${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")} → ${verb}</div>`;
+  }
+  const grpId = onlineAccount.leagueWeek === week ? onlineAccount.leagueGroup : null;
+  if (grpId) {
+    const grp = (await dbGet(`weeklyLeague/${week}/${tier}/${grpId}`)) || {};
+    const list = leagueSortMembers(Object.values(grp));
+    const n = list.length, z = leagueZones(n, tier);
+    html += `<div style="width:420px;max-width:92vw;max-height:46vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;">
+      <div class="lb-row"><span>${tr("Rank")}</span><span>${tr("Player")}</span><span>${tr("Wins")}</span></div>`;
+    list.forEach((m, i) => {
+      const o = leagueOutcome(i, n, m.wins || 0, tier);
+      const bg = o === "up" ? "rgba(0,255,136,0.10)" : o === "down" ? "rgba(255,68,68,0.10)" : "transparent";
+      const me = m.uid === myUid;
+      html += `<div class="lb-row" style="background:${bg};${me ? "outline:1px solid #00ff88;outline-offset:-1px;font-weight:700;" : ""}cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+        <span>#${i + 1}</span><span>${escapeHtml(m.name)}</span><span>${m.wins || 0}</span></div>`;
+    });
+    html += `</div>
+      <div style="font-size:12px;color:#8b93a6;margin-top:10px;max-width:420px;text-align:center;line-height:1.5;">
+        ${z.up ? "🟢 " + tr("Promotion zone") + " (" + tr("Top") + " " + z.up + ", " + tr("min.") + " " + LEAGUE_MIN_WINS_PROMOTE + " " + tr("Wins") + ")" : ""}
+        ${z.down ? " &nbsp; 🔴 " + tr("Relegation zone") + " (" + tr("Bottom") + " " + z.down + ")" : ""}</div>`;
+  } else {
+    html += `<div style="max-width:420px;text-align:center;color:#cfd6e4;font-size:15px;line-height:1.5;margin:10px 0;">
+      ${tr("Win a match to enter this week's league group.")}</div>`;
+  }
+  html += `<div style="font-size:12px;color:#8b93a6;margin-top:12px;max-width:420px;text-align:center;line-height:1.5;">
+    ${tr("Every win counts, including wins against the Online Bot.")}</div>`;
+  box.innerHTML = html;
 }
 
 const DATA_VERSION = "2"; // bei jedem kuenftigen Reset hochzaehlen
@@ -1483,6 +1731,11 @@ async function pushAccountToFirebase() {
     bestWinOpp: onlineAccount.bestWinOpp,
     worstLossChange: onlineAccount.worstLossChange,
     worstLossOpp: onlineAccount.worstLossOpp,
+    leagueTier: onlineAccount.leagueTier ?? 0,
+    leagueBest: onlineAccount.leagueBest ?? 0,
+    leagueWeek: onlineAccount.leagueWeek ?? null,
+    leagueGroup: onlineAccount.leagueGroup ?? null,
+    leagueLastResult: onlineAccount.leagueLastResult ?? null,
     updatedAt: Date.now()
   });
   // Maintain the name → uid lookup index so leaderboard / profile /
@@ -1822,7 +2075,7 @@ function clearAllTimers() {
 //  SCREEN ROUTER
 // ═══════════════════════════════════════════════
 const ALL_SCREENS = [
-  "menu","settings","offlineSettings","accountScreen","leaderboardScreen",
+  "menu","settings","offlineSettings","accountScreen","leaderboardScreen","leagueScreen",
   "onlineWait","vsScreen","winnerOverlay","gameOver"
 ];
 
@@ -1843,7 +2096,7 @@ setInterval(updateChatLock, 1000);
 function updateAccountBtn() {
   updateChatLock();
   const b = document.getElementById("accountBtn");
-  if (b) b.textContent = onlineAccount ? "👤 " + onlineAccount.name : "👤 Log in / Sign up";
+  if (b) b.textContent = onlineAccount ? leagueByTier(onlineAccount.leagueTier).icon + " " + onlineAccount.name : "👤 Log in / Sign up";
 }
 setTimeout(updateAccountBtn, 0);
 window.showScreen = function(id) {
@@ -1854,7 +2107,7 @@ window.showScreen = function(id) {
   });
   document.body.classList.remove("ingame", "mode-online");
   if (id === "menu") updateAccountBtn();
-  const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen"].includes(id);
+  const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen","leagueScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
 };
 
@@ -1906,7 +2159,7 @@ async function loadLeaderboard() {
     activePlayers.forEach((p, i) => {
       const isMe = myUid && p.uid === myUid;
       lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
-        <span>#${i+1}</span><span>${escapeHtml(p.name)}</span>
+        <span>#${i+1}</span><span>${leagueByTier(p.leagueTier).icon} ${escapeHtml(p.name)}</span>
         <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
     });
@@ -1943,6 +2196,8 @@ async function openOnlineProfile(uid) {
 
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">League</span><span class="prof-val">${leagueBadgeHTML(p.leagueTier)}</span></div>
+      <div class="prof-row"><span class="prof-label">Highest League</span><span class="prof-val">${leagueBadgeHTML(p.leagueBest ?? p.leagueTier)}</span></div>
       <div class="prof-row"><span class="prof-label">Total Games</span><span class="prof-val">${totalGames}</span></div>
       <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
       <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
@@ -2019,7 +2274,9 @@ function showLoggedInAccountScreen() {
   showScreen("accountScreen");
   document.getElementById("accountContent").innerHTML = `
     <p style="color:#aaa;margin-bottom:8px;font-size:16px;">Logged in as</p>
-    <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:18px;">${onlineAccount.name}</p>
+    <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:10px;">${escapeHtml(onlineAccount.name)}</p>
+    <div style="font-size:20px;margin-bottom:14px;">${leagueBadgeHTML(onlineAccount.leagueTier)} <span style="color:#8b93a6;font-size:14px;">· ${Math.round(onlineAccount.elo)} ELO</span></div>
+    <button onclick="showLeagueScreen()">🏅 Weekly League</button>
     <button onclick="logoutAccount()">Log Out</button>
     <button onclick="showScreen('menu')">← Back</button>
   `;
@@ -2465,9 +2722,13 @@ async function getPlayerRanks(p1Name, p2Name) {
     const idx1 = sorted.findIndex(p => p.name === p1Name);
     const idx2 = sorted.findIndex(p => p.name === p2Name);
 
+    const all = Object.values(data);
+    const pl1 = all.find(p => p.name === p1Name), pl2 = all.find(p => p.name === p2Name);
     return {
       r1: idx1 !== -1 ? `#${idx1 + 1}` : "Unranked",
-      r2: idx2 !== -1 ? `#${idx2 + 1}` : "Unranked"
+      r2: idx2 !== -1 ? `#${idx2 + 1}` : "Unranked",
+      t1: pl1 ? (pl1.leagueTier || 0) : undefined,
+      t2: pl2 ? (pl2.leagueTier || 0) : undefined
     };
   } catch(e) {
     console.warn("Error loading ranks:", e);
@@ -2489,6 +2750,8 @@ function showVSScreen(n1, e1, n2, e2, callback) {
   getPlayerRanks(n1, n2).then(ranks => {
     document.getElementById("vsRank1").textContent = "Rank: " + ranks.r1;
     document.getElementById("vsRank2").textContent = "Rank: " + ranks.r2;
+    if (ranks.t1 !== undefined && n1 !== "Online Bot") document.getElementById("vsElo1").textContent = "ELO " + Math.round(e1) + " · " + leagueLabel(ranks.t1);
+    if (ranks.t2 !== undefined && n2 !== "Online Bot") document.getElementById("vsElo2").textContent = "ELO " + Math.round(e2) + " · " + leagueLabel(ranks.t2);
 
     document.getElementById("onlineRankMe").textContent  = `(${ranks.r1})`;
     document.getElementById("onlineRankOpp").textContent = `(${ranks.r2})`;
@@ -2881,7 +3144,10 @@ async function handleOnlineResult(winnerName, change) {
   }
 
   saveAccountLocal();
+  updateAccountBtn();
+  lastLeagueNote = "";
   if (fbReady) await pushAccountToFirebase(); // writes ONLY players/{myUid}
+  if (won && fbReady) leagueRecordWin().catch(e => console.warn("league win failed", e));
 
   showEloAnimation(won ? eloChange : -eloChange);
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
@@ -2996,6 +3262,7 @@ function showWinnerOverlay(winnerName, eloChange) {
     `🏆 Winner: <span style="color:gold">${escapeHtml(winnerName)}</span>`;
   document.getElementById("winnerEloChange").textContent =
     `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
+  updateWinnerLeagueLine();
 
   const btns = document.getElementById("winnerButtons");
   btns.innerHTML = "";
@@ -4745,7 +5012,8 @@ const DICT = { de: {
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
   "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
-  "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen"
+  "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
+  "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
 const RX = { de: [
   [/^Starting in (\d+)…$/, "Start in $1…"],
