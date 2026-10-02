@@ -1872,7 +1872,11 @@ async function loadSurvivalBoard() {
     const rows = Object.entries(sv || {})
       .filter(([uid]) => !pl || pl[uid])                       // geloeschte Accounts ausblenden
       .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
-      .filter(r => r.time > 0).sort((a, b) => b.time - a.time).slice(0, 100);
+      .filter(r => r.time > 0).sort((a, b) => b.time - a.time)
+      .filter((r, i, arr) => { // pro Spieler nur die beste Zeit (Liste ist bereits absteigend sortiert)
+        const key = String(dn(r.name)).trim().toLowerCase();
+        return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === key) === i;
+      }).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No survival records yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
