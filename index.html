@@ -818,9 +818,10 @@ body.mode-online #homeBtn{display:none!important;}
         </div>
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
+          <button onclick="startSurvival()">🏝 Survival</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
-          <button onclick="showScreen('leaderboardScreen');loadLeaderboard()">🏆 Leaderboard</button>
+          <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
           <button onclick="showMenuPage('menuMain')">← Back</button>
         </div>
         <div id="menuOffline" class="menuPage" style="display:none">
@@ -908,6 +909,10 @@ body.mode-online #homeBtn{display:none!important;}
 
     <div id="leaderboardScreen">
       <h2>🏆 Online Leaderboard</h2>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
+        <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
+      </div>
       <div id="lbTable">
         <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
       </div>
@@ -1273,6 +1278,14 @@ async function rpcRenameChatMessages(uid, newName) {
   Object.entries(v).forEach(([id, m]) => { if (m && m.uid === uid && m.name !== newName) up["chat/" + id + "/name"] = newName; });
   if (Object.keys(up).length) return update(ref(db), up);
 }
+// Survival: Rekordzeit + Replay in einem atomaren Schreibvorgang (nur eigene UID)
+async function rpcSaveSurvival(time, replayStr, name) {
+  const uid = requireUid();
+  return update(ref(db), {
+    ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
+    ["survivalReplays/" + uid]: String(replayStr)
+  });
+}
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
   const uid = requireUid();
@@ -1302,7 +1315,7 @@ async function rpcModRename(uid, oldName, newName) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -1662,6 +1675,7 @@ function escapeHtml(v) {
 function currentPresenceStatus() {
   const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt" };
   try {
+    if (survivalActive) return "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
@@ -1690,37 +1704,172 @@ function syncPresence(force) {
 setInterval(() => syncPresence(false), 2000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); });
 
-// ═══ Auto-Update: alle bekommen die neue Version ═══
-// Bei jedem Release BUILD_ID hier UND in version.json auf denselben neuen Wert setzen und beide Dateien hochladen.
-const BUILD_ID = "2026-10-03-1";
-let _updateShown = false;
-function _inSafeScreen() {
-  const m = document.getElementById("menu"), a = document.activeElement;
-  const typing = a && /^(INPUT|TEXTAREA)$/.test(a.tagName);
-  return !!(m && m.style.display === "flex") && !running && !typing;
+
+// ═══ SURVIVAL (online, solo) ═══
+// Gleiche Baelle/Spawnrate/Steuerung wie im 1v1, aber ohne Gegner. Zeit = Ticks/60.
+// Replay: Spielerposition alle 3 Ticks + Ball-Spawns (Tick, Position, Geschwindigkeit). Die Baelle bewegen
+// sich deterministisch, deshalb reicht das, um den Lauf exakt nachzuspielen (nur der Rekord wird gespeichert).
+let survivalActive = false, survTick = 0, survRec = null, survHudIv = null, _survInfo = null;
+function survFmt(t) {
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return m ? m + ":" + (s < 10 ? "0" : "") + s.toFixed(1) : s.toFixed(1) + "s";
 }
-function _reloadFresh() { location.replace(location.pathname + "?v=" + Date.now()); }
-async function checkForUpdate() {
+function startSurvival() {
+  if (!onlineAccount) { showCreateAccount(); return; }
+  try { cleanupOnline(); } catch (e) {}
+  clearAllTimers();
+  ["survivalResult", "survReplay"].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+  hideAllScreensForGame();
+  mode = "online"; document.body.classList.add("mode-online");
+  balls = []; players = []; eliminated = [];
+  running = true; startTime = Date.now();
+  onlineVsBot = true; onlineIsHost = true; onlineMatchId = null; onlineOpponent = null;   // keine Netzwerk-Schreibzugriffe im Match
+  onlineResultHandled = false; campReset(); onlineMatchStatus = null; onlineSimTick = 0; myTrail = [];
+  onlineRng = makeLCG(Math.floor(Math.random() * 1e9) + 1);
+  onlineBallSpawnTimer = Date.now();
+  const md = document.getElementById("mode"); if (md) md.textContent = "Survival";
+  document.getElementById("onlineHUD").style.display = "none";
+  const me = createPlayer(W() / 2, H() / 2, myBallColor, onlineAccount.name);
+  players.push(me);
+  survTick = 0; survivalActive = true;
+  survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
+  const hud = document.createElement("div");
+  hud.id = "survivalHUD";
+  hud.style.cssText = "position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:150;pointer-events:none;padding:6px 18px;border-radius:12px;background:rgba(12,12,18,.85);border:1px solid rgba(0,255,136,.5);color:#00ff88;font:700 22px var(--font-display),system-ui,sans-serif;";
+  hud.textContent = "0.0s";
+  document.body.appendChild(hud);
+  if (survHudIv) clearInterval(survHudIv);
+  survHudIv = setInterval(() => { const h = document.getElementById("survivalHUD"); if (h) h.textContent = survFmt(survTick / 60); }, 100);
+  syncPresence(true);
+}
+function survivalTick() {
+  survTick++;
+  if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
+}
+async function endSurvival(camped) {
+  if (!survivalActive) return;
+  survivalActive = false; running = false;
+  clearAllTimers(); campWarn(false);
+  if (survHudIv) { clearInterval(survHudIv); survHudIv = null; }
+  const hud = document.getElementById("survivalHUD"); if (hud) hud.remove();
+  const me = players[0], rec = survRec; survRec = null;
+  rec.n = survTick; rec.e = me ? [Math.round(me.x), Math.round(me.y)] : [0, 0];
+  const t = Math.round(survTick / 60 * 100) / 100;
+  _survInfo = null;
+  setTimeout(() => renderSurvivalResult(t, camped), 900);
+  let best = 0, isRecord = false, saved = true;
   try {
-    const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) return;
-    const live = String((await r.json()).v || "");
-    if (!live || live === BUILD_ID) return;
-    if (_inSafeScreen()) { _reloadFresh(); return; }       // im Menue: sofort neu laden
-    if (_updateShown) return;                               // sonst (Match, Eingabe): Hinweis, Match wird nie unterbrochen
-    _updateShown = true;
-    const b = document.createElement("div");
-    b.style.cssText = "position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9000;background:#14141e;border:1px solid #00ff88;color:#f0f0f5;border-radius:12px;padding:10px 14px;font:14px system-ui,sans-serif;display:flex;gap:10px;align-items:center;";
-    b.innerHTML = '<span>🔄 New version available</span><button style="margin:0;padding:6px 12px;font-size:13px;">Reload</button>';
-    b.querySelector("button").onclick = _reloadFresh;
-    document.body.appendChild(b);
-    // Sobald der Spieler wieder im Menue ist, automatisch laden
-    setInterval(() => { if (_inSafeScreen()) _reloadFresh(); }, 3000);
-  } catch (e) {}
+    if (fbReady && myUid) {
+      const old = await dbGet("survival/" + myUid);
+      best = (old && Number(old.time)) || 0;
+      if (t > best && t >= 1) {
+        await RPC.saveSurvival(t, JSON.stringify(rec), onlineAccount.name);
+        isRecord = true; best = t;
+      }
+    }
+  } catch (e) { saved = false; console.warn("survival save failed", e); }
+  _survInfo = { best, isRecord, saved };
+  if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
-setTimeout(checkForUpdate, 3000);
-setInterval(checkForUpdate, 5 * 60 * 1000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+function renderSurvivalResult(t, camped) {
+  let ov = document.getElementById("survivalResult");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "survivalResult";
+    ov.style.cssText = "position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);";
+    document.body.appendChild(ov);
+  }
+  const i = _survInfo;
+  const line = !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
+    i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
+  ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
+    + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
+    + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
+    + '<div style="font-size:15px;margin-bottom:16px;">' + line + '</div>'
+    + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
+    + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
+    + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
+  ov.querySelector("#survRetry").onclick = () => startSurvival();
+  ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
+  const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => watchSurvivalReplay(myUid, "My record");
+}
+async function watchSurvivalReplay(uid, label) {
+  if (!fbReady) return;
+  let rec = null;
+  try { const raw = await dbGet("survivalReplays/" + uid); rec = raw && JSON.parse(raw); } catch (e) {}
+  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay found."); return; }
+  playSurvivalReplay(rec, label);
+}
+function playSurvivalReplay(rec, label) {
+  const old = document.getElementById("survReplay"); if (old) old.remove();
+  const ov = document.createElement("div"); ov.id = "survReplay";
+  ov.style.cssText = "position:fixed;inset:0;z-index:9500;background:#05050a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:env(safe-area-inset-top,0px) 8px env(safe-area-inset-bottom,0px);box-sizing:border-box;";
+  ov.innerHTML = '<div style="color:#f0f0f5;font:700 16px system-ui,sans-serif;"></div>'
+    + '<canvas style="width:100%;max-width:min(100%,calc((100vh - 120px) * 16 / 9));aspect-ratio:16/9;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:#0a0a12;"></canvas>'
+    + '<div><button class="srR" style="margin:4px 6px;">↺ Restart</button><button class="srC" style="margin:4px 6px;">✕ Close</button></div>';
+  document.body.appendChild(ov);
+  const head = ov.firstChild, cv = ov.querySelector("canvas"), c = cv.getContext("2d");
+  const Wd = cv.width = rec.w || 1280, Hd = cv.height = rec.h || 720;
+  head.textContent = "▶ " + label + " – " + survFmt(rec.n / 60);
+  const P = rec.p, m = P.length / 2, last = 3 * (m - 1), S = rec.s || [];
+  const posAt = (tk) => {
+    let ax, ay, bx, by, f;
+    if (tk >= last) { ax = P[2 * (m - 1)]; ay = P[2 * (m - 1) + 1]; bx = rec.e[0]; by = rec.e[1]; f = (tk - last) / Math.max(1, rec.n - last); }
+    else { const k = Math.floor(tk / 3); ax = P[2 * k]; ay = P[2 * k + 1]; bx = P[2 * k + 2]; by = P[2 * k + 3]; f = (tk % 3) / 3; }
+    f = Math.min(1, f); return [ax + (bx - ax) * f, ay + (by - ay) * f];
+  };
+  let bl, tick, si, t0, raf = 0, closed = false;
+  const reset = () => { bl = []; tick = 0; si = 0; t0 = performance.now(); };
+  const step = () => {
+    tick++;
+    while (si < S.length && S[si][0] === tick) { const q = S[si++]; bl.push({ x: q[1], y: q[2], vx: q[3], vy: q[4], radius: q[5] }); }
+    for (const b of bl) {
+      b.x += b.vx; b.y += b.vy;
+      if (b.x - b.radius < 0)  { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+      if (b.x + b.radius > Wd) { b.vx = -Math.abs(b.vx); b.x = Wd - b.radius; }
+      if (b.y - b.radius < 0)  { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+      if (b.y + b.radius > Hd) { b.vy = -Math.abs(b.vy); b.y = Hd - b.radius; }
+    }
+  };
+  const frame = () => {
+    if (closed) return;
+    const target = Math.min(rec.n, Math.floor((performance.now() - t0) / (1000 / 60)));
+    while (tick < target) step();
+    c.clearRect(0, 0, Wd, Hd);
+    for (const b of bl) { c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = "#ff4444"; c.fill(); }
+    const [px, py] = posAt(tick);
+    c.beginPath(); c.arc(px, py, rec.r || 18, 0, Math.PI * 2); c.fillStyle = rec.c || "#00ff88"; c.fill();
+    c.fillStyle = "#fff"; c.font = "700 28px system-ui,sans-serif"; c.textAlign = "left";
+    c.fillText(survFmt(tick / 60), 16, 40);
+    if (tick >= rec.n) { c.textAlign = "center"; c.font = "700 44px system-ui,sans-serif"; c.fillText("💥 " + survFmt(rec.n / 60), Wd / 2, Hd / 2); return; }
+    raf = requestAnimationFrame(frame);
+  };
+  reset(); raf = requestAnimationFrame(frame);
+  ov.querySelector(".srR").onclick = () => { cancelAnimationFrame(raf); reset(); raf = requestAnimationFrame(frame); };
+  ov.querySelector(".srC").onclick = () => { closed = true; cancelAnimationFrame(raf); ov.remove(); };
+}
+
+// Leaderboard: Tabs ELO | Survival
+function lbShowTab(tab) {
+  const e = document.getElementById("lbTabElo"), v = document.getElementById("lbTabSurv");
+  if (e) e.style.borderColor = tab === "elo" ? "#00ff88" : ""; if (v) v.style.borderColor = tab === "surv" ? "#00ff88" : "";
+  if (tab === "surv") loadSurvivalBoard(); else loadLeaderboard();
+}
+async function loadSurvivalBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
+  if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const [sv, pl] = await Promise.all([dbGet("survival"), dbGet("players")]);
+    const rows = Object.entries(sv || {})
+      .filter(([uid]) => !pl || pl[uid])                       // geloeschte Accounts ausblenden
+      .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
+      .filter(r => r.time > 0).sort((a, b) => b.time - a.time).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No survival records yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+  } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
+}
 
 function sanitizeAccount(acc) {
   if (!acc) return null;
@@ -1867,6 +2016,7 @@ function campTick() {
   else if (!onlineVsBot && campState.opp.m >= CAMP_LIMIT_MS + 1500) { campState.done = true; campDisqualify(false); }
 }
 function campDisqualify(selfCamped) {
+  if (survivalActive) { const m0 = players[0]; if (m0) m0.alive = false; endSurvival(true); return; }
   const meName = onlineAccount.name, oppName = onlineOpponent ? onlineOpponent.name : "Online Bot";
   campWarn(false);
   if (selfCamped) campBanner("campMsg", "🚫 " + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000);
@@ -2565,7 +2715,7 @@ function confirmHome() {
 function exitToMenu() {
   try { cleanupOnline(); } catch (e) { console.warn(e); }
   setTimeout(() => {
-    location.replace(location.pathname + "?v=" + Date.now());
+    window.location.reload();
   }, 150);
 }
 
@@ -4486,13 +4636,15 @@ function update() {
 
   if (mode === "online") {
     campTick();
+    if (survivalActive) survivalTick();
     pushMyPosition();
     onlineSimTick++;
 
     if (onlineIsHost) {
       if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
         onlineBallSpawnTimer = Date.now();
-        balls.push(makeOnlineBall());
+        const nb = makeOnlineBall(); balls.push(nb);
+        if (survivalActive) survRec.s.push([survTick, nb.x, nb.y, nb.vx, nb.vy, nb.radius]);
       }
     }
 
@@ -4645,6 +4797,7 @@ function checkOnlineCollision(me) {
     const dy = me.y - b.y;
     if (Math.sqrt(dx*dx + dy*dy) < me.radius + b.radius) {
       me.alive = false;
+      if (survivalActive) { endSurvival(false); return; }
       const opp = players.find(p => p.name !== me.name);
 
       if (onlineVsBot) {
