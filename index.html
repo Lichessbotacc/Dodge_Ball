@@ -4348,20 +4348,29 @@ async function startOnlineTV() {
 
     const feed = (pl, st) => {
       const now = Date.now();
-      const prevAt = pl.lastPacketAt || now;
-      const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(1, now - prevAt));
+      // Jedes Match-Update (Ball, anderer Spieler ...) liefert den Spielerstand erneut.
+      // Unveränderte Daten sind KEIN neues Paket -> ignorieren (sonst Geschwindigkeit=0 / Zittern).
+      if (pl.lastPacketAt && st.x === pl.baseTx && st.y === pl.baseTy && (st.alive !== false) === pl.alive) return;
       if (pl.lastPacketAt) {
-        pl.netVX = (st.x - pl.tx) / interval;
-        pl.netVY = (st.y - pl.ty) / interval;
+        const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(30, now - pl.lastPacketAt));
+        // Geschwindigkeit aus den ROHEN Paketen (nicht aus dem extrapolierten Ziel), geglättet + begrenzt
+        let vx = (st.x - pl.baseTx) / interval, vy = (st.y - pl.baseTy) / interval;
+        const sp = Math.hypot(vx, vy), MAXV = 0.5;   // px/ms
+        if (sp > MAXV) { vx *= MAXV / sp; vy *= MAXV / sp; }
+        pl.netVX = 0.5 * (pl.netVX || 0) + 0.5 * vx;
+        pl.netVY = 0.5 * (pl.netVY || 0) + 0.5 * vy;
+        pl.netInterval = interval;
+        // Riesiger Sprung (Respawn/Rundenstart) -> direkt setzen statt quer durch die Arena zu fliegen
+        if (Math.hypot(st.x - pl.baseTx, st.y - pl.baseTy) > 400) { pl.x = st.x; pl.y = st.y; pl.netVX = 0; pl.netVY = 0; }
       } else {
         pl.netVX = 0; pl.netVY = 0;
-        pl.x = st.x; pl.y = st.y;           // erstes Paket: direkt hinsetzen, nicht von der Mitte einfliegen
+        pl.x = st.x; pl.y = st.y;           // erstes Paket: direkt hinsetzen
+        pl.netInterval = NET_SMOOTH.MIN_INTERVAL;
       }
       pl.baseTx = st.x; pl.baseTy = st.y;
       pl.tx = st.x; pl.ty = st.y;
       pl.alive = st.alive !== false;
       pl.lastPacketAt = now;
-      pl.netInterval = interval;
     };
 
     const myId = bestId;
