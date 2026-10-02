@@ -1408,6 +1408,7 @@ function renderPresence(playersData) {
 let chatUnsub = null, lastChatSent = 0, chatFirst = true;
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
+const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label im Chat
 
 // Chat name color = exact color of the sender's current league (own league from the account, others from the live players data)
 function chatLeagueColor(uid) {
@@ -1462,7 +1463,13 @@ function renderChat(keepScroll) {
     tx.setAttribute("translate", "no");
     tx.textContent = m.text;
     tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
-    row.append(meta, nm, tx);
+    if (m.name === CHAT_DEV_NAME) {
+      const tag = document.createElement("b");
+      tag.textContent = "[DEV] ";
+      tag.title = "Developer";
+      tag.style.cssText = "color:#ff4d6d;text-shadow:0 0 8px rgba(255,77,109,0.55);letter-spacing:.5px;";
+      row.append(meta, tag, nm, tx);
+    } else row.append(meta, nm, tx);
     box.appendChild(row);
   }
   if (keepScroll) box.scrollTop = prevTop + (box.scrollHeight - prevH);   // beim Nachladen oben: Position halten
@@ -1660,7 +1667,7 @@ async function forfeitOpponent() {
 //  • Warning from CAMP_WARN_MS (3 s), at CAMP_LIMIT_MS (6 s) the player has LOST the match (normal ELO loss) + message.
 //  • Every client checks itself (instant message) AND the opponent (+1.5 s grace) so it cannot be switched off.
 // ═══════════════════════════════════════════════
-const CAMP_ZONE = 0.07, CAMP_WARN_MS = 3000, CAMP_LIMIT_MS = 6000, CAMP_DECAY = 0.25;
+const CAMP_ZONE = 0.14, CAMP_WARN_MS = 3000, CAMP_LIMIT_MS = 6000, CAMP_DECAY = 0.25;
 let campState = null, onlineMatchStatus = null;
 function campReset() { campState = { me: { m: 0 }, opp: { m: 0 }, last: Date.now(), done: false }; campWarn(false); }
 function inDeepCorner(p) {
