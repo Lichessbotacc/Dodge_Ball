@@ -2015,8 +2015,8 @@ function cleanupOnline() {
     RPC.removeOwnQueueEntry().catch(() => {});
     RPC.removeOwnInvite().catch(() => {});
   }
-  if (fbReady && onlineMatchId && !onlineVsBot) {
-    RPC.updateMatch(onlineMatchId, { status: "abandoned", postChat: null }).catch(() => {});
+  if (fbReady && onlineMatchId) {
+    RPC.updateMatch(onlineMatchId, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
   }
   onlineMatchId       = null;
   onlineRole          = null;
@@ -2617,7 +2617,6 @@ let lastSentAlive = true;
 // using a name-derived key.
 function pushMyPosition() {
   if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
-   if (onlineVsBot) return;
   const now = Date.now();
   if (now - lastPosPush < 75) return;
 
@@ -2628,7 +2627,7 @@ function pushMyPosition() {
   const roundedY = Math.round(me.y);
   const aliveState = me.alive;
 
-  if (roundedX === lastSentX && roundedY === lastSentY && aliveState === lastSentAlive) {
+  if (!onlineVsBot && roundedX === lastSentX && roundedY === lastSentY && aliveState === lastSentAlive) {
     return;
   }
 
@@ -2656,7 +2655,6 @@ function pushMyPosition() {
 let lastBallPush = 0;
 function pushBallState() {
   if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
-if (onlineVsBot) return;
   const now = Date.now();
   if (now - lastBallPush < 120) return;
   lastBallPush = now;
@@ -3489,7 +3487,7 @@ function update() {
       if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
     }
 
-    if (onlineIsHost && !onlineVsBot) pushBallState();
+    if (onlineIsHost) pushBallState();
 
     if (onlineVsBot) {
       const bot = players.find(p => p.name !== onlineAccount.name);
@@ -4293,7 +4291,8 @@ async function startOnlineTV() {
   const specText = document.getElementById("spectatorText");
   specText.innerHTML = "Waiting for an active match to start...";
 
-  const badMatches = new Set();      // abgebrochene / eingefrorene Matches ("Zombies")
+  const badMatches = new Map();      // id -> Zeitpunkt, bis zu dem das Match übersprungen wird (läuft ab, wird später erneut versucht)
+  let gotPacket = false;
   let lastMatchesData = null;
   let lastPacketSeen = 0;
   let curMeta = null;
@@ -4315,9 +4314,8 @@ async function startOnlineTV() {
     }
     let bestId = null, bestElo = -1, best = null;
     for (const [id, m] of Object.entries(matchesData)) {
-      if (m.status !== "playing" || badMatches.has(id)) continue;
-      // Bot-/Übungsmatches laufen nur lokal und senden NIE Positionen/Bälle
-      if (id.startsWith("BOT__") || m.p2uid === ONLINE_BOT_UID || m.p1uid === ONLINE_BOT_UID) continue;
+      if (m.status !== "playing") continue;
+      if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
       if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
       const avg = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
@@ -4333,6 +4331,7 @@ async function startOnlineTV() {
     stopInner();
     onlineTvCurrentMatchId = bestId;
     lastPacketSeen = Date.now();
+    gotPacket = false;
     curMeta = best;
     setOnlineAspect(best.arena);
 
@@ -4374,10 +4373,10 @@ async function startOnlineTV() {
         setTimeout(pickMatch, 800);
         return;
       }
-      if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); }
-      if (data.p2State) { feed(p2, data.p2State); lastPacketSeen = Date.now(); }
+      if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); gotPacket = true; }
+      if (data.p2State) { feed(p2, data.p2State); lastPacketSeen = Date.now(); gotPacket = true; }
       if (data.ballState) {
-        try { applyBallCorrection(JSON.parse(data.ballState), 0.35); lastPacketSeen = Date.now(); } catch(e) {}
+        try { applyBallCorrection(JSON.parse(data.ballState), 0.35); lastPacketSeen = Date.now(); gotPacket = true; } catch(e) {}
       }
     });
     onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
@@ -4393,8 +4392,10 @@ async function startOnlineTV() {
   // Auswahl periodisch neu bewerten + eingefrorene Matches (>8s ohne Daten) überspringen
   const tvIv = setInterval(() => {
     if (mode !== "online_tv" || !running) { clearInterval(tvIv); return; }
-    if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > 8000) {
-      badMatches.add(onlineTvCurrentMatchId);
+    // Vor dem ersten Paket (VS-Screen/Countdown) mehr Geduld; danach 8s ohne Daten = eingefroren.
+    // Übersprungene Matches werden nach 10s erneut geprüft -> Zuschauen klappt vor UND während des Starts.
+    if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 8000 : 20000)) {
+      badMatches.set(onlineTvCurrentMatchId, Date.now() + 10000);
       stopInner();
     }
     pickMatch();
