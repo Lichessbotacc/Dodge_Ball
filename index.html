@@ -5897,6 +5897,7 @@ function _modWarnInfo() {
 function _modChatBlock() {
   const s = _modState || {};
   if (s.banned) return "You are banned.";
+  if (s.warning && _modWarnActive(s.warning)) return "Locked: moderator notice.";
   if (s.chatBanned) return "You are banned from the chat.";
   if (s.muteUntil && s.muteUntil > Date.now()) return "Muted until " + new Date(s.muteUntil).toLocaleString();
   return "";
@@ -5913,6 +5914,11 @@ function _modChatLock() {
     if (typeof updateChatLock === "function") updateChatLock(); else inp.disabled = false;
   }
 }
+
+// ── Solange Warnung/Ban aktiv: keine Tastatureingaben ans Spiel ──
+["keydown", "keyup"].forEach(t => window.addEventListener(t, e => {
+  if (_modMode && !(e.target && e.target.closest && e.target.closest("#modOverlay"))) { e.stopImmediatePropagation(); e.preventDefault(); }
+}, true));
 
 // ── Großes Pop-up (Ban / Warnung) ──
 function _modEnsureOv() {
@@ -5947,15 +5953,30 @@ function _modBuild(ov, mode) {
       + '<div id="modMsg" style="min-height:18px;font-size:13px;color:#ff8a8a;margin-bottom:8px;"></div>'
       + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'
       + '<button id="modRenameBtn" style="margin:0;padding:10px 20px;font-size:15px;">Change username</button>'
-      + '<button id="modDeleteBtn" style="margin:0;padding:10px 20px;font-size:15px;">Delete my account</button></div></div>';
+      + '<button id="modDeleteBtn" style="margin:0;padding:10px 20px;font-size:15px;">Delete my account</button></div>'
+      + '<div id="modDelRow" style="display:none;margin-top:14px;"><input id="modDelPw" type="password" placeholder="Password" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:10px;font-size:15px;">'
+      + '<button id="modDelGo" style="margin:0;padding:10px 20px;font-size:15px;background:#a22;border-color:#f44;color:#fff;">Delete permanently</button></div></div>';
     ov.querySelector("#modRenameBtn").onclick = _modDoRename;
     ov.querySelector("#modNewName").addEventListener("keydown", e => { if (e.key === "Enter") _modDoRename(); });
     ov.querySelector("#modDeleteBtn").onclick = () => {
-      _modSnoozeUntil = Date.now() + 120000;   // Pop-up kurz ausblenden, damit der Konto-Bildschirm benutzbar ist
-      _modRender();
-      try { openAccountScreen(); } catch (e) {}
+      ov.querySelector("#modDelRow").style.display = "block";
+      ov.querySelector("#modDelPw").focus();
     };
+    ov.querySelector("#modDelGo").onclick = _modDoDelete;
   }
+}
+async function _modDoDelete() {
+  const pw = (document.getElementById("modDelPw") || {}).value, msg = document.getElementById("modMsg");
+  if (!msg) return;
+  if (!pw) { msg.textContent = "Enter your password."; return; }
+  msg.textContent = "Deleting…";
+  try {
+    showDeleteAccountScreen();                          // rendert das (verdeckte) Lösch-Formular
+    document.getElementById("deletePassword").value = pw;
+    await deleteAccount();                              // bei Erfolg lädt die Seite neu
+    const i = document.getElementById("accountInfo");
+    if (i && i.textContent) msg.textContent = i.textContent;
+  } catch (e) { msg.textContent = "Error: " + (e && e.message); }
 }
 async function _modDoRename() {
   const inp = document.getElementById("modNewName"), msg = document.getElementById("modMsg");
@@ -5976,7 +5997,11 @@ function _modRender() {
   const ban = _modBanInfo(), warn = ban ? null : _modWarnInfo();
   const mode = ban ? "ban" : (warn && Date.now() > _modSnoozeUntil ? "warn" : null);
   if (!mode) { ov.style.display = "none"; _modMode = null; return; }
-  if (mode !== _modMode) { _modBuild(ov, mode); _modMode = mode; }
+  if (mode !== _modMode) {
+    _modBuild(ov, mode); _modMode = mode;
+    try { cleanupOnline(); } catch (e) {}
+    try { showScreen("menu"); } catch (e) {}
+  }
   ov.style.display = "flex";
   if (mode === "ban") ov.querySelector("#modBanReason").textContent = ban.reason ? "Reason: " + ban.reason : "";
   else {
