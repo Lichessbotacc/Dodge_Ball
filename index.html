@@ -4357,6 +4357,34 @@ async function startOnlineTV() {
   let lastPacketSeen = 0;
   let curMeta = null;
 
+  let holdUntil = 0, holdTimer = null;
+  const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); };
+  const showWinner = (winner, scoreTxt) => {
+    hideWinner();
+    const o = document.createElement("div");
+    o.id = "tvWinnerOverlay";
+    o.style.cssText = "position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:150;text-align:center;pointer-events:none;" +
+      "background:linear-gradient(160deg,rgba(16,18,26,0.92),rgba(8,9,14,0.92));border:1px solid rgba(255,215,0,0.5);border-radius:16px;" +
+      "padding:22px 38px;color:#f0f0f5;font-family:var(--font-display);box-shadow:0 10px 40px rgba(0,0,0,0.6);backdrop-filter:blur(8px);";
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:15px;letter-spacing:2px;opacity:.7;margin-bottom:8px;";
+    title.textContent = winner ? "MATCH FINISHED" : "MATCH ENDED";
+    const big = document.createElement("div");
+    big.style.cssText = "font-size:30px;font-weight:700;";
+    if (winner) {
+      big.append(document.createTextNode("🏆 Winner: "));
+      const nm = document.createElement("span");
+      nm.setAttribute("translate", "no");
+      nm.style.color = "gold";
+      nm.textContent = winner;
+      big.append(nm);
+    } else {
+      big.textContent = "No winner (opponent left)";
+    }
+    o.append(title, big);
+    if (scoreTxt) { const s = document.createElement("div"); s.style.cssText = "margin-top:8px;font-size:15px;opacity:.8;"; s.setAttribute("translate", "no"); s.textContent = scoreTxt; o.append(s); }
+    document.body.appendChild(o);
+  };
   const stopInner = () => {
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
     onlineTvCurrentMatchId = null; curMeta = null;
@@ -4366,6 +4394,7 @@ async function startOnlineTV() {
   // Das Parent-Listener feuert bei JEDER Positionsänderung ALLER Matches.
   // Deshalb nur speichern und die Auswahl selten (alle 1.5s) neu berechnen.
   const pickMatch = () => {
+    if (Date.now() < holdUntil) return;      // Gewinner-Anzeige läuft noch
     const matchesData = lastMatchesData;
     if (!matchesData) {
       specText.innerHTML = "No online games are currently running.";
@@ -4412,9 +4441,15 @@ async function startOnlineTV() {
     onlineTvInnerUnsubscribe = RPC.onMatch(myId, (data) => {
       if (myId !== onlineTvCurrentMatchId) return;
       if (!data || data.status === "done" || data.status === "abandoned") {
-        stopInner();
+        // Gewinner anzeigen (Spielfeld bleibt ein paar Sekunden eingefroren), dann nächstes Match suchen
+        if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
+        const winner = data && data.status === "done" && data.winner ? data.winner : null;
+        const sc = data && Number.isFinite(data.p1Score) && Number.isFinite(data.p2Score) ? data.p1Score + " - " + data.p2Score : "";
+        showWinner(winner, sc);
         specText.innerHTML = "Match finished. Searching for next game...";
-        setTimeout(pickMatch, 800);
+        holdUntil = Date.now() + 6000;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
         return;
       }
       if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); gotPacket = true; }
@@ -4438,13 +4473,14 @@ async function startOnlineTV() {
     if (mode !== "online_tv" || !running) { clearInterval(tvIv); return; }
     // Vor dem ersten Paket (VS-Screen/Countdown) mehr Geduld; danach 8s ohne Daten = eingefroren.
     // Übersprungene Matches werden nach 10s erneut geprüft -> Zuschauen klappt vor UND während des Starts.
+    if (Date.now() < holdUntil) return;
     if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 8000 : 20000)) {
       badMatches.set(onlineTvCurrentMatchId, Date.now() + 10000);
       stopInner();
     }
     pickMatch();
   }, 1500);
-  onlineUnsubscribes.push(() => clearInterval(tvIv));
+  onlineUnsubscribes.push(() => { clearInterval(tvIv); clearTimeout(holdTimer); hideWinner(); });
 }
 
 
@@ -4635,7 +4671,7 @@ const DICT = { de: {
   "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "Idle in Menu":"Im Menü","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen"
 }};
 const RX = { de: [
