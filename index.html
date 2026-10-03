@@ -107,8 +107,8 @@
 
 import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
-  getAuth, signInAnonymously, onAuthStateChanged,
-  setPersistence, browserLocalPersistence,
+  getAuth, initializeAuth, indexedDBLocalPersistence, signInAnonymously, onAuthStateChanged,
+  browserLocalPersistence,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   EmailAuthProvider, reauthenticateWithCredential, deleteUser
 }                            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
@@ -140,14 +140,18 @@ let _myUid     = null;
 try {
   _app = initializeApp(firebaseConfig);
   _db  = getDatabase(_app);
-  _auth = getAuth(_app);
+  // FIX: persistence chain (IndexedDB first, localStorage as fallback) set at init time.
+  // The old un-awaited setPersistence(browserLocalPersistence) forced localStorage-only storage,
+  // which mobile/in-app browsers evict -> password session lost -> "Session expired".
+  try {
+    _auth = initializeAuth(_app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
+  } catch(e) { _auth = getAuth(_app); }
   try { getAnalytics(_app); } catch(e) {}
   // ADDED: explicit LOCAL persistence. This is already the web SDK's
   // default, but we set it explicitly so the session survives tab
   // closes / browser restarts on the SAME device — it does NOT make
   // an account follow you to a different device/browser; only
   // signing in with username+password (below) does that.
-  try { setPersistence(_auth, browserLocalPersistence); } catch(e) {}
   _fbReady = true;
   console.log("Firebase connected!");
 } catch(e) {
@@ -1438,8 +1442,11 @@ async function getHeadToHeadScore(uidA, uidB) {
   return score || { [uidA]: 0, [uidB]: 0 };
 }
 
-async function recordHeadToHeadWin(winnerUid, loserUid) {
+async function recordHeadToHeadWin(winnerUid, loserUid, roundKey) {
   const score = await getHeadToHeadScore(winnerUid, loserUid);
+  // Idempotent: both players may call this; the result of one round is counted only once.
+  if (roundKey && score._last === roundKey) return score;
+  if (roundKey) score._last = roundKey;
   score[winnerUid] = (score[winnerUid] || 0) + 1;
   score[loserUid]  = score[loserUid]  || 0;
   await RPC.setHeadToHead(winnerUid, loserUid, score);
@@ -3955,23 +3962,17 @@ async function handleOnlineResult(winnerName, change) {
   if (!onlineVsBot && fbReady) {
     const winnerUid = won ? myUid : oppUid;
     const loserUid  = won ? oppUid : myUid;
-    if (onlineIsHost) {
-      recordHeadToHeadWin(winnerUid, loserUid).then(score => {
-        const myWins = score[myUid] || 0;
-        const oppWins = score[oppUid] || 0;
-        const scoreHUD = document.getElementById("onlineScoreHUD");
-        if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
-      });
-    } else {
-      setTimeout(() => {
-        getHeadToHeadScore(myUid, oppUid).then(score => {
-          const myWins = score[myUid] || 0;
-          const oppWins = score[oppUid] || 0;
-          const scoreHUD = document.getElementById("onlineScoreHUD");
-          if (scoreHUD) scoreHUD.textContent = `${myWins} - ${oppWins}`;
-        });
-      }, 400);
-    }
+    // FIX: BOTH players record the result (idempotent via roundKey), so a host that leaves
+    // right after the match no longer loses the score. Errors are logged instead of swallowed.
+    const roundKey = onlineMatchId + ":" + onlineRound;
+    const showH2H = (score) => {
+      const scoreHUD = document.getElementById("onlineScoreHUD");
+      if (scoreHUD) scoreHUD.textContent = `${score[myUid] || 0} - ${score[oppUid] || 0}`;
+    };
+    recordHeadToHeadWin(winnerUid, loserUid, roundKey).then(showH2H).catch(e => {
+      console.warn("h2h write failed", e);
+      getHeadToHeadScore(myUid, oppUid).then(showH2H).catch(() => {});
+    });
   } else if (onlineVsBot) {
     const botScoreKey = `h2h_bot_${myUid}`;
     const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
