@@ -2028,7 +2028,8 @@ function disarmOnlineDisconnect() {
 }
 function armOnlineDisconnect(forfeit) {
   disarmOnlineDisconnect();
-  if (!fbReady || !onlineMatchId || onlineVsBot) return;
+  if (!fbReady || !onlineMatchId) return;
+  if (onlineVsBot) forfeit = false;   // Bot-Match: bei Verbindungsabbruch nur beenden, keine Strafe
   try { onlineDisarm = RPC.armMatchDisconnect(onlineMatchId, forfeit ? { status: "abandoned", forfeitBy: myUid, eloChange: forfeitChange(false) } : { status: "abandoned" }); } catch (e) {}
 }
 // Applies the forfeit loss to the OWN account (synchronous part; caller pushes to Firebase)
@@ -3737,6 +3738,14 @@ function startOnlineGame(matchData) {
     if (onlineIsHost) {
       { clearInterval(onlineBallIv); onlineBallIv = setInterval(pushBallState, 100); }
     }
+    // Bot-Matches sind fuer Zuschauer sichtbar -> Verbindungsabbruch muss das Match beenden (sonst "Zombie"-Match im TV)
+    armOnlineDisconnect(false);
+    if (window._pingIvOld) clearInterval(window._pingIvOld);
+    const botPingId = onlineMatchId;
+    const botPingIv = window._pingIvOld = setInterval(() => {
+      if (!running || mode !== "online" || onlineMatchId !== botPingId) { clearInterval(botPingIv); return; }
+      RPC.setMatchPath(botPingId, "ping_" + onlineRole, Date.now()).catch(() => {});
+    }, 2500);
     return;
   }
 
@@ -3995,6 +4004,7 @@ async function handleOnlineResult(winnerName, change) {
     }
     localStorage.setItem(botScoreKey, JSON.stringify(botScore));
     syncBotH2H(botScore);
+    if (fbReady && onlineMatchId) RPC.updateMatch(onlineMatchId, { status: "done", winner: winnerName }).catch(() => {});
     const scoreHUD = document.getElementById("onlineScoreHUD");
     if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
   }
@@ -5722,6 +5732,10 @@ async function startOnlineTV() {
       if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
       if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
+      // Zombie-Erkennung: die Spieler schreiben alle 2,5s einen Ping ins Match. Ist der letzte Ping >30s alt,
+      // ist der Spieler weg (Tab geschlossen / Verbindung weg), das Match blieb aber auf "playing" stehen.
+      { const pg = Math.max(Number(m.ping_p1) || 0, Number(m.ping_p2) || 0);
+        if (pg && Date.now() - pg > 30000) continue; }
       const avg = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
       if (avg > bestElo) { bestElo = avg; bestId = id; best = m; }
     }
@@ -5864,7 +5878,7 @@ async function startOnlineTV() {
     // Nach 2s ohne Daten Hinweis zeigen (nur wenn schon Daten kamen und nicht gerade der Gewinner angezeigt wird)
     setStall(!!(onlineTvCurrentMatchId && gotPacket && Date.now() - lastPacketSeen > 2000));
     if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 5000 : 20000)) {
-      badMatches.set(onlineTvCurrentMatchId, Date.now() + 10000);
+      badMatches.set(onlineTvCurrentMatchId, Date.now() + 5 * 60 * 1000);   // eingefroren: 5 Min. ueberspringen statt 10s
       stopInner();
     }
     pickMatch();
