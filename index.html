@@ -664,6 +664,8 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 
 body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
+body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
+body.mode-tv #homeBtn:hover{transform:none;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 #newsBtn{position:absolute;top:62px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
@@ -1746,7 +1748,7 @@ function watchViewerCount(key, imViewer) {
   stopViewerCount();
   if (!key || !fbReady) return;
   _viewKey = String(key); _viewWrite = !!imViewer;
-  if (_viewWrite && myUid) { try { RPC.setTvViewing(_viewKey).catch(() => {}); } catch (e) {} }
+  if (_viewWrite && myUid) { try { RPC.setTvViewing(_viewKey).catch(e => console.warn("tvViewers: Eintragen fehlgeschlagen (Firebase Rules mit tvViewers veroeffentlicht?)", e)); } catch (e) {} }
   viewerBadge(0);
   _viewUnsub = dbOn("tvViewers/" + _viewKey, (d) => { viewerBadge(d ? Object.keys(d).length : 0); });
 }
@@ -2827,7 +2829,7 @@ window.showScreen = function(id) {
     const el = document.getElementById(s);
     if (el) el.style.display = (s === id) ? "flex" : "none";
   });
-  document.body.classList.remove("ingame", "mode-online");
+  document.body.classList.remove("ingame", "mode-online", "mode-tv");
   if (id === "menu") updateAccountBtn();
   const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen","leagueScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
@@ -4462,7 +4464,7 @@ function startGame(selectedMode) {
   document.getElementById("onlineHUD").style.display     = "none";
 
   mode = selectedMode;
-  document.body.classList.remove("mode-online");
+  document.body.classList.remove("mode-online", "mode-tv");
   document.getElementById("eloTable").style.display = (mode === "tournament") ? "block" : "none";
 
   if (mode === "tournament") {
@@ -5533,6 +5535,7 @@ async function startOnlineTV() {
   document.getElementById("spectatorInfo").style.display = "block";
 
   mode = "online_tv";
+  document.body.classList.add("mode-tv");
   running = true;
   balls = [];
   players = [];
