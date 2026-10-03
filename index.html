@@ -1562,8 +1562,12 @@ function renderPresence(playersData) {
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
       const _busy = statusInMatch(p.status);
+      const _pend = challengeOut.has(p.uid), _other = challengeOut.size > 0 && !_pend;
       const _chBtn = (!isMe && onlineAccount && fbReady)
-        ? `<button class="ch-btn${_busy ? ' ch-busy' : ''}" ${_busy ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer('${escapeHtml(p.uid)}')" title="${_busy ? 'Currently in a match' : 'Challenge to a 1v1'}">⚔</button>` : "";
+        ? (_pend
+            ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge('${escapeHtml(p.uid)}')" title="Cancel challenge">⏳</button>`
+            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Challenge to a 1v1')}">⚔</button>`)
+        : "";
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
@@ -1625,24 +1629,28 @@ async function challengePlayer(targetUid) {
   if (!fbReady || !myUid || !onlineAccount) { challengeToast("Log in to challenge players", "#ff8844"); return; }
   if (!targetUid || targetUid === myUid) return;
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  if (challengeOut.size > 0) { challengeToast("You already have an open challenge", "#ff8844"); return; }
   const now = Date.now();
   if (challengeLastSent[targetUid] && now - challengeLastSent[targetUid] < 15000) { challengeToast("Challenge already sent – wait a moment", "#ff8844"); return; }
   const t = (window._lastPlayersData || {})[targetUid];
   if (t && statusInMatch(t.status)) { challengeToast("Player is in a match right now", "#ff8844"); return; }
   challengeLastSent[targetUid] = now;
   const tname = (t && t.name) || "player";
-  const old = challengeOut.get(targetUid);
-  if (old) { try { old.unsub(); } catch (e) {} clearTimeout(old.timer); challengeOut.delete(targetUid); }
+  // Sofort reservieren (vor dem await), damit schnelles Doppeltippen keine zweite Herausforderung startet
+  const entry = { unsub: () => {}, timer: null, finish: null };
+  const finish = () => { try { entry.unsub(); } catch (e) {} clearTimeout(entry.timer); challengeOut.delete(targetUid); RPC.removeChallenge(targetUid, myUid).catch(() => {}); challengeRefreshList(); };
+  entry.finish = finish;
+  challengeOut.set(targetUid, entry);
+  challengeRefreshList();
   try {
     await RPC.sendChallenge(targetUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: now, status: "pending", aspect: screenAspect() });
   } catch (e) {
     console.warn("challenge send failed", e);
+    challengeOut.delete(targetUid); challengeRefreshList();
     challengeToast("Could not send challenge", "#ff4444");
     return;
   }
   challengeToast("⚔ Challenge sent to " + tname, "#ffd700");
-  const entry = { unsub: () => {}, timer: null };
-  const finish = () => { try { entry.unsub(); } catch (e) {} clearTimeout(entry.timer); challengeOut.delete(targetUid); RPC.removeChallenge(targetUid, myUid).catch(() => {}); };
   entry.unsub = dbOn("challenges/" + targetUid + "/" + myUid, async (d) => {
     if (!d) return;
     if (d.status === "declined") { finish(); challengeToast(tname + " declined the challenge", "#ff4455"); return; }
@@ -1658,7 +1666,13 @@ async function challengePlayer(targetUid) {
     }
   });
   entry.timer = setTimeout(() => { finish(); challengeToast(tname + " did not respond", "#888"); }, CHALLENGE_TTL + 3000);
-  challengeOut.set(targetUid, entry);
+}
+function challengeRefreshList() { try { if (window._lastPlayersData) renderPresence(window._lastPlayersData); } catch (e) {} }
+function cancelChallenge(targetUid) {
+  const e = challengeOut.get(targetUid);
+  if (!e) return;
+  if (e.finish) e.finish();
+  challengeToast("Challenge cancelled", "#888");
 }
 
 // ── Empfangen ──
@@ -6344,7 +6358,7 @@ const DICT = { de: {
   "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
   "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
