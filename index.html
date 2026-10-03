@@ -670,6 +670,22 @@ body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
 body.mode-tv #homeBtn:hover{transform:none;}
+.ch-btn{margin-left:8px;border:1px solid rgba(255,215,0,.55);background:rgba(255,215,0,.12);color:#ffd700;border-radius:8px;padding:1px 8px;font-size:13px;line-height:20px;cursor:pointer;flex:none;}
+.ch-btn:hover{background:rgba(255,215,0,.28);}
+.ch-btn.ch-busy,.ch-btn:disabled{opacity:.35;cursor:not-allowed;filter:grayscale(1);}
+#challengeBox{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(120px + env(safe-area-inset-bottom,0px));z-index:950;min-width:260px;max-width:92vw;padding:14px 18px 10px;border-radius:16px;background:rgba(14,16,24,.96);border:1px solid #ffd700;box-shadow:0 12px 40px rgba(0,0,0,.6),0 0 24px rgba(255,215,0,.18);color:#fff;font-family:var(--font-display,sans-serif);animation:chPop .25s ease;}
+@keyframes chPop{from{opacity:0;transform:translateX(-50%) translateY(14px) scale(.96);}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}}
+#challengeBox .ch-title{font-size:11px;letter-spacing:2px;color:#ffd700;margin-bottom:6px;}
+#challengeBox .ch-row{display:flex;align-items:center;gap:14px;}
+#challengeBox .ch-info{flex:1;min-width:0;}
+#challengeBox .ch-name{font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#challengeBox .ch-elo{font-size:14px;color:#cfd3e0;margin-top:2px;}
+#challengeBox .ch-elo b{color:#ffd700;} #challengeBox .ch-elo i{font-style:normal;color:#00e0ff;margin-left:8px;}
+#challengeBox .ch-yes,#challengeBox .ch-no{width:48px;height:48px;border-radius:50%;border:2px solid;font-size:24px;line-height:1;cursor:pointer;background:transparent;flex:none;}
+#challengeBox .ch-yes{border-color:#00e676;color:#00e676;} #challengeBox .ch-yes:hover{background:rgba(0,230,118,.2);}
+#challengeBox .ch-no{border-color:#ff4455;color:#ff4455;} #challengeBox .ch-no:hover{background:rgba(255,68,85,.2);}
+#challengeBox .ch-bar{height:3px;margin-top:10px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;}
+#challengeBox .ch-bar i{display:block;height:100%;background:#ffd700;width:100%;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 #newsBtn{position:absolute;top:62px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
@@ -1227,6 +1243,20 @@ async function rpcGetMatch(matchId) { return rpcGet("onlineMatches/" + matchId);
 
 // ── head-to-head: namespaced by sorted uid pair, writable by either
 //    participant ──
+// ── challenges: challenges/{target}/{from}. Der Herausforderer schreibt "pending" in seinen Eintrag unter dem Ziel,
+//    das Ziel antwortet ("accepted"/"declined") im selben Eintrag, beide duerfen ihn loeschen. ──
+async function rpcSendChallenge(targetUid, payload) {
+  const uid = requireUid();
+  return set(ref(db, "challenges/" + targetUid + "/" + uid), payload);
+}
+async function rpcRespondChallenge(fromUid, payload) {
+  const uid = requireUid();
+  return set(ref(db, "challenges/" + uid + "/" + fromUid), payload);
+}
+async function rpcRemoveChallenge(targetUid, fromUid) {
+  requireUid();
+  return remove(ref(db, "challenges/" + targetUid + "/" + fromUid));
+}
 async function rpcSetHeadToHead(uidA, uidB, data) {
   const uid = requireUid();
   if (uid !== uidA && uid !== uidB) throw new Error("Not a participant in this head-to-head record.");
@@ -1347,6 +1377,7 @@ window._dobRPC = {
   createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, setMatchPath: rpcSetMatchPath,
   removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch,
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
+  sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
   sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
@@ -1530,17 +1561,207 @@ function renderPresence(playersData) {
     let html = "<b>🟢 Active Players:</b><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
+      const _busy = statusInMatch(p.status);
+      const _chBtn = (!isMe && onlineAccount && fbReady)
+        ? `<button class="ch-btn${_busy ? ' ch-busy' : ''}" ${_busy ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer('${escapeHtml(p.uid)}')" title="${_busy ? 'Currently in a match' : 'Challenge to a 1v1'}">⚔</button>` : "";
       html += `
-        <div style="font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
+        <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
-          <span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>
+          <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_chBtn}</span>
         </div>
       `;
     });
     html += "</div>";
     panel.innerHTML = html;
+  }
+}
+
+
+// ═══════════════════════════════════════════════
+//  1v1-HERAUSFORDERUNGEN (aus der Spielerliste)
+//  Popup bei dem Herausgeforderten: Name, ELO, Platzierung, ✓ annehmen / ✗ ablehnen.
+//  Wird IMMER angezeigt, ausser der Spieler ist gerade in einem 1v1-Match oder im Survival.
+// ═══════════════════════════════════════════════
+const CHALLENGE_TTL = 45000;
+const challengeIn = new Map();      // fromUid -> { name, elo, ts, aspect, recv }
+const challengeOut = new Map();     // targetUid -> { unsub, timer }
+const challengeLastSent = {};
+let challengeUnsub = null, challengeShown = null;
+
+function statusInMatch(st) {
+  st = String(st || "");
+  return st === "Survival" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+}
+function inMatchOrSurvival() {
+  try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
+}
+function challengeRankOf(uid, name) {
+  const data = window._lastPlayersData;
+  if (!data) return null;
+  const seen = new Map();
+  Object.entries(data).map(([u, p]) => ({ uid: u, ...p }))
+    .filter(p => ((Number(p.wins) || 0) + (Number(p.losses) || 0)) >= 1)
+    .forEach(p => {
+      const key = String(p.name || "").toLowerCase(), prev = seen.get(key);
+      const games = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
+      if (!prev || p.uid === myUid || (prev.uid !== myUid && games(p) > games(prev))) seen.set(key, p);
+    });
+  const sorted = [...seen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
+  let i = sorted.findIndex(p => p.uid === uid);
+  if (i < 0 && name) i = sorted.findIndex(p => String(p.name || "").toLowerCase() === String(name).toLowerCase());
+  return i >= 0 ? i + 1 : null;
+}
+function challengePrepareForMatch() {
+  try { cleanupOnline(); } catch (e) {}
+  try { clearAllTimers(); } catch (e) {}
+  try { running = false; } catch (e) {}
+}
+function challengeToast(txt, color) { try { leagueToast(tr(txt), color); } catch (e) {} }
+
+// ── Senden ──
+async function challengePlayer(targetUid) {
+  if (!fbReady || !myUid || !onlineAccount) { challengeToast("Log in to challenge players", "#ff8844"); return; }
+  if (!targetUid || targetUid === myUid) return;
+  if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  const now = Date.now();
+  if (challengeLastSent[targetUid] && now - challengeLastSent[targetUid] < 15000) { challengeToast("Challenge already sent – wait a moment", "#ff8844"); return; }
+  const t = (window._lastPlayersData || {})[targetUid];
+  if (t && statusInMatch(t.status)) { challengeToast("Player is in a match right now", "#ff8844"); return; }
+  challengeLastSent[targetUid] = now;
+  const tname = (t && t.name) || "player";
+  const old = challengeOut.get(targetUid);
+  if (old) { try { old.unsub(); } catch (e) {} clearTimeout(old.timer); challengeOut.delete(targetUid); }
+  try {
+    await RPC.sendChallenge(targetUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: now, status: "pending", aspect: screenAspect() });
+  } catch (e) {
+    console.warn("challenge send failed", e);
+    challengeToast("Could not send challenge", "#ff4444");
+    return;
+  }
+  challengeToast("⚔ Challenge sent to " + tname, "#ffd700");
+  const entry = { unsub: () => {}, timer: null };
+  const finish = () => { try { entry.unsub(); } catch (e) {} clearTimeout(entry.timer); challengeOut.delete(targetUid); RPC.removeChallenge(targetUid, myUid).catch(() => {}); };
+  entry.unsub = dbOn("challenges/" + targetUid + "/" + myUid, async (d) => {
+    if (!d) return;
+    if (d.status === "declined") { finish(); challengeToast(tname + " declined the challenge", "#ff4455"); return; }
+    if (d.status === "accepted" && d.matchId) {
+      finish();
+      if (onlineMatchId || inMatchOrSurvival()) return;       // inzwischen woanders im Match
+      try {
+        const md = await RPC.getMatch(d.matchId);
+        if (!md) return;
+        challengePrepareForMatch();
+        joinMatch(d.matchId, { uid: targetUid, name: d.name || tname, elo: d.elo }, md);
+      } catch (e) { console.warn("challenge join failed", e); }
+    }
+  });
+  entry.timer = setTimeout(() => { finish(); challengeToast(tname + " did not respond", "#888"); }, CHALLENGE_TTL + 3000);
+  challengeOut.set(targetUid, entry);
+}
+
+// ── Empfangen ──
+function startChallengeListener() {
+  if (challengeUnsub || !fbReady || !myUid || !onlineAccount) return;
+  challengeUnsub = dbOn("challenges/" + myUid, (data) => {
+    const now = Date.now(), seen = new Set();
+    if (data) Object.entries(data).forEach(([uid, c]) => {
+      if (!c || c.status !== "pending") return;
+      if (!c.ts || Math.abs(now - c.ts) > 120000) { RPC.removeChallenge(myUid, uid).catch(() => {}); return; }   // alt/verwaist
+      seen.add(uid);
+      const prev = challengeIn.get(uid);
+      if (!prev || prev.ts !== c.ts) challengeIn.set(uid, { ...c, recv: now });
+    });
+    for (const k of [...challengeIn.keys()]) if (!seen.has(k)) challengeIn.delete(k);
+    renderChallengeBox();
+  });
+}
+function stopChallengeListener() {
+  if (challengeUnsub) { try { challengeUnsub(); } catch (e) {} challengeUnsub = null; }
+  challengeIn.clear(); renderChallengeBox();
+}
+function hideChallengeBox() { const b = document.getElementById("challengeBox"); if (b) b.remove(); challengeShown = null; }
+
+function renderChallengeBox() {
+  if (!challengeUnsub && fbReady && myUid && onlineAccount) startChallengeListener();
+  if (challengeUnsub && !onlineAccount) { stopChallengeListener(); return; }
+  const now = Date.now();
+  for (const [k, c] of challengeIn) {
+    if (now - c.recv > CHALLENGE_TTL) { challengeIn.delete(k); RPC.removeChallenge(myUid, k).catch(() => {}); }
+  }
+  if (inMatchOrSurvival() || onlineMatchId && !onlineResultHandled) { hideChallengeBox(); return; }
+  let pick = null;
+  for (const [k, c] of challengeIn) if (!pick || c.recv < pick.c.recv) pick = { k, c };
+  if (!pick) { hideChallengeBox(); return; }
+  let box = document.getElementById("challengeBox");
+  if (!box || challengeShown !== pick.k + ":" + pick.c.ts) {
+    hideChallengeBox();
+    const live = (window._lastPlayersData || {})[pick.k] || {};
+    const name = live.name || pick.c.name || "Player";
+    const elo = Math.round(Number(live.elo != null ? live.elo : pick.c.elo) || 1500);
+    const rank = challengeRankOf(pick.k, name);
+    box = document.createElement("div");
+    box.id = "challengeBox";
+    box.innerHTML = '<div class="ch-title"></div><div class="ch-row"><div class="ch-info"><div class="ch-name"></div><div class="ch-elo"><b></b><i></i></div></div>' +
+      '<button class="ch-yes" title="Accept">✓</button><button class="ch-no" title="Decline">✗</button></div><div class="ch-bar"><i></i></div>';
+    box.querySelector(".ch-title").textContent = "⚔ " + tr("1v1 CHALLENGE");
+    box.querySelector(".ch-name").textContent = dn(name);
+    box.querySelector(".ch-elo b").textContent = "ELO " + elo;
+    box.querySelector(".ch-elo i").textContent = rank ? "#" + rank : "";
+    box.querySelector(".ch-yes").addEventListener("click", () => acceptChallenge(pick.k));
+    box.querySelector(".ch-no").addEventListener("click", () => declineChallenge(pick.k));
+    document.body.appendChild(box);
+    challengeShown = pick.k + ":" + pick.c.ts;
+  }
+  const bar = box.querySelector(".ch-bar i");
+  if (bar) bar.style.width = Math.max(0, 100 - (now - pick.c.recv) / CHALLENGE_TTL * 100) + "%";
+}
+setInterval(renderChallengeBox, 250);
+
+async function declineChallenge(fromUid) {
+  const c = challengeIn.get(fromUid);
+  challengeIn.delete(fromUid); hideChallengeBox();
+  if (!c || !myUid || !onlineAccount) return;
+  try { await RPC.respondChallenge(fromUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), status: "declined" }); } catch (e) { console.warn(e); }
+  setTimeout(() => RPC.removeChallenge(myUid, fromUid).catch(() => {}), 8000);
+}
+
+async function acceptChallenge(fromUid) {
+  const c = challengeIn.get(fromUid);
+  if (!c || !myUid || !onlineAccount) return;
+  if (inMatchOrSurvival() || onlineMatchId && !onlineResultHandled) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  challengeIn.delete(fromUid); hideChallengeBox();
+  try {
+    const matchId = [myUid, fromUid].sort().join("__VS__");
+    const existing = await RPC.getMatch(matchId);
+    if (existing && (existing.status === "waiting" || existing.status === "playing")) {
+      const alive = Math.max(Number(existing.ping_p1) || 0, Number(existing.ping_p2) || 0, Number(existing.createdAt) || 0);
+      if (Date.now() - alive < 30000) {
+        challengeToast("A match between you two is already running", "#ff8844");
+        RPC.respondChallenge(fromUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), status: "declined" }).catch(() => {});
+        return;
+      }
+    }
+    const live = (window._lastPlayersData || {})[fromUid] || {};
+    const oppName = live.name || c.name, oppElo = Number(live.elo != null ? live.elo : c.elo) || 1500;
+    const isP1 = myUid < fromUid;
+    const matchData = {
+      p1uid: isP1 ? myUid : fromUid, p2uid: isP1 ? fromUid : myUid,
+      p1: isP1 ? onlineAccount.name : oppName, p2: isP1 ? oppName : onlineAccount.name,
+      p1elo: isP1 ? onlineAccount.elo : oppElo, p2elo: isP1 ? oppElo : onlineAccount.elo,
+      status: "waiting", winner: null, createdAt: Date.now(),
+      arena: Math.min(screenAspect(), Number(c.aspect) || 16 / 9),
+      seed: Math.floor(Math.random() * 1000000)
+    };
+    await RPC.createMatch(matchId, matchData);
+    await RPC.respondChallenge(fromUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), status: "accepted", matchId });
+    setTimeout(() => RPC.removeChallenge(myUid, fromUid).catch(() => {}), 20000);
+    challengePrepareForMatch();
+    joinMatch(matchId, { uid: fromUid, name: oppName, elo: oppElo }, matchData);
+  } catch (e) {
+    console.warn("accept challenge failed", e);
+    challengeToast("Could not start the match", "#ff4444");
   }
 }
 
@@ -5608,6 +5829,12 @@ async function startOnlineTV() {
   specText.innerHTML = "Waiting for an active match to start...";
 
   const deadRemoved = new Set();   // Matches, für die schon ein Löschversuch lief
+  // Eingefrorene Matches dauerhaft (6h) im Browser merken, damit sie beim naechsten TV-Start nicht wieder auftauchen,
+  // auch wenn das Loeschen in der Datenbank scheitert. Schluessel = Match-ID + createdAt (Revanchen/neue Matches bleiben sichtbar).
+  const TV_IGN_KEY = "dobTvIgnore";
+  const tvIgnLoad = () => { try { const o = JSON.parse(localStorage.getItem(TV_IGN_KEY) || "{}"), n = Date.now(); for (const k of Object.keys(o)) if (o[k] < n) delete o[k]; return o; } catch (e) { return {}; } };
+  const tvIgnored = (k) => !!tvIgnLoad()[k];
+  const tvIgnore = (k) => { try { const o = tvIgnLoad(); o[k] = Date.now() + 6 * 3600 * 1000; localStorage.setItem(TV_IGN_KEY, JSON.stringify(o)); } catch (e) {} };
   // Ein Match gilt als "gestartet", sobald irgendein Spieler- oder Ball-Status geschrieben wurde
   const hasStarted = (m) => !!(m && (m.p1State || m.p2State || m.ballState));
   const TV_START_GRACE_MS = 15000; // so lange darf VS-Screen/Countdown dauern, danach gilt ein Match ohne Start als tot
@@ -5729,6 +5956,7 @@ async function startOnlineTV() {
         continue;
       }
       seenPlaying.delete(id);
+      if (tvIgnored(id + ":" + (m.createdAt || 0))) continue;
       if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
       if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) {
@@ -5886,6 +6114,13 @@ async function startOnlineTV() {
     setStall(!!(onlineTvCurrentMatchId && gotPacket && Date.now() - lastPacketSeen > 2000));
     if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 5000 : 20000)) {
       badMatches.set(onlineTvCurrentMatchId, Date.now() + 5 * 60 * 1000);   // eingefroren: 5 Min. ueberspringen statt 10s
+      if (!String(onlineTvCurrentMatchId).startsWith("surv:")) tvIgnore(onlineTvCurrentMatchId + ":" + ((curMeta && curMeta.createdAt) || 0));
+      // Zusaetzlich loeschen versuchen: die Rules erlauben es nur, wenn das Match wirklich tot ist (kein/alter Ping),
+      // ein lebendes, nur laggendes Match bleibt dadurch geschuetzt.
+      if (!String(onlineTvCurrentMatchId).startsWith("surv:") && !deadRemoved.has(onlineTvCurrentMatchId)) {
+        deadRemoved.add(onlineTvCurrentMatchId);
+        RPC.removeMatch(onlineTvCurrentMatchId).catch(e => console.warn("TV: cleanup of frozen match failed", e && (e.code || e.message)));
+      }
       stopInner();
     }
     pickMatch();
@@ -6109,11 +6344,12 @@ const DICT = { de: {
   "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
   "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
 const RX = { de: [
+  [/^⚔ Challenge sent to (.+)$/, "⚔ Herausforderung an $1 gesendet"], [/^(.+) declined the challenge$/, "$1 hat die Herausforderung abgelehnt"], [/^(.+) did not respond$/, "$1 hat nicht geantwortet"],
   [/^Starting in (\d+)…$/, "Start in $1…"],
   [/^Rank: (.+)$/, "Rang: $1"], [/^Rank: #(.+)$/, "Rang: #$1"],
   [/^of (\d+)$/, "von $1"],
