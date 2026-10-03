@@ -1286,6 +1286,10 @@ async function rpcSaveSurvival(time, replayStr, name) {
     ["survivalReplays/" + uid]: String(replayStr)
   });
 }
+// Survival LIVE (fuer Online TV): nur der eigene Knoten survivalLive/{uid}
+async function rpcSetSurvivalLive(data) { const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
+function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
+async function rpcRemoveSurvivalLive() { const uid = requireUid(); return remove(ref(db, "survivalLive/" + uid)); }
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
   const uid = requireUid();
@@ -1315,7 +1319,7 @@ async function rpcModRename(uid, oldName, newName) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -1741,6 +1745,7 @@ function startSurvival() {
   const me = createPlayer(W() / 2, H() / 2, myBallColor, onlineAccount.name);
   players.push(me);
   survTick = 0; survivalActive = true;
+  try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
   const hud = document.createElement("div");
   hud.id = "survivalHUD";
@@ -1751,8 +1756,21 @@ function startSurvival() {
   survHudIv = setInterval(() => { const h = document.getElementById("survivalHUD"); if (h) h.textContent = survFmt(survTick / 60); }, 100);
   syncPresence(true);
 }
+let _survLiveAt = 0;
+function survPushLive(done, finalTime) {
+  if (!fbReady || !myUid || !onlineAccount) return;
+  const now = Date.now();
+  if (!done && now - _survLiveAt < 120) return;
+  _survLiveAt = now;
+  const me = players[0]; if (!me) return;
+  const d = { name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius, x: Math.round(me.x), y: Math.round(me.y), t: survTick, done: !!done };
+  if (done) d.time = finalTime;
+  d.b = JSON.stringify(balls.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius })));
+  RPC.setSurvivalLive(d).catch(() => {});
+}
 function survivalTick() {
   survTick++;
+  survPushLive(false);
   if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
 }
 async function endSurvival(camped) {
@@ -1764,6 +1782,7 @@ async function endSurvival(camped) {
   const me = players[0], rec = survRec; survRec = null;
   rec.n = survTick; rec.e = me ? [Math.round(me.x), Math.round(me.y)] : [0, 0];
   const t = Math.round(survTick / 60 * 100) / 100;
+  survPushLive(true, t);   // TV-Zuschauer sehen das Ende
   _survInfo = null;
   setTimeout(() => renderSurvivalResult(t, camped), 900);
   let best = 0, isRecord = false, saved = true;
@@ -5497,9 +5516,22 @@ async function startOnlineTV() {
   let lastPacketSeen = 0;
   let curMeta = null;
 
+  // Survival-Live: Liste der gerade spielenden Spieler (aktiv = Daten haben sich in den letzten 4s geaendert)
+  let lastSurvData = null;
+  const survSeen = new Map();   // uid -> { t, at }
+  const survActive = () => {
+    const now = Date.now(), out = [];
+    for (const [uid, d] of Object.entries(lastSurvData || {})) {
+      if (!d || d.done) continue;
+      const k = survSeen.get(uid);
+      if (!k || k.t !== d.t) survSeen.set(uid, { t: d.t, at: now });
+      if (now - survSeen.get(uid).at < 4000) out.push([uid, d]);
+    }
+    return out;
+  };
   let holdUntil = 0, holdTimer = null;
   const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); };
-  const showWinner = (winner, scoreTxt) => {
+  const showWinner = (winner, scoreTxt, survTime) => {
     hideWinner();
     const o = document.createElement("div");
     o.id = "tvWinnerOverlay";
@@ -5508,10 +5540,14 @@ async function startOnlineTV() {
       "padding:22px 38px;color:#f0f0f5;font-family:var(--font-display);box-shadow:0 10px 40px rgba(0,0,0,0.6);backdrop-filter:blur(8px);";
     const title = document.createElement("div");
     title.style.cssText = "font-size:15px;letter-spacing:2px;opacity:.7;margin-bottom:8px;";
-    title.textContent = winner ? "MATCH FINISHED" : "MATCH ENDED";
+    title.textContent = survTime ? "SURVIVAL ENDED" : winner ? "MATCH FINISHED" : "MATCH ENDED";
     const big = document.createElement("div");
     big.style.cssText = "font-size:30px;font-weight:700;";
-    if (winner) {
+    if (survTime) {
+      big.append(document.createTextNode("🏝 "));
+      const nm = document.createElement("span"); nm.setAttribute("translate", "no"); nm.style.color = "gold"; nm.textContent = winner + " – " + survTime;
+      big.append(nm);
+    } else if (winner) {
       big.append(document.createTextNode("🏆 Winner: "));
       const nm = document.createElement("span");
       nm.setAttribute("translate", "no");
@@ -5536,12 +5572,10 @@ async function startOnlineTV() {
   // Deshalb nur speichern und die Auswahl selten (alle 1.5s) neu berechnen.
   const pickMatch = () => {
     if (Date.now() < holdUntil) return;      // Gewinner-Anzeige läuft noch
-    const matchesData = lastMatchesData;
-    if (!matchesData) {
-      specText.innerHTML = "No online games are currently running.";
-      stopInner();
-      return;
-    }
+    // Laufendes Match/Survival wird NIE gewechselt: erst wenn es zu Ende ist (done/abandoned/Run vorbei)
+    // oder eingefroren (siehe Intervall unten), wird onlineTvCurrentMatchId geleert und neu gewählt.
+    if (onlineTvCurrentMatchId) return;
+    const matchesData = lastMatchesData || {};
     let bestId = null, bestElo = -1, best = null;
     for (const [id, m] of Object.entries(matchesData)) {
       if (m.status !== "playing") { seenPlaying.delete(id); continue; }
@@ -5560,6 +5594,51 @@ async function startOnlineTV() {
       if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
       const avg = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
       if (avg > bestElo) { bestElo = avg; bestId = id; best = m; }
+    }
+    // Survival-Kandidat: Spieler mit der hoechsten ELO (1v1 zaehlt mit dem Durchschnitt beider ELOs)
+    let survId = null, survD = null, survElo = -1;
+    for (const [uid, d] of survActive()) {
+      const id = "surv:" + uid;
+      if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
+      const e = Number(d.elo) || 1500;
+      if (e > survElo || (e === survElo && id === onlineTvCurrentMatchId)) { survId = id; survD = d; survElo = e; }
+    }
+    // Survival gewinnt nur bei hoeherer ELO als das beste 1v1 (bei Gleichstand bleibt das aktuelle)
+    if (survId && (!bestId || survElo > bestElo || (survElo === bestElo && survId === onlineTvCurrentMatchId))) {
+      if (survId === onlineTvCurrentMatchId) return;
+      // Ein bereits laufender Survival-Zuschauer bleibt beim selben Spieler, solange er aktiv ist
+      stopInner();
+      onlineTvCurrentMatchId = survId;
+      lastPacketSeen = Date.now(); gotPacket = false; curMeta = null;
+      const suid = survId.slice(5);
+      const sp = createPlayer(W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
+      players = [sp]; balls = [];
+      const hud = document.getElementById("onlineHUD");
+      const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+      setT("onlineNameMe", dn(survD.name)); setT("onlineNameOpp", ""); setT("onlineRankMe", "(" + survElo + ")"); setT("onlineRankOpp", "");
+      setT("onlineStatusHUD", "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60));
+      if (hud) hud.style.display = "flex";
+      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE SURVIVAL (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
+      onlineTvInnerUnsubscribe = dbOn("survivalLive/" + suid, (d) => {
+        if (survId !== onlineTvCurrentMatchId) return;
+        if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
+        if (d.done) {
+          if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
+          showWinner(dn(d.name), "", survFmt(Number(d.time) || (d.t || 0) / 60));
+          badMatches.set(survId, Date.now() + 15000);
+          specText.innerHTML = "Survival run finished. Searching for next game...";
+          holdUntil = Date.now() + 6000;
+          clearTimeout(holdTimer);
+          holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
+          return;
+        }
+        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true });
+        lastPacketSeen = Date.now(); gotPacket = true;
+        setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
+        if (d.b) { try { applyBallCorrection(JSON.parse(d.b), 0.35); } catch(e) {} }
+      });
+      onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
+      return;
     }
     if (!bestId) {
       specText.innerHTML = "No live match is currently running. Waiting for a game...";
@@ -5640,6 +5719,9 @@ async function startOnlineTV() {
     if (first) pickMatch();
   });
   onlineUnsubscribes.push(onlineTvUnsubscribe);
+  const survUnsub = dbOn("survivalLive", (d) => { lastSurvData = d || {}; if (lastMatchesData === null) { lastMatchesData = {}; } });
+  onlineUnsubscribes.push(survUnsub);
+  setTimeout(() => { if (mode !== "online_tv" || !running) return; if (lastMatchesData === null) lastMatchesData = {}; pickMatch(); }, 1200);
 
   // Auswahl periodisch neu bewerten + eingefrorene Matches (>8s ohne Daten) überspringen
   const tvIv = setInterval(() => {
@@ -5756,6 +5838,13 @@ canvas.addEventListener("touchstart", e => {
                       (data.exists() && !newData.exists() && data.child('status').val() === 'playing' && !data.child('p1State').exists() && !data.child('p2State').exists()
                         && !data.child('ballState').exists() && data.child('createdAt').val() < now - 30000)
                    )"
+      }
+    },
+
+    "survivalLive": {
+      "$uid": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
 
