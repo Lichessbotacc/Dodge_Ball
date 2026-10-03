@@ -1442,6 +1442,16 @@ async function getHeadToHeadScore(uidA, uidB) {
   return score || { [uidA]: 0, [uidB]: 0 };
 }
 
+// Bot-Score lag bisher nur im localStorage -> Zuschauer (Online-TV) sahen bei Bot-Matches immer 0-0.
+// Jetzt wird er zusaetzlich nach headToHead/{myUid VS bot} gespiegelt (Rules erlauben das).
+function syncBotH2H(botScore) {
+  try {
+    if (!fbReady || !myUid || !botScore) return;
+    RPC.setHeadToHead(myUid, ONLINE_BOT_UID, { [myUid]: botScore.me || 0, [ONLINE_BOT_UID]: botScore.bot || 0 })
+      .catch(e => console.warn("bot h2h sync failed", e));
+  } catch (e) {}
+}
+
 async function recordHeadToHeadWin(winnerUid, loserUid, roundKey) {
   const score = await getHeadToHeadScore(winnerUid, loserUid);
   // Idempotent: both players may call this; the result of one round is counted only once.
@@ -3527,6 +3537,8 @@ async function startBotMatch() {
       status: "playing",
       createdAt: Date.now(),
       seed: Math.floor(Math.random() * 1000000)
+    }).then(() => {
+      try { syncBotH2H(JSON.parse(localStorage.getItem(`h2h_bot_${myUid}`) || '{"me":0,"bot":0}')); } catch (e) {}
     }).catch(() => {});
   }
 
@@ -3982,6 +3994,7 @@ async function handleOnlineResult(winnerName, change) {
       botScore.bot++;
     }
     localStorage.setItem(botScoreKey, JSON.stringify(botScore));
+    syncBotH2H(botScore);
     const scoreHUD = document.getElementById("onlineScoreHUD");
     if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
   }
@@ -5574,6 +5587,7 @@ async function startOnlineTV() {
 
   mode = "online_tv";
   document.body.classList.add("mode-tv");
+  { const md = document.getElementById("mode"); if (md) md.textContent = "Online TV"; }
   running = true;
   balls = [];
   players = [];
@@ -5632,7 +5646,7 @@ async function startOnlineTV() {
   };
   const homeIv = setInterval(placeHome, 400);
   onlineUnsubscribes.push(() => { clearInterval(homeIv); if (homeEl) { homeEl.style.left = ""; homeEl.style.top = ""; } });
-  const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); };
+  const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); const sb = document.getElementById("tvStallBanner"); if (sb) sb.remove(); };
   const showWinner = (winner, scoreTxt, survTime) => {
     hideWinner();
     const o = document.createElement("div");
@@ -5663,7 +5677,20 @@ async function startOnlineTV() {
     if (scoreTxt) { const s = document.createElement("div"); s.style.cssText = "margin-top:8px;font-size:15px;opacity:.8;"; s.setAttribute("translate", "no"); s.textContent = scoreTxt; o.append(s); }
     document.body.appendChild(o);
   };
+  const setStall = (on) => {
+    let b = document.getElementById("tvStallBanner");
+    if (!on) { if (b) b.remove(); return; }
+    if (!b) {
+      b = document.createElement("div");
+      b.id = "tvStallBanner";
+      b.style.cssText = "position:fixed;left:50%;top:30%;transform:translateX(-50%);z-index:140;pointer-events:none;padding:8px 18px;border-radius:12px;" +
+        "background:rgba(192,57,43,0.92);color:#fff;font:700 14px var(--font-body,sans-serif);box-shadow:0 6px 24px rgba(0,0,0,.5);";
+      b.textContent = "⚠ Connection to match lost – waiting for data…";
+      document.body.appendChild(b);
+    }
+  };
   const stopInner = () => {
+    setStall(false);
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
     onlineTvCurrentMatchId = null; curMeta = null;
     stopViewerCount();
@@ -5834,7 +5861,9 @@ async function startOnlineTV() {
     // Vor dem ersten Paket (VS-Screen/Countdown) mehr Geduld; danach 8s ohne Daten = eingefroren.
     // Übersprungene Matches werden nach 10s erneut geprüft -> Zuschauen klappt vor UND während des Starts.
     if (Date.now() < holdUntil) return;
-    if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 8000 : 20000)) {
+    // Nach 2s ohne Daten Hinweis zeigen (nur wenn schon Daten kamen und nicht gerade der Gewinner angezeigt wird)
+    setStall(!!(onlineTvCurrentMatchId && gotPacket && Date.now() - lastPacketSeen > 2000));
+    if (onlineTvCurrentMatchId && Date.now() - lastPacketSeen > (gotPacket ? 5000 : 20000)) {
       badMatches.set(onlineTvCurrentMatchId, Date.now() + 10000);
       stopInner();
     }
