@@ -1733,7 +1733,7 @@ function viewerBadge(n) {
   if (n === null) { if (e) e.remove(); return; }
   if (!e) {
     e = document.createElement("div"); e.id = "viewerBadge";
-    e.style.cssText = "position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:140;pointer-events:none;padding:3px 9px;border-radius:9px;background:rgba(12,12,18,.7);border:1px solid rgba(255,255,255,.15);color:#f0f0f5;font:600 11px system-ui,sans-serif;opacity:.85;";
+    e.style.cssText = "position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:140;pointer-events:none;padding:6px 14px;border-radius:12px;background:rgba(12,12,18,.75);border:1px solid rgba(255,255,255,.2);color:#f0f0f5;font:700 16px system-ui,sans-serif;opacity:.92;";
     e.setAttribute("translate", "no");
     document.body.appendChild(e);
   }
@@ -5570,6 +5570,30 @@ async function startOnlineTV() {
     return out;
   };
   let holdUntil = 0, holdTimer = null;
+  // Home-Button im TV: in die Luecke zwischen #ui (oben links) und dem Zeit/Score-HUD (Mitte) setzen
+  const homeEl = document.getElementById("homeBtn");
+  const placeHome = () => {
+    if (!homeEl || mode !== "online_tv") return;
+    const hud = document.getElementById("onlineHUD"), ui = document.getElementById("ui");
+    const par = homeEl.offsetParent || document.body, pr = par.getBoundingClientRect();
+    const hw = homeEl.offsetWidth, hh = homeEl.offsetHeight;
+    const hudOn = hud && hud.style.display !== "none" && hud.offsetWidth > 0;
+    const uiOn = ui && ui.offsetWidth > 0 && getComputedStyle(ui).display !== "none";
+    const uiR = uiOn ? ui.getBoundingClientRect() : null;
+    if (!hudOn) { homeEl.style.left = ""; homeEl.style.top = ""; return; }
+    const hr = hud.getBoundingClientRect();
+    const minLeft = (uiR ? uiR.right : pr.left + 10) + 8;
+    const left = hr.left - 8 - hw;
+    if (left >= minLeft) {   // passt in die Luecke
+      homeEl.style.left = (left - pr.left) + "px";
+      homeEl.style.top = (hr.top - pr.top + Math.max(0, (hr.height - hh) / 2)) + "px";
+    } else if (uiR) {        // zu eng: direkt unter die UI oben links
+      homeEl.style.left = (uiR.left - pr.left) + "px";
+      homeEl.style.top = (uiR.bottom - pr.top + 6) + "px";
+    }
+  };
+  const homeIv = setInterval(placeHome, 400);
+  onlineUnsubscribes.push(() => { clearInterval(homeIv); if (homeEl) { homeEl.style.left = ""; homeEl.style.top = ""; } });
   const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); };
   const showWinner = (winner, scoreTxt, survTime) => {
     hideWinner();
