@@ -1286,6 +1286,10 @@ async function rpcSaveSurvival(time, replayStr, name) {
     ["survivalReplays/" + uid]: String(replayStr)
   });
 }
+// TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
+function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
+async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
+async function rpcClearTvViewing(key) { const uid = requireUid(); return remove(ref(db, "tvViewers/" + _tvKey(key) + "/" + uid)); }
 // Survival LIVE (fuer Online TV): nur der eigene Knoten survivalLive/{uid}
 async function rpcSetSurvivalLive(data) { const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
 function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
@@ -1319,7 +1323,7 @@ async function rpcModRename(uid, oldName, newName) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -1718,6 +1722,35 @@ setInterval(() => syncPresence(false), 2000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); });
 
 
+// ═══ ZUSCHAUER-ANZEIGE (klein, unten rechts) ═══
+// Spieler (1v1 / Survival) sehen, wie viele gerade zuschauen; TV-Zuschauer tragen sich selbst ein und sehen die Gesamtzahl.
+// Schluessel: 1v1 = Match-ID, Survival = "surv_" + UID des Spielers.
+let _viewKey = null, _viewUnsub = null, _viewWrite = false;
+function viewerBadge(n) {
+  let e = document.getElementById("viewerBadge");
+  if (n === null) { if (e) e.remove(); return; }
+  if (!e) {
+    e = document.createElement("div"); e.id = "viewerBadge";
+    e.style.cssText = "position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:140;pointer-events:none;padding:3px 9px;border-radius:9px;background:rgba(12,12,18,.7);border:1px solid rgba(255,255,255,.15);color:#f0f0f5;font:600 11px system-ui,sans-serif;opacity:.85;";
+    e.setAttribute("translate", "no");
+    document.body.appendChild(e);
+  }
+  e.textContent = "👁 " + n;
+}
+function stopViewerCount() {
+  if (_viewUnsub) { try { _viewUnsub(); } catch (e) {} _viewUnsub = null; }
+  if (_viewKey && _viewWrite && fbReady && myUid) { try { RPC.clearTvViewing(_viewKey).catch(() => {}); } catch (e) {} }
+  _viewKey = null; _viewWrite = false; viewerBadge(null);
+}
+function watchViewerCount(key, imViewer) {
+  stopViewerCount();
+  if (!key || !fbReady) return;
+  _viewKey = String(key); _viewWrite = !!imViewer;
+  if (_viewWrite && myUid) { try { RPC.setTvViewing(_viewKey).catch(() => {}); } catch (e) {} }
+  viewerBadge(0);
+  _viewUnsub = dbOn("tvViewers/" + _viewKey, (d) => { viewerBadge(d ? Object.keys(d).length : 0); });
+}
+
 // ═══ SURVIVAL (online, solo) ═══
 // Gleiche Baelle/Spawnrate/Steuerung wie im 1v1, aber ohne Gegner. Zeit = Ticks/60.
 // Replay: Spielerposition alle 3 Ticks + Ball-Spawns (Tick, Position, Geschwindigkeit). Die Baelle bewegen
@@ -1783,6 +1816,7 @@ async function endSurvival(camped) {
   rec.n = survTick; rec.e = me ? [Math.round(me.x), Math.round(me.y)] : [0, 0];
   const t = Math.round(survTick / 60 * 100) / 100;
   survPushLive(true, t);   // TV-Zuschauer sehen das Ende
+  stopViewerCount();
   _survInfo = null;
   setTimeout(() => renderSurvivalResult(t, camped), 900);
   let best = 0, isRecord = false, saved = true;
@@ -3178,6 +3212,7 @@ function cancelOnline() {
 
 // CHANGED: queue/invite cleanup now keyed by myUid instead of name.
 function cleanupOnline() {
+  try { stopViewerCount(); } catch (e) {}
   if (onlineBallIv) { clearInterval(onlineBallIv); onlineBallIv = null; }
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
@@ -3865,6 +3900,7 @@ function pushBallState() {
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
   onlineResultHandled = true;
+  stopViewerCount();
   clearActiveMatchMarker();
   armOnlineDisconnect(false);
   campWarn(false);
@@ -4675,6 +4711,7 @@ function update() {
   }
 
   if (mode === "online") {
+    { const vk = survivalActive ? (myUid ? "surv_" + myUid : null) : onlineMatchId; if (vk && vk !== _viewKey) watchViewerCount(vk, false); }
     campTick();
     if (survivalActive) survivalTick();
     pushMyPosition();
@@ -5564,6 +5601,7 @@ async function startOnlineTV() {
   const stopInner = () => {
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
     onlineTvCurrentMatchId = null; curMeta = null;
+    stopViewerCount();
     players = []; balls = [];
     const h = document.getElementById("onlineHUD"); if (h) h.style.display = "none";
   };
@@ -5609,6 +5647,7 @@ async function startOnlineTV() {
       // Ein bereits laufender Survival-Zuschauer bleibt beim selben Spieler, solange er aktiv ist
       stopInner();
       onlineTvCurrentMatchId = survId;
+      watchViewerCount("surv_" + survId.slice(5), true);
       lastPacketSeen = Date.now(); gotPacket = false; curMeta = null;
       const suid = survId.slice(5);
       const sp = createPlayer(W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
@@ -5649,6 +5688,7 @@ async function startOnlineTV() {
 
     stopInner();
     onlineTvCurrentMatchId = bestId;
+    watchViewerCount(bestId, true);
     lastPacketSeen = Date.now();
     gotPacket = false;
     curMeta = best;
@@ -5838,6 +5878,16 @@ canvas.addEventListener("touchstart", e => {
                       (data.exists() && !newData.exists() && data.child('status').val() === 'playing' && !data.child('p1State').exists() && !data.child('p2State').exists()
                         && !data.child('ballState').exists() && data.child('createdAt').val() < now - 30000)
                    )"
+      }
+    },
+
+    "tvViewers": {
+      "$target": {
+        ".read": true,
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.val() === true"
+        }
       }
     },
 
