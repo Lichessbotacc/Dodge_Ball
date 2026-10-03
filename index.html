@@ -5731,11 +5731,18 @@ async function startOnlineTV() {
       seenPlaying.delete(id);
       if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       // Matches, die älter als 30 Min. sind, sind fast sicher Zombies
-      if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) continue;
+      if (m.createdAt && Date.now() - m.createdAt > 30 * 60 * 1000) {
+        if (!deadRemoved.has(id)) { deadRemoved.add(id); RPC.removeMatch(id).catch(() => {}); }   // Rules erlauben Loeschen toter Matches
+        continue;
+      }
       // Zombie-Erkennung: die Spieler schreiben alle 2,5s einen Ping ins Match. Ist der letzte Ping >30s alt,
       // ist der Spieler weg (Tab geschlossen / Verbindung weg), das Match blieb aber auf "playing" stehen.
       { const pg = Math.max(Number(m.ping_p1) || 0, Number(m.ping_p2) || 0);
-        if (pg && Date.now() - pg > 30000) continue; }
+        if (pg && Date.now() - pg > 30000) {
+          // >95s kein Lebenszeichen: Zombie-Match aufraeumen (Rules: Ping >90s alt -> Loeschen erlaubt)
+          if (Date.now() - pg > 95000 && !deadRemoved.has(id)) { deadRemoved.add(id); RPC.removeMatch(id).catch(() => {}); }
+          continue;
+        } }
       const avg = ((m.p1elo || 1500) + (m.p2elo || 1500)) / 2;
       if (avg > bestElo) { bestElo = avg; bestId = id; best = m; }
     }
