@@ -652,7 +652,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 
 /* ── Menü: Chat | Modi | Players nebeneinander ── */
 #menu{flex-wrap:nowrap;gap:24px;}
-#socialBar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:14px;z-index:6;}
+#socialBar{position:static;transform:none;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:16px;z-index:6;}
 .socialLink{display:flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;border-radius:999px;color:#f0f0f5;text-decoration:none;
   font-family:var(--font-display);font-size:13px;background:rgba(16,18,26,0.75);border:1px solid rgba(255,255,255,0.12);
   backdrop-filter:blur(8px);transition:transform .15s ease,border-color .15s ease;}
@@ -662,7 +662,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 @media (max-width:980px){#menu{flex-wrap:wrap;gap:20px;}#chatPanel,#onlinePlayersPanel{width:320px!important;}}
 /* Handy/schmale Fenster: Social-Buttons ans Ende des Menues (im Fluss), nicht mehr ueber den Chat gelegt */
 @media (max-width:980px){
-  #socialBar{position:static;transform:none;order:99;flex:0 0 100%;justify-content:center;flex-wrap:wrap;margin-top:6px;}
+  #socialBar{margin-top:12px;}
   #menu{padding-bottom:calc(40px + env(safe-area-inset-bottom,0px));}
 }
 
@@ -809,25 +809,6 @@ body.mode-tv #homeBtn:hover{transform:none;}
     </div>
 
          <div id="menu">
-      <div id="socialBar">
-        <a id="linkWhatsApp" class="socialLink" href="https://chat.whatsapp.com/HA0w5ZkjAt9I5xlHOcFLLh?mode=gi_t" target="_blank" rel="noopener noreferrer" title="Join our WhatsApp group" aria-label="WhatsApp">
-          <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-            <circle cx="16" cy="16" r="16" fill="#25D366"/>
-            <path d="M16 6.2a9.7 9.7 0 0 0-8.3 14.7L6.3 25.7l5-1.3A9.7 9.7 0 1 0 16 6.2z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>
-            <path d="M12.6 11.3c.3-.5.7-.5 1-.4.2.5.7 1.7.8 1.9.1.2 0 .4-.1.6l-.5.6c-.1.2-.2.3 0 .6.7 1.2 1.7 2.1 3 2.7.3.1.5.1.6-.1l.7-.9c.2-.2.4-.2.6-.1l1.8.9c.2.1.3.2.3.4 0 .6-.4 1.3-1 1.6-.6.4-1.5.4-2.8-.1-2.4-.9-4.2-2.8-5.2-5-.4-1-.4-1.9.1-2.6z" fill="#fff"/>
-          </svg>
-          <span>WhatsApp</span>
-        </a>
-        <a id="linkDiscord" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
-          <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-            <circle cx="16" cy="16" r="16" fill="#5865F2"/>
-            <path d="M22.4 10.3a14 14 0 0 0-3.4-1l-.5 1a13 13 0 0 0-5 0l-.5-1a14 14 0 0 0-3.4 1c-2.2 3.2-2.8 6.4-2.5 9.5a14 14 0 0 0 4.2 2.1l.9-1.5c-.5-.2-1-.4-1.4-.7l.3-.3a10 10 0 0 0 8.8 0l.3.3c-.4.3-.9.5-1.4.7l.9 1.5a14 14 0 0 0 4.2-2.1c.4-3.600-.6-6.800-2.500-9.500z" fill="#fff"/>
-            <ellipse cx="12.700" cy="16.300" rx="1.600" ry="1.800" fill="#5865F2"/>
-            <ellipse cx="19.300" cy="16.300" rx="1.600" ry="1.800" fill="#5865F2"/>
-          </svg>
-          <span>Discord</span>
-        </a>
-      </div>
       <button id="accountBtn" onclick="openAccountScreen()">👤 Log in / Sign up</button>
       <button id="newsBtn" onclick="openNews()">📰 News<span class="newsDot" id="newsDot"></span></button>
       <!-- LINKS: Global Chat -->
@@ -859,6 +840,25 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
           <button onclick="showMenuPage('menuMain')">← Back</button>
+          <div id="socialBar">
+            <a id="linkWhatsApp" class="socialLink" href="https://chat.whatsapp.com/HA0w5ZkjAt9I5xlHOcFLLh?mode=gi_t" target="_blank" rel="noopener noreferrer" title="Join our WhatsApp group" aria-label="WhatsApp">
+              <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+                <circle cx="16" cy="16" r="16" fill="#25D366"/>
+                <path d="M16 6.2a9.7 9.7 0 0 0-8.3 14.7L6.3 25.7l5-1.3A9.7 9.7 0 1 0 16 6.2z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M12.6 11.3c.3-.5.7-.5 1-.4.2.5.7 1.7.8 1.9.1.2 0 .4-.1.6l-.5.6c-.1.2-.2.3 0 .6.7 1.2 1.7 2.1 3 2.7.3.1.5.1.6-.1l.7-.9c.2-.2.4-.2.6-.1l1.8.9c.2.1.3.2.3.4 0 .6-.4 1.3-1 1.6-.6.4-1.5.4-2.8-.1-2.4-.9-4.2-2.8-5.2-5-.4-1-.4-1.9.1-2.6z" fill="#fff"/>
+              </svg>
+              <span>WhatsApp</span>
+            </a>
+            <a id="linkDiscord" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
+              <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+                <circle cx="16" cy="16" r="16" fill="#5865F2"/>
+                <path d="M22.4 10.3a14 14 0 0 0-3.4-1l-.5 1a13 13 0 0 0-5 0l-.5-1a14 14 0 0 0-3.4 1c-2.2 3.2-2.8 6.4-2.5 9.5a14 14 0 0 0 4.2 2.1l.9-1.5c-.5-.2-1-.4-1.4-.7l.3-.3a10 10 0 0 0 8.8 0l.3.3c-.4.3-.9.5-1.4.7l.9 1.5a14 14 0 0 0 4.2-2.1c.4-3.600-.6-6.800-2.500-9.500z" fill="#fff"/>
+                <ellipse cx="12.700" cy="16.300" rx="1.600" ry="1.800" fill="#5865F2"/>
+                <ellipse cx="19.300" cy="16.300" rx="1.600" ry="1.800" fill="#5865F2"/>
+              </svg>
+              <span>Discord</span>
+            </a>
+          </div>
         </div>
         <div id="menuOffline" class="menuPage" style="display:none">
           <button onclick="startGame('single')">Singleplayer</button>
@@ -2384,6 +2384,67 @@ function campDisqualify(selfCamped) {
   if (selfCamped) reportOnlineResult(oppName, meName); else reportOnlineResult(meName, oppName);
 }
 
+
+// ═══════════════════════════════════════════════
+//  ANTI CORNER-CAMPING FUER ALLE MODI (zentral)
+//  campGuardTick() laeuft in update() fuer JEDEN Modus automatisch, auch fuer kuenftige:
+//    • Standard: jeder lokale Spieler (isLocalPlayer) wird ueberwacht, bei Disqualifikation scheidet er aus (arenaEliminate).
+//    • Neuer Modus mit eigenem Spielende? -> CAMP_ADAPTERS["meinmodus"] = { humans(), active(), frozen(p), kill(p) } eintragen,
+//      alle Felder sind optional (fehlt etwas, gilt der Standard).
+//    • Nicht ueberwacht: "online" (hat eigene Logik oben), "online_tv" (nur Zuschauer).
+//  Regeln (Zone, Warnung 3s, Limit 6s) sind dieselben wie online: CAMP_ZONE / CAMP_WARN_MS / CAMP_LIMIT_MS / CAMP_DECAY.
+// ═══════════════════════════════════════════════
+const CAMP_SKIP = { online: 1, online_tv: 1 };
+const CAMP_ADAPTERS = {
+  multi:      { humans: () => players.slice(0, 2) },
+  tournament: {
+    humans: () => { const m = playerMatchMap.get("YOU"); const me = m && m.players.find(p => p.name === "YOU"); return me ? [me] : []; },
+    active: () => { const m = playerMatchMap.get("YOU"); return !!(m && m.running); },
+    kill: (p) => {
+      const m = playerMatchMap.get("YOU"); if (!m || !m.running) return;
+      p.alive = false;
+      const alive = m.players.filter(x => x.alive);
+      if (alive.length <= 1) { m.running = false; finishMatch(m, alive[0] || m.players.find(x => x !== p), p); }
+    }
+  },
+  coin: {
+    frozen: (p) => !!(p.stunnedUntil && Date.now() < p.stunnedUntil),     // betaeubt = darf sich nicht bewegen, zaehlt nicht
+    kill: (p) => { p.coinsCollected = 0; coinScorePlayer = 0; const e = document.getElementById("coinScore"); if (e) e.textContent = 0; endCoinMode(); }
+  },
+  streak: {
+    active: () => !!(streak && streak.phase === "play"),
+    kill: (p) => { p.alive = false; streakEnd(); }
+  }
+};
+let campGen = { key: "", meters: new WeakMap(), last: 0 };
+function campGenReset() { campGen = { key: mode + ":" + startTime, meters: new WeakMap(), last: Date.now() }; campWarn(false); }
+function campGuardTick() {
+  if (!running || CAMP_SKIP[mode] || spectateModeActive) return;
+  const key = mode + ":" + startTime;
+  if (campGen.key !== key) campGenReset();
+  const ad = CAMP_ADAPTERS[mode] || {};
+  const now = Date.now(), dt = Math.min(250, now - campGen.last);
+  campGen.last = now;
+  if (ad.active && !ad.active()) return;
+  const humans = (ad.humans ? ad.humans() : players.filter(isLocalPlayer)).filter(p => p && p.alive !== false);
+  let worst = 0, worstP = null;
+  for (const p of humans) {
+    if (ad.frozen && ad.frozen(p)) continue;
+    const prev = campGen.meters.get(p) || 0;
+    const m = inDeepCorner(p) ? prev + dt : Math.max(0, prev - dt * CAMP_DECAY);
+    campGen.meters.set(p, m);
+    if (m > worst) { worst = m; worstP = p; }
+  }
+  if (worst >= CAMP_WARN_MS) campWarn(true, Math.max(0, Math.ceil((CAMP_LIMIT_MS - worst) / 1000))); else campWarn(false);
+  if (worstP && worst >= CAMP_LIMIT_MS) {
+    campWarn(false);
+    const who = humans.length > 1 ? dn(worstP.label || worstP.name) + ": " : "";
+    campBanner("campMsg", "🚫 " + who + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000);
+    campGen.meters.delete(worstP);
+    if (ad.kill) ad.kill(worstP); else arenaEliminate(worstP);
+  }
+}
+
 // ═══════════════════════════════════════════════
 //  WEEKLY LEAGUE (Duolingo style) – independent of ELO
 //  • Each week (Mon 00:00 UTC to Sun 24:00 UTC) active players of a league are placed in groups
@@ -3116,6 +3177,7 @@ function clearAllTimers() {
   if (coinIntervalId)     { clearInterval(coinIntervalId);     coinIntervalId     = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
   if (typeof streakCleanup === "function") streakCleanup();
+  if (typeof campWarn === "function") campWarn(false);
 }
 
 // ═══════════════════════════════════════════════
@@ -4863,6 +4925,7 @@ function streakStartRound() {
   const nc = streakChaserTarget(L);
   for (let i = 0; i < nc; i++) balls.push(streakMakeBall(L, true));
   streak.phase = "intro"; streak.phaseUntil = Date.now() + C.introMs;
+  campGenReset();
   streakHud();
   streakSetOverlay(`<div class="sk-title">${tr("ROUND")} ${L}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}${nc ? " · 🟠 " + tr("chasing balls") : ""}</div>`);
 }
@@ -4955,6 +5018,7 @@ function streakRoundWon() {
 }
 function streakEnd() {
   streak.phase = "over"; running = false;
+  campWarn(false);
   streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
   streakHud();
@@ -5217,6 +5281,8 @@ function gameOver() {
 // ═══════════════════════════════════════════════
 function update() {
   if (!running) return;
+  campGuardTick();           // Anti-Corner-Camping fuer jeden Modus
+  if (!running) return;      // Disqualifikation kann das Spiel beendet haben
   if (mode === "tournament") { updateTournament(); return; }
 
   const el = document.getElementById("time");
@@ -5514,20 +5580,25 @@ function checkCollision(p) {
     for (const b of balls) {
       const dx = p.x - b.x, dy = p.y - b.y;
       if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
-        p.alive = false;
-        p.deathTime = Date.now();
-        eliminated.push(p);
-        const alive = players.filter(x => x.alive);
-        if (alive.length <= 1) {
-          if (alive.length === 1 && !eliminated.includes(alive[0])) {
-            alive[0].deathTime = Infinity;
-            eliminated.push(alive[0]);
-          }
-          finishArena();
-        }
+        arenaEliminate(p);
         return;
       }
     }
+  }
+}
+// Spieler in einem Arena-Modus ausscheiden lassen (Ball getroffen ODER Corner-Camping-Disqualifikation)
+function arenaEliminate(p) {
+  if (!p.alive) return;
+  p.alive = false;
+  p.deathTime = Date.now();
+  eliminated.push(p);
+  const alive = players.filter(x => x.alive);
+  if (alive.length <= 1) {
+    if (alive.length === 1 && !eliminated.includes(alive[0])) {
+      alive[0].deathTime = Infinity;
+      eliminated.push(alive[0]);
+    }
+    finishArena();
   }
 }
 
