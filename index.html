@@ -2121,6 +2121,7 @@ function survFmt(t) {
 }
 function startSurvival() {
   if (!guestGate("survival")) return;
+  countModeRun("survPlayed");
   try { cleanupOnline(); } catch (e) {}
   clearAllTimers();
   ["survivalResult", "survReplay"].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
@@ -2172,7 +2173,6 @@ function countModeRun(field) {
 }
 async function endSurvival(camped) {
   if (!survivalActive) return;
-  countModeRun("survPlayed");
   survivalActive = false; running = false;
   clearAllTimers(); campWarn(false);
   if (survHudIv) { clearInterval(survHudIv); survHudIv = null; }
@@ -3435,9 +3435,9 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) : "–"}</span></div>
-      <div class="prof-row"><span class="prof-label">🏝 Survival Runs</span><span class="prof-val">${p.survPlayed ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">🏝 Survival Runs</span><span class="prof-val">${Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0)}</span></div>
       <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec : "–"}</span></div>
-      <div class="prof-row"><span class="prof-label">🔥 Streak Runs</span><span class="prof-val">${p.streakPlayed ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streak Runs</span><span class="prof-val">${Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0)}</span></div>
     `;
 
     document.getElementById("profileModal").style.display = "flex";
@@ -5061,6 +5061,7 @@ function streakStartRound() {
 }
 function startStreak() {
   if (!guestGate("streak")) return;
+  countModeRun("streakPlayed");
   clearAllTimers();
   waitingQueue = []; matches = []; playerMatchMap.clear();
   spectateModeActive = false; spectateMatchId = null;
@@ -5154,8 +5155,8 @@ function streakRoundWon() {
   streak.timers.push(setTimeout(() => { if (mode === "streak" && streak && streak.phase === "won") streakStartRound(); }, STREAK_CFG.betweenMs));
 }
 function streakEnd() {
+  if (!streak || streak.phase === "over") return;   // darf nur einmal pro Run laufen (Kollision + Camping konnten beide ausloesen)
   streak.phase = "over"; running = false;
-  countModeRun("streakPlayed");
   campWarn(false);
   try { streakPushLive(true); stopViewerCount(); } catch (e) {}   // TV-Zuschauer sehen das Ende
   streakFlush();
