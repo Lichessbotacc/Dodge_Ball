@@ -3220,11 +3220,15 @@ const NET_SMOOTH = {
 };
 
 // Gemeinsame Paket-Verarbeitung für Online-Gegner UND Online TV (identisch sauber)
-function feedNetPlayer(pl, st) {
+function feedNetPlayer(pl, st, stopMs) {
   const now = Date.now();
   // Jedes Match-Update (Ball, anderer Spieler ...) liefert den Spielerstand erneut.
   // Unveränderte Daten sind KEIN neues Paket -> ignorieren (sonst Geschwindigkeit=0 / Zittern).
-  if (pl.lastPacketAt && st.x === pl.baseTx && st.y === pl.baseTy && (st.alive !== false) === pl.alive) return;
+  if (pl.lastPacketAt && st.x === pl.baseTx && st.y === pl.baseTy && (st.alive !== false) === pl.alive) {
+    // Unveraenderte Daten laenger als stopMs = Spieler steht still -> Extrapolation beenden, auf echte Position zurueck
+    if (stopMs && now - pl.lastPacketAt > stopMs) { pl.netVX = 0; pl.netVY = 0; pl.tx = st.x; pl.ty = st.y; }
+    return;
+  }
   if (pl.lastPacketAt) {
     const interval = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(30, now - pl.lastPacketAt));
     let vx = (st.x - pl.baseTx) / interval, vy = (st.y - pl.baseTy) / interval;
@@ -4330,6 +4334,23 @@ function makeOnlineBall() {
 // (host has bad ping) this avoids visible "snapping" — small/frequent
 // corrections stay gentle, while a correction after a longer gap pulls
 // harder so we don't drift indefinitely out of sync.
+let tvFreezeBalls = false;
+// Streak-TV: Baelle per ID abgleichen (Verfolger laufen ab / neue kommen dazu, Indizes verschieben sich sonst)
+function applyStreakTvBalls(arr) {
+  if (!arr.length || arr[0].i === undefined) { applyBallCorrection(arr, 0.35); return; }
+  const old = new Map();
+  for (const b of balls) if (b.id !== undefined) old.set(b.id, b);
+  const out = [];
+  for (const a of arr) {
+    let b = old.get(a.i);
+    if (b) { const pull = b.chase ? 0.6 : 0.35; b.x += (a.x - b.x) * pull; b.y += (a.y - b.y) * pull; }
+    else b = { id: a.i, x: a.x, y: a.y };
+    b.vx = a.vx; b.vy = a.vy; b.radius = a.radius;
+    if (a.ch !== undefined) { b.chase = true; b.born = Date.now() - a.ch; } else delete b.chase;
+    out.push(b);
+  }
+  balls = out;
+}
 let lastBallCorrectionAt = 0;
 function applyBallCorrection(authoritative, minPull) {
   const now = Date.now();
@@ -4980,11 +5001,12 @@ function streakPushLive(done) {
   const d = { k: "streak", name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius,
     x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive,
     bx: bot ? Math.round(bot.x) : 0, by: bot ? Math.round(bot.y) : 0, ba: bot ? !!bot.alive : false,
-    t: _skTick, w: streak.wins, L: streakLevel(), ph: streak.phase, done: !!done };
+    t: _skTick, w: streak.wins, L: streakLevel(), rd: streak.rd || 0, ph: streak.phase, done: !!done };
   if (done) d.time = streak.wins;
-  d.b = JSON.stringify(balls.map(b => { const o = { x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) o.ch = Math.max(0, now - b.born); return o; }));
+  d.b = JSON.stringify(balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) o.ch = Math.max(0, now - b.born); return o; }));
   RPC.setSurvivalLive(d).catch(() => {});
 }
+let _skBallId = 0;
 const streakSrv = { level: null, last: 0, busy: false, target: 0 };   // Stand in der Bestenliste (Server)
 const streakSleep = ms => new Promise(r => setTimeout(r, ms));
 // Der Server erlaubt +1 Level pro Schreibvorgang und mindestens 6s Abstand. Darum wird Level fuer Level hochgezaehlt.
@@ -5046,7 +5068,7 @@ function streakMakeBall(L, chase) {
     }
   }
   const spd = 5 + Math.random() * 6, ang = Math.random() * Math.PI * 2;
-  const b = { x, y, radius: r, vx: Math.cos(ang) * spd * ONLINE_BALL_SPEED * mul, vy: Math.sin(ang) * spd * ONLINE_BALL_SPEED * mul };
+  const b = { id: ++_skBallId, x, y, radius: r, vx: Math.cos(ang) * spd * ONLINE_BALL_SPEED * mul, vy: Math.sin(ang) * spd * ONLINE_BALL_SPEED * mul };
   if (chase) {
     b.chase = true; b.born = Date.now();
     b.radius = 13 + Math.random() * 6;
@@ -5070,6 +5092,7 @@ function streakStartRound() {
   for (let i = 0; i < ONLINE_START_BALLS; i++) balls.push(streakMakeBall(L, false));
   const nc = streakChaserTarget(L);
   for (let i = 0; i < nc; i++) balls.push(streakMakeBall(L, true));
+  streak.rd = (streak.rd || 0) + 1;
   streak.phase = "intro"; streak.phaseUntil = Date.now() + C.introMs;
   campGenReset();
   streakHud();
@@ -5463,7 +5486,7 @@ function update() {
       p.x += (p.tx - p.x) * a;
       p.y += (p.ty - p.y) * a;
     }
-    for (const b of balls) {
+    if (!tvFreezeBalls) for (const b of balls) {
       b.x += b.vx; b.y += b.vy;
       if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
       if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
@@ -6432,7 +6455,7 @@ async function startOnlineTV(targetUid) {
   const stopInner = () => {
     setStall(false);
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null;
+    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null; tvFreezeBalls = false;
     { const u = document.getElementById("ui"); if (u && mode === "online_tv") u.innerHTML = tvUiDefault; }
     stopViewerCount();
     players = []; balls = [];
@@ -6498,6 +6521,7 @@ async function startOnlineTV(targetUid) {
       lastPacketSeen = Date.now(); gotPacket = false; curMeta = null;
       const suid = survId.slice(5);
       const isSk = survD.k === "streak";
+      let skRd = -1;
       const sp = createPlayer(isSk ? W() * 0.25 : W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
       const spBot = isSk ? createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot") : null;
       if (isSk) { sp.label = dn(survD.name); spBot.label = "Online Bot"; }
@@ -6521,6 +6545,7 @@ async function startOnlineTV(targetUid) {
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
         if (d.done) {
           if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
+          tvFreezeBalls = true;
           showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
           badMatches.set(survId, Date.now() + 15000);
           specText.innerHTML = (isSk ? "Streak" : "Survival run") + " finished. Searching for next game...";
@@ -6531,16 +6556,17 @@ async function startOnlineTV(targetUid) {
         }
         lastPacketSeen = Date.now(); gotPacket = true;
         if (isSk) {
-          feedNetPlayer(sp, { x: d.x, y: d.y, alive: d.ma !== false });
-          feedNetPlayer(spBot, { x: d.bx, y: d.by, alive: d.ba !== false });
+          const rd = d.rd || 0;
+          if (rd !== skRd) {            // neue Runde: alles hart auf den neuen Stand setzen statt hinzugleiten
+            skRd = rd; balls = [];
+            sp.lastPacketAt = 0; spBot.lastPacketAt = 0;
+          }
+          tvFreezeBalls = d.ph !== "play";   // Intro/Rundensieg: die Baelle stehen auch beim Spieler still
+          feedNetPlayer(sp, { x: d.x, y: d.y, alive: d.ma !== false }, 250);
+          feedNetPlayer(spBot, { x: d.bx, y: d.by, alive: d.ba !== false }, 250);
           setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streak · " + tr("Round") + " " + (d.L || 1));
           skUi(d);
-          if (d.b) { try {
-            const arr = JSON.parse(d.b); applyBallCorrection(arr, 0.35);
-            for (let i = 0; i < arr.length && i < balls.length; i++) {
-              if (arr[i].ch !== undefined) { balls[i].chase = true; balls[i].born = Date.now() - arr[i].ch; } else { delete balls[i].chase; }
-            }
-          } catch(e) {} }
+          if (d.b) { try { applyStreakTvBalls(JSON.parse(d.b)); } catch(e) {} }
           return;
         }
         feedNetPlayer(sp, { x: d.x, y: d.y, alive: true });
