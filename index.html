@@ -848,13 +848,13 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <h1>DarkOnBalls</h1>
         <div id="menuMain" class="menuPage">
           <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
-          <button onclick="startStreak()">🔥 Streak</button>
           <button onclick="showMenuPage('menuOffline')" style="display:none" id="btnOfflineMenu">🎮 Offline</button> <!-- Offline vorübergehend ausgeblendet: style="display:none" entfernen zum Einblenden -->
           <button onclick="openSettings()">⚙️ Settings</button>
         </div>
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startSurvival()">🏝 Survival</button>
+          <button onclick="startStreak()">🔥 Streak</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
@@ -948,6 +948,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
+        <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streak</button>
       </div>
       <div id="lbTable">
         <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
@@ -1265,6 +1266,10 @@ async function rpcRemoveChallenge(targetUid, fromUid) {
   requireUid();
   return remove(ref(db, "challenges/" + targetUid + "/" + fromUid));
 }
+async function rpcSetStreakBoard(payload) {
+  const uid = requireUid();
+  return set(ref(db, "streakBoard/" + uid), { name: String(payload.name), level: Number(payload.level), ts: serverTimestamp() });
+}
 async function rpcSetHeadToHead(uidA, uidB, data) {
   const uid = requireUid();
   if (uid !== uidA && uid !== uidB) throw new Error("Not a participant in this head-to-head record.");
@@ -1385,7 +1390,7 @@ window._dobRPC = {
   createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, setMatchPath: rpcSetMatchPath,
   removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch,
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
-  sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
+  setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
   sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
@@ -1964,6 +1969,7 @@ function currentPresenceStatus() {
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
+    if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streak";
     if (running && !(mode === "online" && onlineResultHandled)) {
       if (mode === "online") {
         if (onlineVsBot) return "1v1 vs Bot";
@@ -2180,9 +2186,27 @@ function playSurvivalReplay(rec, label) {
 
 // Leaderboard: Tabs ELO | Survival
 function lbShowTab(tab) {
-  const e = document.getElementById("lbTabElo"), v = document.getElementById("lbTabSurv");
+  const e = document.getElementById("lbTabElo"), v = document.getElementById("lbTabSurv"), k = document.getElementById("lbTabStreak");
   if (e) e.style.borderColor = tab === "elo" ? "#00ff88" : ""; if (v) v.style.borderColor = tab === "surv" ? "#00ff88" : "";
-  if (tab === "surv") loadSurvivalBoard(); else loadLeaderboard();
+  if (k) k.style.borderColor = tab === "streak" ? "#00ff88" : "";
+  if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else loadLeaderboard();
+}
+async function loadStreakBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Level</span><span></span></div>';
+  if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const [sb, pl] = await Promise.all([dbGet("streakBoard"), dbGet("players")]);
+    const rows = Object.entries(sb || {})
+      .filter(([uid]) => !pl || pl[uid])                       // geloeschte Accounts ausblenden
+      .map(([uid, r]) => ({ uid, level: Number(r && r.level) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
+      .filter(r => r.level > 0)
+      .sort((a, b) => b.level - a.level || a.ts - b.ts)         // gleiches Level: wer es zuerst erreicht hat steht oben
+      .slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No streak records yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
+  } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadSurvivalBoard() {
   const t = document.getElementById("lbTable");
@@ -4745,13 +4769,35 @@ function startSurvivalMode() {
 // ═══════════════════════════════════════════════
 const STREAK_CFG = {
   botSkillStart: 0.10, botSkillStep: 0.065, botSkillMax: 0.97,   // Bot-Faehigkeit 0..1 pro Level
-  ballSpeedStart: 0.85, ballSpeedStep: 0.045, ballSpeedMax: 2.1, // Ballgeschwindigkeit (Faktor)
-  ballsStart: 3, ballsEveryLevels: 3, ballsMax: 10,              // Baelle zu Rundenbeginn
-  spawnStartMs: 6500, spawnStepMs: 220, spawnMinMs: 2600, totalBallsMax: 26,
-  chaserFromLevel: 4, chaserEvery: 3, chaserMax: 4, chaserLifeMs: 9000, // verfolgende Baelle
+  // Level 1 = EXAKT wie im Online-Modus (ONLINE_START_BALLS, ONLINE_SPAWN_MS, ONLINE_BALL_SPEED, Groesse 15-35, Abstand 220).
+  // Danach steigt nur das Tempo der Baelle (Faktor) und es kommen verfolgende Baelle dazu.
+  ballSpeedStart: 1.0, ballSpeedStep: 0.04, ballSpeedMax: 2.0,
+  totalBallsMax: 200,                                            // reine Sicherheitsgrenze
+  chaserFromLevel: 4, chaserEvery: 3, chaserMax: 4, chaserLifeMs: 9000, chaserSpawnMs: 1500, // verfolgende Baelle
   introMs: 1600, betweenMs: 1500
 };
 let streak = null;
+const streakSrv = { level: null, last: 0, busy: false, target: 0 };   // Stand in der Bestenliste (Server)
+const streakSleep = ms => new Promise(r => setTimeout(r, ms));
+// Der Server erlaubt +1 Level pro Schreibvorgang und mindestens 6s Abstand. Darum wird Level fuer Level hochgezaehlt.
+async function streakFlush() {
+  if (streakSrv.busy) return;
+  streakSrv.busy = true;
+  try {
+    while (fbReady && myUid && onlineAccount) {
+      if (streakSrv.level === null) {
+        const cur = await dbGet("streakBoard/" + myUid);
+        streakSrv.level = cur ? (Number(cur.level) || 0) : 0;
+      }
+      if (streakSrv.level >= streakSrv.target) break;
+      const wait = streakSrv.last + 6300 - Date.now();
+      if (wait > 0) await streakSleep(wait);
+      await RPC.setStreakBoard({ name: onlineAccount.name, level: streakSrv.level + 1 });
+      streakSrv.level++; streakSrv.last = Date.now();
+    }
+  } catch (e) { console.warn("streak board sync failed", e && (e.code || e.message)); }
+  streakSrv.busy = false;
+}
 const streakBestKey = "dobStreakBest";
 function streakReadBest() { try { return parseInt(localStorage.getItem(streakBestKey) || "0", 10) || 0; } catch (e) { return 0; } }
 function streakSetOverlay(html) {
@@ -4770,21 +4816,33 @@ function streakHud() {
   const ui = document.getElementById("ui"); if (!ui || !streak) return;
   ui.innerHTML = `🔥 ${tr("Streak")}: <b id="sk_w">${streak.wins}</b><br>${tr("Best")}: <span id="sk_b">${Math.max(streak.best, streak.wins)}</span><br>${tr("Round")}: <span id="sk_r">${streakLevel()}</span><br>${tr("Bot level")}: <span id="sk_l">${streakLevel()}</span>`;
 }
-function streakSpawnMs(L) { return Math.max(STREAK_CFG.spawnMinMs, STREAK_CFG.spawnStartMs - STREAK_CFG.spawnStepMs * (L - 1)); }
 function streakChaserTarget(L) {
   const C = STREAK_CFG;
   return L < C.chaserFromLevel ? 0 : Math.min(C.chaserMax, 1 + Math.floor((L - C.chaserFromLevel) / C.chaserEvery));
 }
+// Normaler Ball: gleiche Formel wie makeOnlineBall(), nur mit Tempo-Faktor pro Level
 function streakMakeBall(L, chase) {
   const C = STREAK_CFG;
-  const b = makeBallAt(players);   // Platzierung mit Abstand zu den Spielern
   const mul = Math.min(C.ballSpeedMax, C.ballSpeedStart + C.ballSpeedStep * (L - 1));
-  const spd = (3 + Math.random() * 2.5) * mul, ang = Math.random() * Math.PI * 2;
-  b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
+  const r = 15 + Math.random() * 20;
+  let x, y, valid = false, tries = 0;
+  const minDistance = 220;
+  while (!valid && tries++ < 100) {
+    x = r + Math.random() * (W() - r * 2);
+    y = r + Math.random() * (H() - r * 2);
+    valid = true;
+    for (const p of players) {
+      if (!p.alive) continue;
+      const dx = p.x - x, dy = p.y - y;
+      if (Math.sqrt(dx * dx + dy * dy) < p.radius + r + minDistance) { valid = false; break; }
+    }
+  }
+  const spd = 5 + Math.random() * 6, ang = Math.random() * Math.PI * 2;
+  const b = { x, y, radius: r, vx: Math.cos(ang) * spd * ONLINE_BALL_SPEED * mul, vy: Math.sin(ang) * spd * ONLINE_BALL_SPEED * mul };
   if (chase) {
     b.chase = true; b.born = Date.now();
     b.radius = 13 + Math.random() * 6;
-    b.cspd = spd * 0.8;
+    b.cspd = Math.hypot(b.vx, b.vy) * 0.85;
     b.turn = Math.min(0.06, 0.018 + 0.0018 * L);   // max. Drehung pro Tick (rad) -> wird schwerer
   }
   return b;
@@ -4794,13 +4852,14 @@ function streakStartRound() {
   const sk = Math.min(C.botSkillMax, C.botSkillStart + C.botSkillStep * (L - 1));
   players = []; balls = []; myTrail = []; eliminated = [];
   const me = createPlayer(W() * 0.25, H() / 2, myBallColor, "Player");
+  me.label = (onlineAccount && onlineAccount.name) ? dn(onlineAccount.name) : "Player";   // Anzeige: Account-Name
   const bot = createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot");
+  bot.label = "Online Bot";
   bot.skill = { aim: sk, reaction: sk, movement: sk, awareness: sk, aggression: sk };
   bot.speed = 2.2 + sk * 5.5; bot.awareness = 55 + sk * 130;
   bot.dodgePower = 0.4 + sk * 2.6; bot.randomness = (1 - sk) * 5;
   players.push(me, bot);
-  const n = Math.min(C.ballsMax, C.ballsStart + Math.floor((L - 1) / C.ballsEveryLevels));
-  for (let i = 0; i < n; i++) balls.push(streakMakeBall(L, false));
+  for (let i = 0; i < ONLINE_START_BALLS; i++) balls.push(streakMakeBall(L, false));
   const nc = streakChaserTarget(L);
   for (let i = 0; i < nc; i++) balls.push(streakMakeBall(L, true));
   streak.phase = "intro"; streak.phaseUntil = Date.now() + C.introMs;
@@ -4817,7 +4876,7 @@ function startStreak() {
   mode = "streak";
   document.body.classList.remove("mode-online", "mode-tv");
   const et = document.getElementById("eloTable"); if (et) et.style.display = "none";
-  streak = { wins: 0, best: streakReadBest(), phase: "intro", phaseUntil: 0, nextSpawn: 0, timers: [] };
+  streak = { wins: 0, best: streakReadBest(), phase: "intro", phaseUntil: 0, lastSpawn: 0, nextChase: 0, timers: [] };
   hideAllScreensForGame();
   balls = []; players = []; eliminated = [];
   running = true; startTime = Date.now();
@@ -4834,7 +4893,7 @@ function updateStreak() {
   if (!streak) return;
   const C = STREAK_CFG, now = Date.now();
   if (streak.phase === "intro") {
-    if (now >= streak.phaseUntil) { streak.phase = "play"; streak.nextSpawn = now + streakSpawnMs(streakLevel()); streakSetOverlay(null); }
+    if (now >= streak.phaseUntil) { streak.phase = "play"; streak.lastSpawn = now; streak.nextChase = now + C.chaserSpawnMs; streakSetOverlay(null); }
     return;
   }
   if (streak.phase !== "play") return;
@@ -4847,12 +4906,15 @@ function updateStreak() {
     p.y = Math.max(p.radius, Math.min(H() - p.radius, p.y));
   }
 
-  // neue Baelle / Ersatz fuer abgelaufene Verfolger
-  if (now >= streak.nextSpawn) {
-    streak.nextSpawn = now + streakSpawnMs(L);
-    const chasers = balls.filter(b => b.chase).length;
-    if (chasers < streakChaserTarget(L)) balls.push(streakMakeBall(L, true));
-    else if (balls.length < C.totalBallsMax) balls.push(streakMakeBall(L, false));
+  // Spawn-Takt wie online: alle ONLINE_SPAWN_MS ein neuer Ball (gleiche Pruefung wie im Online-Update)
+  if (now - streak.lastSpawn > ONLINE_SPAWN_MS) {
+    streak.lastSpawn = now;
+    if (balls.length < C.totalBallsMax) balls.push(streakMakeBall(L, false));
+  }
+  // verfolgende Baelle zusaetzlich / als Ersatz fuer abgelaufene
+  if (now >= streak.nextChase && balls.filter(b => b.chase).length < streakChaserTarget(L)) {
+    streak.nextChase = now + C.chaserSpawnMs;
+    balls.push(streakMakeBall(L, true));
   }
 
   // Verfolger lenken zum Spieler und laufen nach einer Weile ab
@@ -4885,6 +4947,7 @@ function updateStreak() {
 }
 function streakRoundWon() {
   streak.phase = "won"; streak.wins++;
+  streakSrv.target = Math.max(streakSrv.target, streak.wins); streakFlush();
   if (streak.wins > streak.best) { streak.best = streak.wins; try { localStorage.setItem(streakBestKey, String(streak.best)); } catch (e) {} }
   streakHud();
   streakSetOverlay(`<div class="sk-title" style="color:#00e676">✓ ${tr("ROUND WON")}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}</div>`);
@@ -4892,6 +4955,7 @@ function streakRoundWon() {
 }
 function streakEnd() {
   streak.phase = "over"; running = false;
+  streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
   streakHud();
   const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${tr("STREAK ENDED")}</div>
@@ -5927,7 +5991,7 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     }
 
     ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
-    ctx.fillText(dn(p.name), p.x, p.y - p.radius - 10);
+    ctx.fillText(p.label || dn(p.name), p.x, p.y - p.radius - 10);
   }
 
   if (mode === "online") {
@@ -6544,7 +6608,7 @@ const DICT = { de: {
   "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","Streak":"Streak","Best":"Bestwert","Round":"Runde","Bot level":"Bot-Level","ROUND":"RUNDE","ROUND WON":"RUNDE GEWONNEN","STREAK ENDED":"STREAK BEENDET","wins in a row":"Siege in Folge","NEW BEST":"NEUER BESTWERT","Try again":"Nochmal","Home":"Menü","chasing balls":"verfolgende Bälle","🔥 Streak":"🔥 Streak","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","No streak records yet":"Noch keine Streak-Rekorde","Streak":"Streak","Best":"Bestwert","Round":"Runde","Bot level":"Bot-Level","ROUND":"RUNDE","ROUND WON":"RUNDE GEWONNEN","STREAK ENDED":"STREAK BEENDET","wins in a row":"Siege in Folge","NEW BEST":"NEUER BESTWERT","Try again":"Nochmal","Home":"Menü","chasing balls":"verfolgende Bälle","🔥 Streak":"🔥 Streak","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
   "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
