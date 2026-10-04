@@ -1173,7 +1173,18 @@ function requireUid() {
 //    for leaderboard / presence / opponent lookups; only WRITES are
 //    identity-gated) ──
 async function rpcGet(path)        { return (await get(ref(db, path))).val(); }
-function rpcOn(path, cb)           { return onValue(ref(db, path), snap => cb(snap.val())); }
+// Live-Listener mit Netz-Fallback: kommt innerhalb von 6 s kein Snapshot (WebSocket blockiert/instabil), wird alle 3 s per get() nachgeladen
+function onValueRobust(r, cb) {
+  let got = false, stopped = false, iv = null;
+  const stopPoll = () => { if (iv) { clearInterval(iv); iv = null; } };
+  const unsub = onValue(r, snap => { got = true; stopPoll(); cb(snap.val()); }, err => console.warn("listener error", err && err.code, err && err.message));
+  const t = setTimeout(() => {
+    if (got || stopped) return;
+    iv = setInterval(async () => { if (stopped) return; try { const sn = await get(r); if (!stopped) cb(sn.val()); } catch (e) {} }, 3000);
+  }, 6000);
+  return () => { stopped = true; clearTimeout(t); stopPoll(); try { unsub(); } catch (e) {} };
+}
+function rpcOn(path, cb)           { return onValueRobust(ref(db, path), cb); }
 
 // ── identity-gated writes: target is ALWAYS derived from the caller's
 //    own uid, never accepted as a free-form path from the caller ──
@@ -1250,7 +1261,7 @@ async function rpcRemoveMatch(matchId) {
   return remove(ref(db, "onlineMatches/" + matchId));
 }
 function rpcOnMatch(matchId, cb) {
-  return onValue(ref(db, "onlineMatches/" + matchId), snap => cb(snap.val()));
+  return onValueRobust(ref(db, "onlineMatches/" + matchId), cb);
 }
 async function rpcGetMatch(matchId) { return rpcGet("onlineMatches/" + matchId); }
 
@@ -5731,6 +5742,8 @@ async function reportOnlineResult(winnerName, loserName) {
       await RPC.updateMatch(onlineMatchId, {
         status: "done", winner: winnerName, eloChange: change
       });
+      const _mid = onlineMatchId;
+      setTimeout(() => { if (!onlineResultHandled && onlineMatchId === _mid) handleOnlineResult(winnerName, change); }, 4000);
     } catch(e) {
       handleOnlineResult(winnerName, change);
     }
