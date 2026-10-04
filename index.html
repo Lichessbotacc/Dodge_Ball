@@ -1609,7 +1609,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Playing Streak" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -3064,6 +3064,8 @@ let onlineVsBot          = false;
 let onlineTvUnsubscribe = null;
 let onlineTvInnerUnsubscribe = null;
 let onlineTvCurrentMatchId = null;
+let tvClock = null;   // Online TV: Zeit des gerade angeschauten Matches/Runs { base (s), at (ms) }
+function tvClockSec() { return tvClock ? Math.max(0, Math.floor(tvClock.base + (Date.now() - tvClock.at) / 1000)) : 0; }
 
 let onlineRng             = null;
 let onlineBallSpawnTimer  = 0;
@@ -3600,6 +3602,7 @@ function cancelOnline() {
 // CHANGED: queue/invite cleanup now keyed by myUid instead of name.
 function cleanupOnline() {
   try { stopViewerCount(); } catch (e) {}
+  if (_skLiveOn) { _skLiveOn = false; try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} }
   if (onlineBallIv) { clearInterval(onlineBallIv); onlineBallIv = null; }
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
@@ -4839,6 +4842,23 @@ const STREAK_CFG = {
   introMs: 1600, betweenMs: 1500
 };
 let streak = null;
+// Streak LIVE (fuer Online TV): gleicher Knoten wie Survival (survivalLive/{uid}), erkennbar am Feld k:"streak" -> keine neuen DB-Regeln noetig
+let _skLiveAt = 0, _skTick = 0, _skLiveOn = false;
+function streakPushLive(done) {
+  if (!fbReady || !myUid || !onlineAccount || !streak) return;
+  const now = Date.now();
+  if (!done && now - _skLiveAt < 120) return;
+  _skLiveAt = now; _skTick++;
+  const me = players.find(p => p.name === "Player"), bot = players.find(p => p.name === "Bot");
+  if (!me) return;
+  const d = { k: "streak", name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius,
+    x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive,
+    bx: bot ? Math.round(bot.x) : 0, by: bot ? Math.round(bot.y) : 0, ba: bot ? !!bot.alive : false,
+    t: _skTick, w: streak.wins, L: streakLevel(), ph: streak.phase, done: !!done };
+  if (done) d.time = streak.wins;
+  d.b = JSON.stringify(balls.map(b => { const o = { x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) o.ch = Math.max(0, now - b.born); return o; }));
+  RPC.setSurvivalLive(d).catch(() => {});
+}
 const streakSrv = { level: null, last: 0, busy: false, target: 0 };   // Stand in der Bestenliste (Server)
 const streakSleep = ms => new Promise(r => setTimeout(r, ms));
 // Der Server erlaubt +1 Level pro Schreibvorgang und mindestens 6s Abstand. Darum wird Level fuer Level hochgezaehlt.
@@ -4940,6 +4960,8 @@ function startStreak() {
   document.body.classList.remove("mode-online", "mode-tv");
   const et = document.getElementById("eloTable"); if (et) et.style.display = "none";
   streak = { wins: 0, best: streakReadBest(), phase: "intro", phaseUntil: 0, lastSpawn: 0, nextChase: 0, timers: [] };
+  _skTick = 0; _skLiveAt = 0;
+  try { if (fbReady && myUid && onlineAccount) { RPC.armSurvivalLiveDisconnect().catch(() => {}); _skLiveOn = true; } } catch (e) {}
   hideAllScreensForGame();
   balls = []; players = []; eliminated = [];
   running = true; startTime = Date.now();
@@ -4955,6 +4977,10 @@ function streakHit(p) {
 function updateStreak() {
   if (!streak) return;
   const C = STREAK_CFG, now = Date.now();
+  if (fbReady && myUid && onlineAccount) {
+    if (_viewKey !== "surv_" + myUid) watchViewerCount("surv_" + myUid, false);
+    streakPushLive(false);
+  }
   if (streak.phase === "intro") {
     if (now >= streak.phaseUntil) { streak.phase = "play"; streak.lastSpawn = now; streak.nextChase = now + C.chaserSpawnMs; streakSetOverlay(null); }
     return;
@@ -5019,6 +5045,7 @@ function streakRoundWon() {
 function streakEnd() {
   streak.phase = "over"; running = false;
   campWarn(false);
+  try { streakPushLive(true); stopViewerCount(); } catch (e) {}   // TV-Zuschauer sehen das Ende
   streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
   streakHud();
@@ -5286,7 +5313,7 @@ function update() {
   if (mode === "tournament") { updateTournament(); return; }
 
   const el = document.getElementById("time");
-  if (el) el.textContent = Math.floor((Date.now() - startTime) / 1000);
+  if (el) el.textContent = mode === "online_tv" ? tvClockSec() : Math.floor((Date.now() - startTime) / 1000);
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
   if (mode === "online_tv") {
@@ -6153,6 +6180,9 @@ async function startOnlineTV() {
 
   mode = "online_tv";
   document.body.classList.add("mode-tv");
+  tvClock = null;
+  const tvUiDefault = `Time: <span id="time">0</span>s<br>Balls: <span id="balls">0</span><br>Mode: <span id="mode">Online TV</span>`;
+  document.getElementById("ui").innerHTML = tvUiDefault;
   { const md = document.getElementById("mode"); if (md) md.textContent = "Online TV"; }
   running = true;
   balls = [];
@@ -6228,11 +6258,11 @@ async function startOnlineTV() {
       "padding:22px 38px;color:#f0f0f5;font-family:var(--font-display);box-shadow:0 10px 40px rgba(0,0,0,0.6);backdrop-filter:blur(8px);";
     const title = document.createElement("div");
     title.style.cssText = "font-size:15px;letter-spacing:2px;opacity:.7;margin-bottom:8px;";
-    title.textContent = survTime ? "SURVIVAL ENDED" : winner ? "MATCH FINISHED" : "MATCH ENDED";
+    title.textContent = survTime ? (String(survTime).indexOf("🔥") === 0 ? "STREAK ENDED" : "SURVIVAL ENDED") : winner ? "MATCH FINISHED" : "MATCH ENDED";
     const big = document.createElement("div");
     big.style.cssText = "font-size:30px;font-weight:700;";
     if (survTime) {
-      big.append(document.createTextNode("🏝 "));
+      big.append(document.createTextNode(String(survTime).indexOf("🔥") === 0 ? "🔥 " : "🏝 "));
       const nm = document.createElement("span"); nm.setAttribute("translate", "no"); nm.style.color = "gold"; nm.textContent = winner + " – " + survTime;
       big.append(nm);
     } else if (winner) {
@@ -6264,7 +6294,8 @@ async function startOnlineTV() {
   const stopInner = () => {
     setStall(false);
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-    onlineTvCurrentMatchId = null; curMeta = null;
+    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null;
+    { const u = document.getElementById("ui"); if (u && mode === "online_tv") u.innerHTML = tvUiDefault; }
     stopViewerCount();
     players = []; balls = [];
     const h = document.getElementById("onlineHUD"); if (h) h.style.display = "none";
@@ -6326,30 +6357,55 @@ async function startOnlineTV() {
       watchViewerCount("surv_" + survId.slice(5), true);
       lastPacketSeen = Date.now(); gotPacket = false; curMeta = null;
       const suid = survId.slice(5);
-      const sp = createPlayer(W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
-      players = [sp]; balls = [];
+      const isSk = survD.k === "streak";
+      const sp = createPlayer(isSk ? W() * 0.25 : W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
+      const spBot = isSk ? createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot") : null;
+      if (isSk) { sp.label = dn(survD.name); spBot.label = "Online Bot"; }
+      players = spBot ? [sp, spBot] : [sp]; balls = [];
+      const skUi = (d) => {
+        const u = document.getElementById("ui"); if (!u || mode !== "online_tv") return;
+        if (!document.getElementById("sk_w")) u.innerHTML = `🔥 ${tr("Streak")}: <b id="sk_w">0</b><br>${tr("Round")}: <span id="sk_r">1</span><br>${tr("Bot level")}: <span id="sk_l">1</span>`;
+        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+        set("sk_w", d.w || 0); set("sk_r", d.L || 1); set("sk_l", d.L || 1);
+      };
+      if (isSk) skUi(survD); else tvClock = { base: (survD.t || 0) / 60, at: Date.now() };
       const hud = document.getElementById("onlineHUD");
       const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
       setT("onlineNameMe", dn(survD.name)); setT("onlineNameOpp", ""); setT("onlineRankMe", "(" + survElo + ")"); setT("onlineRankOpp", "");
-      setT("onlineStatusHUD", "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60));
+      if (isSk) { setT("onlineStatusHUD", "📺 Live Streak · " + tr("Round") + " " + (survD.L || 1)); setT("onlineScoreHUD", "🔥 " + (survD.w || 0)); }
+      else { setT("onlineStatusHUD", "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60)); }
       if (hud) hud.style.display = "flex";
-      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE SURVIVAL (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
+      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE ${isSk ? "STREAK" : "SURVIVAL"} (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
       onlineTvInnerUnsubscribe = dbOn("survivalLive/" + suid, (d) => {
         if (survId !== onlineTvCurrentMatchId) return;
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
         if (d.done) {
           if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-          showWinner(dn(d.name), "", survFmt(Number(d.time) || (d.t || 0) / 60));
+          showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
           badMatches.set(survId, Date.now() + 15000);
-          specText.innerHTML = "Survival run finished. Searching for next game...";
+          specText.innerHTML = (isSk ? "Streak" : "Survival run") + " finished. Searching for next game...";
           holdUntil = Date.now() + 6000;
           clearTimeout(holdTimer);
           holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
           return;
         }
-        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true });
         lastPacketSeen = Date.now(); gotPacket = true;
+        if (isSk) {
+          feedNetPlayer(sp, { x: d.x, y: d.y, alive: d.ma !== false });
+          feedNetPlayer(spBot, { x: d.bx, y: d.by, alive: d.ba !== false });
+          setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streak · " + tr("Round") + " " + (d.L || 1));
+          skUi(d);
+          if (d.b) { try {
+            const arr = JSON.parse(d.b); applyBallCorrection(arr, 0.35);
+            for (let i = 0; i < arr.length && i < balls.length; i++) {
+              if (arr[i].ch !== undefined) { balls[i].chase = true; balls[i].born = Date.now() - arr[i].ch; } else { delete balls[i].chase; }
+            }
+          } catch(e) {} }
+          return;
+        }
+        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true });
         setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
+        tvClock = { base: (d.t || 0) / 60, at: Date.now() };
         if (d.b) { try { applyBallCorrection(JSON.parse(d.b), 0.35); } catch(e) {} }
       });
       onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
@@ -6423,7 +6479,11 @@ async function startOnlineTV() {
       if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); gotPacket = true; }
       if (data.p2State) { feed(p2, data.p2State); lastPacketSeen = Date.now(); gotPacket = true; }
       if (data.ballState) {
-        try { applyBallCorrection(JSON.parse(data.ballState), 0.35); lastPacketSeen = Date.now(); gotPacket = true; } catch(e) {}
+        try {
+          const bsArr = JSON.parse(data.ballState);
+          if (!tvClock) tvClock = { base: Math.max(0, bsArr.length - ONLINE_START_BALLS) * ONLINE_SPAWN_MS / 1000, at: Date.now() };
+          applyBallCorrection(bsArr, 0.35); lastPacketSeen = Date.now(); gotPacket = true;
+        } catch(e) {}
       }
     });
     onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
