@@ -2574,6 +2574,7 @@ const LEAGUE_PROMOTE_TOP       = 5;        // max. promoted players per group
 const LEAGUE_PROMOTE_TOP_BRONZE = 10;       // Bronze: top half moves up (higher leagues are still empty)
 const LEAGUE_RELEGATE_BOTTOM   = 5;        // max. relegated players per group
 const LEAGUE_MIN_GROUP_PROMOTE = 5;        // groups with fewer players promote nobody
+const LEAGUE_GRACE_MS          = 20000;    // so lange nach Wochenende wird noch nicht ausgewertet
 const LEAGUE_KEEP_WEEKS        = 4;        // own entries of older weeks get cleaned up
 const LEAGUE_MIN_WINS_PROMOTE  = 3;        // fewer than 3 weekly wins = no promotion
 
@@ -2665,6 +2666,7 @@ async function leagueResolvePrevious() {
   if (!fbReady || !onlineAccount || !myUid) return;
   const w = onlineAccount.leagueWeek, g = onlineAccount.leagueGroup;
   if (!w || !g || w === leagueWeekId()) return;
+  if (Date.now() < leagueWeekStart() + LEAGUE_GRACE_MS) return;      // kurze Karenz: Nachzuegler-Siege der alten Woche sollen noch ankommen
   const tier = onlineAccount.leagueTier || 0;
   let grp;
   try { grp = await dbGet(`weeklyLeague/${w}/${tier}/${g}`); }
@@ -2733,10 +2735,22 @@ async function leagueCleanupOld() {
   }
   leagueHistorySet(keep);
 }
+// Wochenwechsel waehrend man online ist: im Menue (oder Liga-Screen) wird die alte Woche automatisch ausgewertet und der Screen gezeigt.
+// Waehrend eines Matches / Survival / Streak passiert nichts, das kommt erst, wenn man wieder im Menue ist.
+setInterval(() => {
+  if (!fbReady || !onlineAccount || !myUid) return;
+  if (!onlineAccount.leagueWeek || onlineAccount.leagueWeek === leagueWeekId()) return;
+  const m = document.getElementById("menu"), l = document.getElementById("leagueScreen");
+  if (!((m && m.style.display === "flex") || (l && l.style.display === "flex"))) return;
+  leagueResolvePrevious().catch(() => {});
+}, 10000);
 function leagueEnsureJoined() {
   if (_leagueBusy) return _leagueBusy;
   _leagueBusy = (async () => {
-    try { await leagueResolvePrevious(); await leagueJoinCurrent(); leagueCleanupOld().catch(() => {}); }
+    try {
+      const wait = leagueWeekStart() + LEAGUE_GRACE_MS - Date.now();
+      if (wait > 0 && onlineAccount && onlineAccount.leagueWeek && onlineAccount.leagueWeek !== leagueWeekId()) await new Promise(r => setTimeout(r, wait + 300));
+      await leagueResolvePrevious(); await leagueJoinCurrent(); leagueCleanupOld().catch(() => {}); }
     finally { _leagueBusy = null; }
   })();
   return _leagueBusy;
@@ -2930,7 +2944,7 @@ function leagueCelebrate(r, force) {
 // Rangliste der vergangenen Woche (eigene Gruppe, bleibt ca. 4 Wochen in der Datenbank)
 async function leagueShowLastRanking(r) {
   r = r || (onlineAccount && onlineAccount.leagueLastResult);
-  if (!r || (!r.group && !r.test)) { leagueToast(tr("No ranking available"), "#ff8844"); return; }
+  if (!r || !r.group) { leagueToast(tr("No ranking available"), "#ff8844"); return; }
   const old = document.getElementById("lgRankOv"); if (old) old.remove();
   const L = leagueByTier(r.from);
   const ov = document.createElement("div");
@@ -2946,13 +2960,7 @@ async function leagueShowLastRanking(r) {
   document.body.appendChild(ov);
   const body = ov.querySelector(".lgBody");
   let list = [];
-  if (r.test) {
-    const names = ["Nova","Blitz","Echo","Pixel","Vortex","Zap","Orbit","Flux","Rogue","Comet","Delta","Frost","Glitch","Hawk","Ion","Jet","Kilo","Lynx","Mako","Neon"];
-    list = names.map((n, i) => ({ uid: "t" + i, name: n, wins: Math.max(0, 14 - i) }));
-    const idx = Math.max(0, Math.min(list.length - 1, (r.rank || 1) - 1));
-    list[idx] = { uid: myUid || "me", name: onlineAccount ? onlineAccount.name : "You", wins: r.wins || 0 };
-    list = leagueSortMembers(list);
-  } else {
+  {
     try {
       const grp = await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`);
       list = grp ? leagueSortMembers(Object.values(grp)) : [];
@@ -2966,39 +2974,13 @@ async function leagueShowLastRanking(r) {
     if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
     if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
     const me = (myUid && m.uid === myUid), medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}"${r.test ? "" : ` onclick="openOnlineProfile('${escapeHtml(m.uid)}')"`}>
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
       <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
       <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
       <span class="lg-wins">${m.wins || 0}</span></div>`;
   });
   body.innerHTML = html;
 }
-
-// TEST-Button (nur Admin, unten rechts im Hauptmenue): zeigt den Auswertungs-Screen mit Beispieldaten, wechselt bei jedem Klick Aufstieg -> Abstieg -> Geblieben
-let _lgTestIdx = 0;
-function leagueTestPreview() {
-  const samples = [
-    { outcome: "up",   rank: 3,  size: 20, wins: 9, from: 1, to: 2 },
-    { outcome: "down", rank: 18, size: 20, wins: 1, from: 2, to: 1 },
-    { outcome: "stay", rank: 9,  size: 20, wins: 4, from: 1, to: 1 }
-  ];
-  const r = Object.assign({ week: "TEST", test: true }, samples[_lgTestIdx++ % samples.length]);
-  const o = document.querySelector(".lg-celebrate"); if (o) o.remove();
-  leagueCelebrate(r, true);
-}
-setInterval(() => {
-  let b = document.getElementById("lgTestBtn");
-  const menu = document.getElementById("menu");
-  const show = typeof _modIsAdmin === "function" && _modIsAdmin() && menu && menu.style.display === "flex";
-  if (!show) { if (b) b.style.display = "none"; return; }
-  if (!b) {
-    b = document.createElement("button"); b.id = "lgTestBtn"; b.textContent = "🧪 TEST";
-    b.style.cssText = "position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:40;margin:0;padding:8px 16px;font-size:13px;";
-    b.onclick = leagueTestPreview;
-    document.body.appendChild(b);
-  }
-  b.style.display = "block";
-}, 1000);
 
 const DATA_VERSION = "2"; // bei jedem kuenftigen Reset hochzaehlen
 if (localStorage.getItem("dobDataVersion") !== DATA_VERSION) {
