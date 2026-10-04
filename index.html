@@ -2025,6 +2025,32 @@ function watchViewerCount(key, imViewer) {
   _viewUnsub = dbOn("tvViewers/" + _viewKey, (d) => { viewerBadge(d ? Object.keys(d).length : 0); });
 }
 
+// ═══ GAST-LIMIT: ohne Account darf jeder Modus 3x gespielt werden, danach kommt das Account-Popup ═══
+const GUEST_LIMIT = 3, GUEST_KEY = "dobGuestPlays";
+function myPlayName() { return onlineAccount ? onlineAccount.name : "Guest"; }
+function guestPlaysRead() { try { return JSON.parse(localStorage.getItem(GUEST_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function guestGate(key) {
+  if (onlineAccount) return true;
+  const o = guestPlaysRead(), n = Number(o[key]) || 0;
+  if (n >= GUEST_LIMIT) { showGuestLimit(); return false; }
+  o[key] = n + 1;
+  try { localStorage.setItem(GUEST_KEY, JSON.stringify(o)); } catch (e) {}
+  return true;
+}
+function showGuestLimit() {
+  if (document.getElementById("guestLimit")) return;
+  const ov = document.createElement("div");
+  ov.id = "guestLimit";
+  ov.style.cssText = "position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);";
+  ov.innerHTML = '<div style="max-width:380px;background:#14141e;border:1px solid rgba(255,215,0,0.5);border-radius:16px;padding:26px 30px;text-align:center;color:#f0f0f5;font-family:var(--font-display);box-shadow:0 14px 50px rgba(0,0,0,.65);">' +
+    '<div style="font-size:22px;font-weight:700;margin-bottom:10px;color:#ffd700;">Create an account</div>' +
+    '<div style="font-size:15px;line-height:1.5;margin-bottom:18px;opacity:.9;">You have played this mode ' + GUEST_LIMIT + ' times as a guest. Create a free account to keep playing.</div>' +
+    '<button id="glCreate" style="margin:4px 6px;">Create account</button><button id="glBack" style="margin:4px 6px;">Back</button></div>';
+  document.body.appendChild(ov);
+  ov.querySelector("#glCreate").onclick = () => { ov.remove(); showCreateAccount(); };
+  ov.querySelector("#glBack").onclick = () => ov.remove();
+}
+
 // ═══ SURVIVAL (online, solo) ═══
 // Gleiche Baelle/Spawnrate/Steuerung wie im 1v1, aber ohne Gegner. Zeit = Ticks/60.
 // Replay: Spielerposition alle 3 Ticks + Ball-Spawns (Tick, Position, Geschwindigkeit). Die Baelle bewegen
@@ -2035,7 +2061,7 @@ function survFmt(t) {
   return m ? m + ":" + (s < 10 ? "0" : "") + s.toFixed(1) : s.toFixed(1) + "s";
 }
 function startSurvival() {
-  if (!onlineAccount) { showCreateAccount(); return; }
+  if (!guestGate("survival")) return;
   try { cleanupOnline(); } catch (e) {}
   clearAllTimers();
   ["survivalResult", "survReplay"].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
@@ -2049,7 +2075,7 @@ function startSurvival() {
   onlineBallSpawnTimer = Date.now();
   const md = document.getElementById("mode"); if (md) md.textContent = "Survival";
   document.getElementById("onlineHUD").style.display = "none";
-  const me = createPlayer(W() / 2, H() / 2, myBallColor, onlineAccount.name);
+  const me = createPlayer(W() / 2, H() / 2, myBallColor, myPlayName());
   players.push(me);
   survTick = 0; survivalActive = true;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
@@ -2095,7 +2121,7 @@ async function endSurvival(camped) {
   setTimeout(() => renderSurvivalResult(t, camped), 900);
   let best = 0, isRecord = false, saved = true;
   try {
-    if (fbReady && myUid) {
+    if (fbReady && myUid && onlineAccount) {
       const old = await dbGet("survival/" + myUid);
       best = (old && Number(old.time)) || 0;
       if (t > best && t >= 1) {
@@ -2115,7 +2141,7 @@ function renderSurvivalResult(t, camped) {
     document.body.appendChild(ov);
   }
   const i = _survInfo;
-  const line = !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
+  const line = !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
@@ -2364,8 +2390,8 @@ function campTick() {
   const now = Date.now(), dt = Math.min(250, now - campState.last);
   campState.last = now;
   if (!(onlineVsBot || onlineMatchStatus === "playing")) return;      // not before the real start
-  const me  = players.find(p => p.name === onlineAccount.name);
-  const opp = players.find(p => p.name !== onlineAccount.name);
+  const me  = players.find(p => p.name === myPlayName());
+  const opp = players.find(p => p.name !== myPlayName());
   const upd = (st, p) => { if (!p || p.alive === false) return; st.m = inDeepCorner(p) ? st.m + dt : Math.max(0, st.m - dt * CAMP_DECAY); };
   upd(campState.me, me);
   if (!onlineVsBot) upd(campState.opp, opp);
@@ -2924,7 +2950,7 @@ let myTrail = [];
 function isLocalPlayer(p) {
   if (!p) return false;
   if (p.name === "Player" || p.name === "YOU" || p.name === "Player 1") return true;
-  if (mode === "online" && onlineAccount && p.name === onlineAccount.name) return true;
+  if (mode === "online" && p.name === myPlayName()) return true;
   return false;
 }
 
@@ -4244,7 +4270,7 @@ function pushMyPosition() {
   const now = Date.now();
   if (now - lastPosPush < 75) return;
 
-  const me = players.find(p => p.name === onlineAccount.name);
+  const me = players.find(p => p.name === myPlayName());
   if (!me) return;
 
   const roundedX = Math.round(me.x);
@@ -4266,7 +4292,7 @@ function pushMyPosition() {
   RPC.setMatchPath(onlineMatchId, stateKey, stateData).catch(() => {});
 
   if (onlineVsBot) {
-    const bot = players.find(p => p.name !== onlineAccount.name);
+    const bot = players.find(p => p.name !== myPlayName());
     if (bot) {
       const botData = { x: Math.round(bot.x), y: Math.round(bot.y), alive: bot.alive };
       RPC.setMatchPath(onlineMatchId, "p2State", botData).catch(() => {});
@@ -4950,6 +4976,7 @@ function streakStartRound() {
   streakSetOverlay(`<div class="sk-title">${tr("ROUND")} ${L}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}${nc ? " · 🟠 " + tr("chasing balls") : ""}</div>`);
 }
 function startStreak() {
+  if (!guestGate("streak")) return;
   clearAllTimers();
   waitingQueue = []; matches = []; playerMatchMap.clear();
   spectateModeActive = false; spectateMatchId = null;
@@ -5079,6 +5106,7 @@ function startMirrorMode() {
 //  START GAME
 // ═══════════════════════════════════════════════
 function startGame(selectedMode) {
+  if (!guestGate(selectedMode)) return;
   clearAllTimers();
   waitingQueue = []; matches = []; playerMatchMap.clear();
   spectateModeActive = false; spectateMatchId = null;
@@ -5369,7 +5397,7 @@ function update() {
     if (onlineIsHost) pushBallState();
 
     if (onlineVsBot) {
-      const bot = players.find(p => p.name !== onlineAccount.name);
+      const bot = players.find(p => p.name !== myPlayName());
       if (bot && bot.alive) {
         updateAI(bot, balls);
         checkBotCollision(bot);
@@ -5392,7 +5420,7 @@ function update() {
       // This means YOUR experience stays smooth regardless of the
       // OPPONENT's connection quality, which is exactly the lag you
       // described (good ping for you, choppy because of them).
-      const opp = players.find(p => p.name !== onlineAccount.name);
+      const opp = players.find(p => p.name !== myPlayName());
       if (opp && opp.tx !== undefined && opp.ty !== undefined) {
         const nowMs = Date.now();
         const sinceLastPacket = nowMs - (opp.lastPacketAt || nowMs);
@@ -5434,7 +5462,7 @@ function update() {
       }
     }
 
-    const me = players.find(p => p.name === onlineAccount.name);
+    const me = players.find(p => p.name === myPlayName());
     if (me) {
       me.x = Math.max(me.radius, Math.min(W()-me.radius, me.x));
       me.y = Math.max(me.radius, Math.min(H()-me.radius, me.y));
@@ -5531,7 +5559,7 @@ function checkBotCollision(bot) {
     const dy = bot.y - b.y;
     if (Math.sqrt(dx*dx + dy*dy) < bot.radius + b.radius) {
       bot.alive = false;
-      const me = players.find(p => p.name === onlineAccount.name);
+      const me = players.find(p => p.name === myPlayName());
 
       if (me && me.alive) {
         const oppElo = onlineOpponent?.elo || 1500;
