@@ -961,9 +961,10 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <div id="onlineStatus">Searching for opponent…</div>
 
      <div style="font-size:13px;opacity:0.8;margin-top:6px;">
-  Matchmaking may take up to 10 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.
+  Matchmaking may take up to 30 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.
 </div>
       <div id="onlineSearchAnim" style="font-size:40px;margin:10px 0;">⏳</div>
+      <button id="playBotBtn" onclick="playWithBotNow()">🤖 Play with Online Bot</button>
       <button onclick="cancelOnline()">Cancel</button>
     </div>
 
@@ -3744,7 +3745,13 @@ async function startSearchingOnline() {
 
   onlineBotMatchTimeout = setTimeout(() => {
     if (!onlineMatchId) startBotMatch();
-  }, 10000);
+  }, 30000);
+}
+// Knopf waehrend der Suche: sofort gegen den Online Bot spielen
+function playWithBotNow() {
+  if (onlineMatchId) return;
+  const b = document.getElementById("playBotBtn"); if (b) b.disabled = true;
+  startBotMatch().finally(() => { if (b) b.disabled = false; });
 }
 
 // CHANGED: matchmaking now operates on uid-keyed queue entries.
@@ -6753,8 +6760,8 @@ const DICT = { de: {
   "Logging in…":"Melde an…","Incorrect username or password.":"Benutzername oder Passwort falsch.","You need to create an account first!":"Du musst zuerst einen Account erstellen!",
   "Profile not found.":"Profil nicht gefunden.","Error while loading profile.":"Fehler beim Laden des Profils.","Error while loading":"Fehler beim Laden","No players":"Keine Spieler","Firebase not connected":"Nicht verbunden",
   "🌐 Online 1v1":"🌐 Online 1v1","Searching for opponent…":"Suche Gegner…",
-  "Matchmaking may take up to 10 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.":"Die Suche kann bis zu 10 Sekunden dauern. Ist kein Gegner verfügbar, wirst du automatisch mit unserem Online-Bot gepaart.",
-  "Cancel":"Abbrechen","Yes":"Ja","Return to main menu?":"Zurück zum Hauptmenü?","Firebase not connected. Cannot play online.":"Nicht verbunden. Online spielen nicht möglich.",
+  "Matchmaking may take up to 30 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.":"Die Suche kann bis zu 30 Sekunden dauern. Ist kein Gegner verfügbar, wirst du automatisch mit unserem Online-Bot gepaart.",
+  "Cancel":"Abbrechen","🤖 Play with Online Bot":"🤖 Mit Online-Bot spielen","Yes":"Ja","Return to main menu?":"Zurück zum Hauptmenü?","Firebase not connected. Cannot play online.":"Nicht verbunden. Online spielen nicht möglich.",
   "Firebase is not connected yet!":"Noch nicht verbunden!","Rank: Loading...":"Rang: Lädt…","Waiting for opponent…":"Warte auf Gegner…","⏳ Waiting for opponent…":"⏳ Warte auf Gegner…",
   "🏆 Winner!":"🏆 Gewinner!","🏆 Winner:":"🏆 Gewinner:","Winner:":"Gewinner:","💬 Chat with opponent":"💬 Chat mit Gegner","(not saved)":"(wird nicht gespeichert)",
   "🔄 Rematch":"🔄 Revanche","🔍 New Opponent":"🔍 Neuer Gegner","🔄 Accept Rematch":"🔄 Revanche annehmen","Opponent left":"Gegner hat verlassen","Practice match":"Übungsmatch",
