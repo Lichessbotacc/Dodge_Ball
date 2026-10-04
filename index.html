@@ -835,6 +835,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
           <button onclick="showMenuPage('menuOffline')" style="display:none" id="btnOfflineMenu">🎮 Offline</button> <!-- Offline vorübergehend ausgeblendet: style="display:none" entfernen zum Einblenden -->
           <button onclick="openSettings()">⚙️ Settings</button>
+          <button onclick="inviteFriends()">🔗 Invite friends</button>
         </div>
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
@@ -3279,6 +3280,19 @@ function confirmHome() {
   document.body.appendChild(ov);
   document.getElementById("homeYes").onclick = () => { ov.remove(); exitToMenu(); };
   document.getElementById("homeNo").onclick  = () => ov.remove();
+}
+
+// Einladungs-Link: teilt die Spiel-URL (Handy: Teilen-Menue, sonst in die Zwischenablage kopieren)
+async function inviteFriends() {
+  const url = (location.protocol === "file:") ? location.href : location.origin + location.pathname;
+  const text = "Play DarkOnBalls with me!";
+  try {
+    if (navigator.share) { await navigator.share({ title: "DarkOnBalls", text, url }); return; }
+  } catch (e) { if (e && e.name === "AbortError") return; }
+  try {
+    await navigator.clipboard.writeText(url);
+    leagueToast("🔗 " + tr("Invite link copied!"), "#00ff88");
+  } catch (e) { prompt(tr("Copy this link and send it to your friends:"), url); }
 }
 
 function exitToMenu() {
@@ -6942,7 +6956,7 @@ Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen 
 
 Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
 
-Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein."});
+Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein.","🔗 Invite friends":"🔗 Freunde einladen","Invite link copied!":"Einladungslink kopiert!","Copy this link and send it to your friends:":"Kopiere diesen Link und schick ihn an deine Freunde:"});
 
 Object.assign(DICT.de, {"No corner camping!": "Kein Ecken-Campen!", "Move out in": "Verlasse die Ecke in", "Corner camping is not allowed – you lost the match.": "Ecken-Campen ist nicht erlaubt – du hast das Match verloren.", "Opponent was disqualified for corner camping – you win!": "Gegner wurde wegen Ecken-Campens disqualifiziert – du gewinnst!"});
 
