@@ -2557,7 +2557,7 @@ function campGuardTick() {
 
 // ═══════════════════════════════════════════════
 //  WEEKLY LEAGUE (Duolingo style) – independent of ELO
-//  • Each week (Mon 00:00 UTC to Sun 24:00 UTC) active players of a league are placed in groups
+//  • Each week (Mon 00:00 to Sun 24:00 German time) active players of a league are placed in groups
 //    of max. 20 players. Only wins of the current week count.
 //  • Top players move up, bottom players move down, the rest stay. ELO stays a pure matchmaking/ranking system.
 //  • No server job: every client evaluates its OWN previous week from the (public) group data
@@ -2584,17 +2584,38 @@ function leagueBadgeHTML(t) {
   return `<span style="color:${l.color};font-weight:700;white-space:nowrap;">${l.icon} <span>${l.name}</span></span>`;
 }
 // Week = Monday 00:00 UTC; the id is the date of that Monday (e.g. "2026-09-28")
-function leagueWeekStart(ts) {
-  const d = new Date(ts || Date.now());
-  const day = (d.getUTCDay() + 6) % 7;                       // Mon=0 … Sun=6
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day);
+// Woche = Montag 00:00 bis Sonntag 24:00 DEUTSCHE Zeit (Europe/Berlin, inkl. Sommer-/Winterzeit)
+const LEAGUE_TZ = "Europe/Berlin";
+const _lgFmt = new Intl.DateTimeFormat("en-GB", { timeZone: LEAGUE_TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function _lgParts(ms) {
+  const o = {};
+  for (const p of _lgFmt.formatToParts(new Date(ms))) if (p.type !== "literal") o[p.type] = Number(p.value);
+  return o;
 }
+function _lgOffsetMs(ms) {                                   // Berlin minus UTC zum Zeitpunkt ms
+  const p = _lgParts(ms);
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000;
+}
+function _lgMidnightBerlin(y, m, d) {                        // UTC-ms von 00:00 Berliner Zeit am Datum y-m-d
+  let t = Date.UTC(y, m - 1, d);
+  t = Date.UTC(y, m - 1, d) - _lgOffsetMs(t);
+  t = Date.UTC(y, m - 1, d) - _lgOffsetMs(t);
+  return t;
+}
+function leagueWeekStart(ts) {
+  const p = _lgParts(ts || Date.now());
+  const loc = new Date(Date.UTC(p.year, p.month - 1, p.day));
+  const day = (loc.getUTCDay() + 6) % 7;                     // Mo=0 … So=6
+  const mon = new Date(Date.UTC(p.year, p.month - 1, p.day - day));
+  return _lgMidnightBerlin(mon.getUTCFullYear(), mon.getUTCMonth() + 1, mon.getUTCDate());
+}
+function leagueWeekEnd(ts) { return leagueWeekStart(leagueWeekStart(ts) + 7 * 86400000 + 12 * 3600000); }
 function leagueWeekId(ts) {
-  const d = new Date(leagueWeekStart(ts));
-  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  const p = _lgParts(leagueWeekStart(ts) + 12 * 3600000);    // Mittag des Montags -> Datum sicher der Montag
+  return p.year + "-" + String(p.month).padStart(2, "0") + "-" + String(p.day).padStart(2, "0");
 }
 function leagueCountdownText() {
-  const ms = Math.max(0, leagueWeekStart(Date.now()) + 7 * 86400000 - Date.now());
+  const ms = Math.max(0, leagueWeekEnd(Date.now()) - Date.now());
   const d = Math.floor(ms / 86400000), h = Math.floor((ms % 86400000) / 3600000), m = Math.floor((ms % 3600000) / 60000);
   return tr("Week ends in") + " " + (d ? d + "d " : "") + h + "h " + m + "m";
 }
@@ -2660,16 +2681,13 @@ async function leagueResolvePrevious() {
   if (outcome === "down") newTier = Math.max(0, tier - 1);
   onlineAccount.leagueTier = newTier;
   onlineAccount.leagueBest = Math.max(onlineAccount.leagueBest || 0, newTier);
-  onlineAccount.leagueLastResult = { week: w, rank, size, wins, outcome, from: tier, to: newTier };
+  onlineAccount.leagueLastResult = { week: w, rank, size, wins, outcome, from: tier, to: newTier, group: g };
   onlineAccount.leagueWeek = null;
   onlineAccount.leagueGroup = null;
   saveAccountLocal();
   updateAccountBtn();
+  try { leagueCelebrate(onlineAccount.leagueLastResult); } catch (e) { console.warn(e); }
   try { await pushAccountToFirebase(); } catch (e) { console.warn(e); }
-  if (outcome !== "stay") {
-    const l = leagueByTier(newTier);
-    leagueToast((outcome === "up" ? "⬆ " + tr("Promoted to") : "⬇ " + tr("Relegated to")) + " " + l.icon + " " + tr(l.name), l.color);
-  }
 }
 
 // Join a group of the current week (happens with the first counted win)
@@ -2761,7 +2779,7 @@ async function renderLeague() {
   if (!box || !onlineAccount) return;
   const tier = onlineAccount.leagueTier || 0, week = leagueWeekId();
   const vt = leagueViewTier == null ? tier : leagueViewTier, L = leagueByTier(vt);     // vt = angeschaute Liga
-  const ws = leagueWeekStart(Date.now()), pct = Math.min(100, Math.max(0, (Date.now() - ws) / (7 * 86400000) * 100));
+  const ws = leagueWeekStart(Date.now()), pct = Math.min(100, Math.max(0, (Date.now() - ws) / (leagueWeekEnd(Date.now()) - ws) * 100));
   const grpId = onlineAccount.leagueWeek === week ? onlineAccount.leagueGroup : null;
   const groups = (await dbGet(`weeklyLeague/${week}/${vt}`)) || {};
   const gids = Object.keys(groups).filter(id => groups[id] && Object.keys(groups[id]).length)
@@ -2863,11 +2881,13 @@ async function renderLeague() {
     else html += `<div class="lg-card"><h4>👁 ${tr("Viewing only")}</h4>${tr("No groups in this league yet")}</div><button onclick="leagueView(null)" style="margin:0;">← ${tr("My league")}</button>`;
   }
 
+  if (r && r.group) html += `<button onclick="leagueShowLastRanking()" style="margin:0;">📜 ${tr("Last week's ranking")}</button>`;
+
   // 6) How it works
   html += `<details class="lg-how" ${grpId ? "" : "open"}><summary>❓ ${tr("How does the league work?")}</summary><div class="lg-steps">
     <div class="lg-s"><b>1</b><div><strong>${tr("Win matches")}</strong><br>${tr("Every online win this week = 1 point. Wins against the Online Bot count too.")}</div></div>
     <div class="lg-s"><b>2</b><div><strong>${tr("Your group")}</strong><br>${tr("You compete against up to")} ${LEAGUE_GROUP_SIZE} ${tr("players of your league. Ties are won by whoever got there first.")}</div></div>
-    <div class="lg-s"><b>3</b><div><strong>${tr("Sunday = decision")}</strong><br>${tr("The week ends Sunday 24:00 UTC. A new week starts Monday with fresh groups and 0 wins.")}</div></div>
+    <div class="lg-s"><b>3</b><div><strong>${tr("Sunday = decision")}</strong><br>${tr("The week ends Sunday 24:00 (German time). A new week starts Monday with fresh groups and 0 wins.")}</div></div>
     <div class="lg-s"><b>4</b><div><strong>${tr("Up or down")}</strong><br>${tr("Top players move up (at least")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("wins needed), the bottom ones drop a league, everyone else stays.")}</div></div>
     <div class="lg-s"><b>🏆</b><div><strong>${LEAGUES.map(l => l.icon).join(" → ")}</strong><br>${tr("Reach Platinum – your ELO is not affected by the league.")}</div></div>
   </div></details>
@@ -2876,29 +2896,109 @@ async function renderLeague() {
   leagueCelebrate(r);
 }
 
-// One-time celebration after a promotion / relegation
-function leagueCelebrate(r) {
-  if (!r || r.outcome === "stay") return;
-  let seen = null; try { seen = localStorage.getItem("dobLeagueSeen"); } catch (e) {}
-  if (seen === r.week) return;
-  try { localStorage.setItem("dobLeagueSeen", r.week); } catch (e) {}
-  const l = leagueByTier(r.to), up = r.outcome === "up", cols = ["#00ff88", "#00c8ff", "#ffd700", "#ff4444", l.color];
+// Einmaliger Screen nach der Wochenauswertung (Aufstieg / Abstieg / geblieben). force = Testmodus
+function leagueCelebrate(r, force) {
+  if (!r || (!force && (!r.rank || document.querySelector(".lg-celebrate")))) return;
+  if (!force) {
+    let seen = null; try { seen = localStorage.getItem("dobLeagueSeen"); } catch (e) {}
+    if (seen === r.week) return;
+    try { localStorage.setItem("dobLeagueSeen", r.week); } catch (e) {}
+  }
+  const l = leagueByTier(r.to), up = r.outcome === "up", down = r.outcome === "down";
+  const cols = ["#00ff88", "#00c8ff", "#ffd700", "#ff4444", l.color];
   let conf = "";
-  if (up) for (let i = 0; i < 44; i++) conf += `<i style="left:${Math.random() * 100}%;background:${cols[i % 5]};animation-delay:${(Math.random() * 0.9).toFixed(2)}s;animation-duration:${(2 + Math.random() * 1.6).toFixed(2)}s;--dx:${Math.round(Math.random() * 160 - 80)}px"></i>`;
+  if (up) for (let i = 0; i < 60; i++) conf += `<i style="left:${Math.random() * 100}%;background:${cols[i % 5]};animation-delay:${(Math.random() * 0.9).toFixed(2)}s;animation-duration:${(2 + Math.random() * 1.6).toFixed(2)}s;--dx:${Math.round(Math.random() * 160 - 80)}px"></i>`;
+  const title = up ? tr("Congratulations!") : down ? tr("Relegated") : tr("Well played!");
+  const line  = up ? tr("You were promoted to") : down ? tr("You were relegated to") : tr("You stay in");
+  const msg   = up ? tr("Welcome to the next league – new week, new goals!") : down ? tr("New week, new chance – win your way back up!") : tr("New week – push for the top!");
   const ov = document.createElement("div");
-  ov.className = "lg-celebrate " + (up ? "up" : "down");
+  ov.className = "lg-celebrate " + (down ? "down" : "up");
   ov.style.setProperty("--lc", l.color);
-  ov.innerHTML = conf + `<div class="lg-cel-box"><div class="lg-cel-icon">${up ? l.icon : "📉"}</div>
-    <div class="lg-cel-title">${up ? tr("Promoted!") : tr("Relegated")}</div>
+  ov.innerHTML = conf + `<div class="lg-cel-box"><div class="lg-cel-icon">${down ? "📉" : l.icon}</div>
+    <div class="lg-cel-title">${title}</div>
+    <div class="lg-cel-meta" style="margin-top:8px;">${line}</div>
     <div class="lg-cel-sub">${l.icon} ${escapeHtml(tr(l.name))}</div>
     <div class="lg-cel-meta">${tr("Last week")}: #${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")}</div>
-    <div class="lg-cel-meta">${up ? tr("Welcome to the next league – new week, new goals!") : tr("New week, new chance – win your way back up!")}</div>
-    <button>OK</button></div>`;
+    <div class="lg-cel-meta">${msg}</div>
+    <div><button class="lgRk">📜 ${tr("Last week's ranking")}</button><button class="lgOk">OK</button></div></div>`;
   const close = () => { ov.classList.add("out"); setTimeout(() => ov.remove(), 300); };
-  ov.addEventListener("click", close);
-  setTimeout(close, 9000);
+  ov.querySelector(".lgOk").addEventListener("click", e => { e.stopPropagation(); close(); });
+  ov.querySelector(".lgRk").addEventListener("click", e => { e.stopPropagation(); close(); leagueShowLastRanking(r); });
   document.body.appendChild(ov);
 }
+
+// Rangliste der vergangenen Woche (eigene Gruppe, bleibt ca. 4 Wochen in der Datenbank)
+async function leagueShowLastRanking(r) {
+  r = r || (onlineAccount && onlineAccount.leagueLastResult);
+  if (!r || (!r.group && !r.test)) { leagueToast(tr("No ranking available"), "#ff8844"); return; }
+  const old = document.getElementById("lgRankOv"); if (old) old.remove();
+  const L = leagueByTier(r.from);
+  const ov = document.createElement("div");
+  ov.id = "lgRankOv";
+  ov.style.cssText = "position:fixed;inset:0;z-index:210;display:flex;align-items:center;justify-content:center;background:rgba(5,5,10,.85);backdrop-filter:blur(6px);padding:14px;box-sizing:border-box;";
+  ov.style.setProperty("--lc", L.color);
+  ov.innerHTML = `<div style="width:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;gap:10px;background:#0d0f16;border:1px solid ${L.color};border-radius:16px;padding:16px;color:#eaf2fb;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;font-family:var(--font-display);">📜 ${tr("Last week's ranking")}</b><button class="lgX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>
+    <div style="font-size:13px;color:var(--text-dim);">${L.icon} ${escapeHtml(tr(L.name))} · ${tr("Week of")} ${escapeHtml(r.week)}</div>
+    <div class="lgBody lg-table" style="max-height:60vh;">${tr("Loading league…")}</div></div>`;
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector(".lgX").onclick = () => ov.remove();
+  document.body.appendChild(ov);
+  const body = ov.querySelector(".lgBody");
+  let list = [];
+  if (r.test) {
+    const names = ["Nova","Blitz","Echo","Pixel","Vortex","Zap","Orbit","Flux","Rogue","Comet","Delta","Frost","Glitch","Hawk","Ion","Jet","Kilo","Lynx","Mako","Neon"];
+    list = names.map((n, i) => ({ uid: "t" + i, name: n, wins: Math.max(0, 14 - i) }));
+    const idx = Math.max(0, Math.min(list.length - 1, (r.rank || 1) - 1));
+    list[idx] = { uid: myUid || "me", name: onlineAccount ? onlineAccount.name : "You", wins: r.wins || 0 };
+    list = leagueSortMembers(list);
+  } else {
+    try {
+      const grp = await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`);
+      list = grp ? leagueSortMembers(Object.values(grp)) : [];
+    } catch (e) { body.textContent = tr("Error while loading"); return; }
+  }
+  if (!list.length) { body.textContent = tr("No ranking available"); return; }
+  const n = list.length, z = leagueZones(n, r.from);
+  let html = "";
+  if (z.up) html += `<div class="lg-zone up">⬆ ${tr("Promotion zone")} · ${tr("Top")} ${z.up} · ${tr("min.")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("Wins")}</div>`;
+  list.forEach((m, i) => {
+    if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
+    if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
+    const me = (myUid && m.uid === myUid), medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}"${r.test ? "" : ` onclick="openOnlineProfile('${escapeHtml(m.uid)}')"`}>
+      <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
+      <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
+      <span class="lg-wins">${m.wins || 0}</span></div>`;
+  });
+  body.innerHTML = html;
+}
+
+// TEST-Button (nur Admin, unten rechts im Hauptmenue): zeigt den Auswertungs-Screen mit Beispieldaten, wechselt bei jedem Klick Aufstieg -> Abstieg -> Geblieben
+let _lgTestIdx = 0;
+function leagueTestPreview() {
+  const samples = [
+    { outcome: "up",   rank: 3,  size: 20, wins: 9, from: 1, to: 2 },
+    { outcome: "down", rank: 18, size: 20, wins: 1, from: 2, to: 1 },
+    { outcome: "stay", rank: 9,  size: 20, wins: 4, from: 1, to: 1 }
+  ];
+  const r = Object.assign({ week: "TEST", test: true }, samples[_lgTestIdx++ % samples.length]);
+  const o = document.querySelector(".lg-celebrate"); if (o) o.remove();
+  leagueCelebrate(r, true);
+}
+setInterval(() => {
+  let b = document.getElementById("lgTestBtn");
+  const menu = document.getElementById("menu");
+  const show = typeof _modIsAdmin === "function" && _modIsAdmin() && menu && menu.style.display === "flex";
+  if (!show) { if (b) b.style.display = "none"; return; }
+  if (!b) {
+    b = document.createElement("button"); b.id = "lgTestBtn"; b.textContent = "🧪 TEST";
+    b.style.cssText = "position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:40;margin:0;padding:8px 16px;font-size:13px;";
+    b.onclick = leagueTestPreview;
+    document.body.appendChild(b);
+  }
+  b.style.display = "block";
+}, 1000);
 
 const DATA_VERSION = "2"; // bei jedem kuenftigen Reset hochzaehlen
 if (localStorage.getItem("dobDataVersion") !== DATA_VERSION) {
@@ -6950,13 +7050,13 @@ const RX = { de: [
 ]};
 
 Object.assign(DICT.de, {"Viewing only": "Nur ansehen", "Group": "Gruppe", "My league": "Meine Liga", "No groups in this league yet": "In dieser Liga gibt es diese Woche noch keine Gruppen"});
-Object.assign(DICT.de, {"Group too small": "Gruppe zu klein", "Groups under": "Gruppen mit weniger als", "players can't promote anyone this week.": "Spielern lassen diese Woche niemanden aufsteigen.", "Promotion eligibility": "Aufstiegsberechtigung", "Promoted!": "Aufgestiegen!", "Relegated": "Abgestiegen", "Welcome to the next league – new week, new goals!": "Willkommen in der nächsten Liga – neue Woche, neue Ziele!", "New week, new chance – win your way back up!": "Neue Woche, neue Chance – kämpf dich wieder hoch!","Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 UTC. A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 UTC. Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
+Object.assign(DICT.de, {"Group too small": "Gruppe zu klein", "Groups under": "Gruppen mit weniger als", "players can't promote anyone this week.": "Spielern lassen diese Woche niemanden aufsteigen.", "Promotion eligibility": "Aufstiegsberechtigung", "Promoted!": "Aufgestiegen!", "Relegated": "Abgestiegen", "Welcome to the next league – new week, new goals!": "Willkommen in der nächsten Liga – neue Woche, neue Ziele!", "New week, new chance – win your way back up!": "Neue Woche, neue Chance – kämpf dich wieder hoch!","Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 (German time). A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 Uhr (deutsche Zeit). Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
 
 Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen – Strafe angewendet"});
 
 Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
 
-Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein.","🔗 Invite friends":"🔗 Freunde einladen","Invite link copied!":"Einladungslink kopiert!","Copy this link and send it to your friends:":"Kopiere diesen Link und schick ihn an deine Freunde:"});
+Object.assign(DICT.de, {"Enter your password.":"Gib dein Passwort ein.","🔗 Invite friends":"🔗 Freunde einladen","Congratulations!":"Herzlichen Glückwunsch!","You were promoted to":"Du bist aufgestiegen in","You were relegated to":"Du bist abgestiegen in","You stay in":"Du bleibst in","Well played!":"Gut gespielt!","New week – push for the top!":"Neue Woche – greif nach der Spitze!","Last week's ranking":"Rangliste der letzten Woche","Week of":"Woche vom","No ranking available":"Keine Rangliste verfügbar","Invite link copied!":"Einladungslink kopiert!","Copy this link and send it to your friends:":"Kopiere diesen Link und schick ihn an deine Freunde:"});
 
 Object.assign(DICT.de, {"No corner camping!": "Kein Ecken-Campen!", "Move out in": "Verlasse die Ecke in", "Corner camping is not allowed – you lost the match.": "Ecken-Campen ist nicht erlaubt – du hast das Match verloren.", "Opponent was disqualified for corner camping – you win!": "Gegner wurde wegen Ecken-Campens disqualifiziert – du gewinnst!"});
 
