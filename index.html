@@ -1635,6 +1635,9 @@ function renderPresence(playersData) {
       const isMe = myUid && p.uid === myUid;
       const _busy = statusInMatch(p.status);
       const _pend = challengeOut.has(p.uid), _other = challengeOut.size > 0 && !_pend;
+      const _tvBtn = (!isMe && fbReady && _busy)
+        ? `<button class="ch-btn" onclick="event.stopPropagation(); watchPlayerTV('${escapeHtml(p.uid)}')" title="Watch live">📺</button>`
+        : "";
       const _chBtn = (!isMe && onlineAccount && fbReady)
         ? (_pend
             ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge('${escapeHtml(p.uid)}')" title="Cancel challenge">⏳</button>`
@@ -1645,7 +1648,7 @@ function renderPresence(playersData) {
              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
-          <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_chBtn}</span>
+          <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
       `;
     });
@@ -2166,10 +2169,23 @@ function survivalTick() {
   survPushLive(false);
   if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
 }
+let _runCountChain = Promise.resolve();
 function countModeRun(field) {
   if (!onlineAccount) return;
   onlineAccount[field] = (onlineAccount[field] || 0) + 1;
-  try { saveAccountLocal(); pushAccountToFirebase().catch(() => {}); } catch (e) {}
+  try { saveAccountLocal(); } catch (e) {}
+  // Jeder Start (auch Retry / Try again) zaehlt. Seriell + atomar: nur das eine Feld wird geschrieben,
+  // Basis ist der hoehere Wert aus Server und lokal -> schnelle Retries ueberschreiben sich nicht.
+  _runCountChain = _runCountChain.then(async () => {
+    if (!fbReady || !myUid || !onlineAccount) return;
+    try {
+      const cur = Number(await dbGet("players/" + myUid + "/" + field)) || 0;
+      const v = Math.max(cur + 1, onlineAccount[field] || 0);
+      onlineAccount[field] = v;
+      saveAccountLocal();
+      await RPC.updateOwnPlayer({ [field]: v });
+    } catch (e) { console.warn("run count sync failed", e); }
+  });
 }
 async function endSurvival(camped) {
   if (!survivalActive) return;
@@ -6282,7 +6298,13 @@ function moveSingle(x, y) {
 //  CHANGED: scans onlineMatches (uid-keyed participants now) via the
 //  guarded RPC; read-only, no write capability needed here at all.
 // ═══════════════════════════════════════════════
-async function startOnlineTV() {
+function watchPlayerTV(uid) {
+  if (!uid || !fbReady) return;
+  if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  startOnlineTV(uid);
+}
+async function startOnlineTV(targetUid) {
+  const tvTarget = (typeof targetUid === "string" && targetUid) ? targetUid : null;
   cleanupOnline();
   clearAllTimers();
 
@@ -6428,6 +6450,7 @@ async function startOnlineTV() {
     let bestId = null, bestElo = -1, best = null;
     for (const [id, m] of Object.entries(matchesData)) {
       if (m.status !== "playing") { seenPlaying.delete(id); continue; }
+      if (tvTarget && m.p1uid !== tvTarget && m.p2uid !== tvTarget) continue;
       // Nie gestartete Matches (gepaart, aber nie losgegangen): nicht anzeigen, nach kurzer Zeit löschen
       if (!hasStarted(m)) {
         if (!seenPlaying.has(id)) seenPlaying.set(id, Date.now());
@@ -6460,6 +6483,7 @@ async function startOnlineTV() {
     let survId = null, survD = null, survElo = -1;
     for (const [uid, d] of survActive()) {
       const id = "surv:" + uid;
+      if (tvTarget && uid !== tvTarget) continue;
       if (badMatches.has(id)) { if (Date.now() < badMatches.get(id)) continue; badMatches.delete(id); }
       const e = Number(d.elo) || 1500;
       if (e > survElo || (e === survElo && id === onlineTvCurrentMatchId)) { survId = id; survD = d; survElo = e; }
@@ -6528,7 +6552,7 @@ async function startOnlineTV() {
       return;
     }
     if (!bestId) {
-      specText.innerHTML = "No live match is currently running. Waiting for a game...";
+      specText.innerHTML = tvTarget ? "This player is not playing right now. Waiting for their next game..." : "No live match is currently running. Waiting for a game...";
       stopInner();
       return;
     }
