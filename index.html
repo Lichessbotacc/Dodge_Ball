@@ -2161,8 +2161,14 @@ function survivalTick() {
   survPushLive(false);
   if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
 }
+function countModeRun(field) {
+  if (!onlineAccount) return;
+  onlineAccount[field] = (onlineAccount[field] || 0) + 1;
+  try { saveAccountLocal(); pushAccountToFirebase().catch(() => {}); } catch (e) {}
+}
 async function endSurvival(camped) {
   if (!survivalActive) return;
+  countModeRun("survPlayed");
   survivalActive = false; running = false;
   clearAllTimers(); campWarn(false);
   if (survHudIv) { clearInterval(survHudIv); survHudIv = null; }
@@ -2325,6 +2331,8 @@ function sanitizeAccount(acc) {
   acc.bestWinOpp = acc.bestWinOpp ?? "";
   acc.worstLossChange = acc.worstLossChange ?? 0;
   acc.worstLossOpp = acc.worstLossOpp ?? "";
+  acc.survPlayed = Number(acc.survPlayed) > 0 ? Math.floor(acc.survPlayed) : 0;
+  acc.streakPlayed = Number(acc.streakPlayed) > 0 ? Math.floor(acc.streakPlayed) : 0;
   acc.leagueTier = acc.leagueTier ?? 0;
   acc.leagueBest = acc.leagueBest ?? acc.leagueTier;
   acc.leagueWeek = acc.leagueWeek ?? null;
@@ -2908,6 +2916,8 @@ async function pushAccountToFirebase() {
     bestWinOpp: onlineAccount.bestWinOpp,
     worstLossChange: onlineAccount.worstLossChange,
     worstLossOpp: onlineAccount.worstLossOpp,
+    survPlayed: onlineAccount.survPlayed || 0,
+    streakPlayed: onlineAccount.streakPlayed || 0,
     leagueTier: onlineAccount.leagueTier ?? 0,
     leagueBest: onlineAccount.leagueBest ?? 0,
     leagueWeek: onlineAccount.leagueWeek ?? null,
@@ -3388,6 +3398,11 @@ async function openOnlineProfile(uid) {
       const minGained = Math.max(0, Math.round((p.elo ?? 1500) - 1500 + (p.totalEloLost ?? 0)));
       if (!(p.totalEloGained >= minGained)) p.totalEloGained = Math.max(minGained, p.wins);
     }
+    let svRec = 0, skRec = 0;
+    try {
+      const [sv, sk] = await Promise.all([dbGet("survival/" + uid).catch(() => null), dbGet("streakBoard/" + uid).catch(() => null)]);
+      svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
+    } catch (e) {}
     const wins = p.wins ?? 0;
     const losses = p.losses ?? 0;
     const totalGames = wins + losses;
@@ -3415,6 +3430,10 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">🏝 Survival Runs</span><span class="prof-val">${p.survPlayed ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streak Runs</span><span class="prof-val">${p.streakPlayed ?? 0}</span></div>
     `;
 
     document.getElementById("profileModal").style.display = "flex";
@@ -5132,6 +5151,7 @@ function streakRoundWon() {
 }
 function streakEnd() {
   streak.phase = "over"; running = false;
+  countModeRun("streakPlayed");
   campWarn(false);
   try { streakPushLive(true); stopViewerCount(); } catch (e) {}   // TV-Zuschauer sehen das Ende
   streakFlush();
