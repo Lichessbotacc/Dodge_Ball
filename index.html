@@ -1178,10 +1178,12 @@ function rpcOn(path, cb)           { return onValue(ref(db, path), snap => cb(sn
 // ── identity-gated writes: target is ALWAYS derived from the caller's
 //    own uid, never accepted as a free-form path from the caller ──
 async function rpcSetOwnPlayer(data) {
+  requireNotBanned();
   const uid = requireUid();
   return set(ref(db, "players/" + uid), data);
 }
 async function rpcUpdateOwnPlayer(data) {
+  requireNotBanned();
   const uid = requireUid();
   return update(ref(db, "players/" + uid), data);
 }
@@ -1205,6 +1207,7 @@ async function rpcRemoveUsernameIndex(name) {
 //    the TARGET's uid (the invite itself is a small, schema-limited
 //    object — rules additionally restrict its shape) ──
 async function rpcSetOwnQueueEntry(data) {
+  requireNotBanned();
   const uid = requireUid();
   return set(ref(db, "queue/" + uid), data);
 }
@@ -1213,7 +1216,7 @@ async function rpcRemoveOwnQueueEntry() {
   return remove(ref(db, "queue/" + uid));
 }
 async function rpcSendInvite(targetUid, invitePayload) {
-  requireUid();
+  requireUid(); requireNotBanned();
   return set(ref(db, "queue/" + targetUid + "_invite"), invitePayload);
 }
 async function rpcRemoveOwnInvite() {
@@ -1268,6 +1271,7 @@ async function rpcRemoveChallenge(targetUid, fromUid) {
   return remove(ref(db, "challenges/" + targetUid + "/" + fromUid));
 }
 async function rpcSetStreakBoard(payload) {
+  requireNotBanned();
   const uid = requireUid();
   return set(ref(db, "streakBoard/" + uid), { name: String(payload.name), level: Number(payload.level), ts: serverTimestamp() });
 }
@@ -1315,6 +1319,7 @@ function rpcOnChat(cb) {
 }
 // Weekly league: writes ONLY the own entry (path always contains the own uid)
 async function rpcSetLeagueMember(week, tier, group, data) {
+  requireNotBanned();
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !/^\d$/.test(String(tier)) || !/^[A-Za-z0-9_-]{1,40}$/.test(group)) throw new Error("Bad league path.");
   return set(ref(db, "weeklyLeague/" + week + "/" + tier + "/" + group + "/" + uid), data);
@@ -1336,6 +1341,7 @@ async function rpcRenameChatMessages(uid, newName) {
 }
 // Survival: Rekordzeit + Replay in einem atomaren Schreibvorgang (nur eigene UID)
 async function rpcSaveSurvival(time, replayStr, name) {
+  requireNotBanned();
   const uid = requireUid();
   return update(ref(db), {
     ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
@@ -1347,7 +1353,7 @@ function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Err
 async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
 async function rpcClearTvViewing(key) { const uid = requireUid(); return remove(ref(db, "tvViewers/" + _tvKey(key) + "/" + uid)); }
 // Survival LIVE (fuer Online TV): nur der eigene Knoten survivalLive/{uid}
-async function rpcSetSurvivalLive(data) { const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
+async function rpcSetSurvivalLive(data) { requireNotBanned(); const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
 function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
 async function rpcRemoveSurvivalLive() { const uid = requireUid(); return remove(ref(db, "survivalLive/" + uid)); }
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
@@ -1366,6 +1372,7 @@ async function rpcNewsPush(data) { requireUid(); return push(ref(db, "news"), da
 async function rpcNewsRemove(id) { requireUid(); return remove(ref(db, "news/" + id)); }
 // ── Mod/Admin: nur mit Admin-UID (die Database Rules erzwingen das zusätzlich serverseitig) ──
 const MOD_ADMIN_UID_RPC = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";
+function requireNotBanned() { if (window.__dobBanned) throw new Error("Account banned."); }
 function requireAdmin() { const u = requireUid(); if (u !== MOD_ADMIN_UID_RPC) throw new Error("Admin only."); return u; }
 async function rpcModSetSanction(uid, data) { requireAdmin(); return update(ref(db, "sanctions/" + uid), data); }
 async function rpcModClearSanction(uid)     { requireAdmin(); return remove(ref(db, "sanctions/" + uid)); }
@@ -1378,9 +1385,45 @@ async function rpcModRename(uid, oldName, newName) {
   up["usernames/" + String(newName).toLowerCase()] = uid;
   return update(ref(db), up);
 }
+// Ban: loescht ALLE Daten eines Spielers (Ranglisten, Liga, Survival, Streak, Queue, Challenges, Chat, Head-to-Head, Usernamen-Index)
+async function rpcModPurgeUser(uid, name) {
+  requireAdmin();
+  uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
+  const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
+    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid]);
+  const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
+  const [un, wl, ch, h2h, chat] = await Promise.all([
+    safe(async () => (await get(ref(db, "usernames"))).val()),
+    safe(async () => (await get(ref(db, "weeklyLeague"))).val()),
+    safe(async () => (await get(ref(db, "challenges"))).val()),
+    safe(async () => (await get(ref(db, "headToHead"))).val()),
+    safe(async () => (await get(query(ref(db, "chat"), limitToLast(1000)))).val())
+  ]);
+  if (name) paths.add("usernames/" + String(name).toLowerCase());
+  Object.entries(un || {}).forEach(([k, v]) => { if (v === uid) paths.add("usernames/" + k); });
+  Object.entries(wl || {}).forEach(([w, tiers]) => Object.entries(tiers || {}).forEach(([t, groups]) => Object.entries(groups || {}).forEach(([g, members]) => { if (members && members[uid]) paths.add("weeklyLeague/" + w + "/" + t + "/" + g + "/" + uid); })));
+  Object.entries(ch || {}).forEach(([target, from]) => { if (from && from[uid]) paths.add("challenges/" + target + "/" + uid); });
+  Object.keys(h2h || {}).forEach(k => { if (k.indexOf(uid) !== -1) paths.add("headToHead/" + k); });
+  Object.entries(chat || {}).forEach(([id, m]) => { if (m && m.uid === uid) paths.add("chat/" + id); });
+  const list = [...paths], failed = [];
+  const res = await Promise.allSettled(list.map(pth => remove(ref(db, pth))));
+  res.forEach((r, i) => { if (r.status === "rejected") failed.push(list[i]); });
+  return { total: list.length, failed };
+}
+async function rpcModRestoreUser(uid, backup) {
+  requireAdmin();
+  uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || !backup) throw new Error("Nothing to restore.");
+  const up = {};
+  if (backup.player) { up["players/" + uid] = backup.player; if (backup.player.name) up["usernames/" + String(backup.player.name).toLowerCase()] = uid; }
+  if (backup.survival) up["survival/" + uid] = backup.survival;
+  if (backup.streak) up["streakBoard/" + uid] = backup.streak;
+  return update(ref(db), up);
+}
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -7158,6 +7201,7 @@ function _modRender() {
   _modChatLock();
   const ov = _modEnsureOv();
   const ban = _modBanInfo(), warn = ban ? null : _modWarnInfo();
+  window.__dobBanned = !!ban;
   const mode = ban ? "ban" : (warn && Date.now() > _modSnoozeUntil ? "warn" : null);
   if (!mode) { ov.style.display = "none"; _modMode = null; return; }
   if (mode !== _modMode) {
@@ -7198,12 +7242,13 @@ async function openModPanel(prefill) {
     ov.style.cssText = "position:fixed;inset:0;z-index:15000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);";
     ov.innerHTML = '<div style="width:min(760px,95vw);max-height:88vh;display:flex;flex-direction:column;background:#0d0f16;border:1px solid rgba(255,255,255,0.12);border-top:3px solid #ff4d6d;border-radius:14px;padding:16px;color:#e6e9f2;text-align:left;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🛡 Mod Panel</b><button id="modPanelX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
-      + '<div style="display:flex;gap:8px;margin:10px 0;"><input id="modSearch" type="text" placeholder="Search name or UID…" style="flex:1;margin:0;padding:8px;font-size:13px;"><button id="modReload" style="margin:0;padding:6px 12px;font-size:13px;">↻</button></div>'
+      + '<div style="display:flex;gap:8px;margin:10px 0;"><input id="modSearch" type="text" placeholder="Search name or UID…" style="flex:1;margin:0;padding:8px;font-size:13px;"><button id="modScanBtn" style="margin:0;padding:8px 12px;font-size:13px;">🔍 Scan for cheaters</button><button id="modReload" style="margin:0;padding:6px 12px;font-size:13px;">↻</button></div>'
       + '<div id="modList" style="overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div></div>';
     ov.addEventListener("click", e => { if (e.target === ov) closeModPanel(); });
     document.body.appendChild(ov);
     ov.querySelector("#modPanelX").onclick = closeModPanel;
     ov.querySelector("#modReload").onclick = _modPanelLoad;
+    ov.querySelector("#modScanBtn").onclick = _modScanBtn;
     ov.querySelector("#modSearch").addEventListener("input", _modPanelRender);
   }
   ov.style.display = "flex";
@@ -7255,7 +7300,8 @@ function _modPanelRender() {
     mk("✏ Rename", () => _modRenameAct(uid, p));
     mk("🔇 Mute", () => _modMute(uid));
     mk(s.chatBanned ? "💬 Allow chat" : "🚫 Chat ban", () => _modRPC().modSetSanction(uid, { chatBanned: s.chatBanned ? null : true }));
-    mk(s.banned ? "♻ Unban" : "🔨 Ban", () => _modBan(uid, s));
+    mk(s.banned ? "♻ Unban" : "🔨 Ban + wipe data", () => _modBan(uid, s, p));
+    if (s.banned) mk("🧹 Wipe data again", () => _modPurge(uid, p.name));
     mk("🧹 Clear all", () => _modRPC().modClearSanction(uid));
     row.appendChild(bar); list.appendChild(row);
   });
@@ -7285,10 +7331,131 @@ async function _modMute(uid) {
   const m = Number(prompt("Mute for how many minutes? (0 = unmute)", "60")); if (isNaN(m) || m < 0) _modCancel();
   await _modRPC().modSetSanction(uid, { muteUntil: m > 0 ? Date.now() + m * 60000 : null });
 }
-async function _modBan(uid, s) {
-  if (s.banned) { await _modRPC().modSetSanction(uid, { banned: null, banReason: null }); return; }
+async function _modPurge(uid, name) {
+  const r = await _modRPC().modPurgeUser(uid, name);
+  if (r && r.failed && r.failed.length) alert("Could not delete " + r.failed.length + " of " + r.total + " entries (Database Rules must allow the admin to delete them):\n" + r.failed.slice(0, 12).join("\n"));
+  return r;
+}
+async function _modBan(uid, s, p) {
+  if (s.banned) {
+    await _modRPC().modSetSanction(uid, { banned: null, banReason: null, autoBan: null });
+    if (s.backup && confirm("Restore this player's backed-up data (profile, survival record, streak)?")) { await _modRPC().modRestoreUser(uid, s.backup); await _modRPC().modSetSanction(uid, { backup: null }); }
+    return;
+  }
+  const nm = (p && p.name) || uid;
   const reason = prompt("Ban reason (shown to the player):", "Inappropriate username"); if (reason === null) _modCancel();
+  if (!confirm("Ban " + nm + " and DELETE all their data (leaderboards, league, survival, streak, chat)?")) _modCancel();
+  try {
+    const [pl, sv, sk] = await Promise.all([_modRPC().get("players/" + uid), _modRPC().get("survival/" + uid), _modRPC().get("streakBoard/" + uid)]);
+    await _modRPC().modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null } });
+  } catch (e) { console.warn("backup failed", e); }
   await _modRPC().modSetSanction(uid, { banned: true, banReason: reason.trim(), bannedAt: Date.now() });
+  await _modPurge(uid, nm);
+  await new Promise(r => setTimeout(r, 4000));        // sein Client bekommt den Ban und stoppt Schreibzugriffe; Restschreibungen werden noch einmal weggeraeumt
+  await _modPurge(uid, nm);
+}
+// ═══ AUTOMATISCHER CHEAT-SCAN (laeuft nur auf deinem Admin-Client) ═══
+// Gebannt wird NUR bei Werten, die mit dem echten Spielcode nachweislich unmoeglich sind (kein "verdaechtig", keine Statistik):
+//  1) ELO > 1500 + 50 * Siege  (pro Sieg max. +50, Start 1500, ELO steigt nur durch Siege)  bzw. ELO < 100 / > 5000 / keine gueltige Zahl
+//  2) Siege/Niederlagen negativ, keine ganze Zahl oder keine Zahl
+//  3) Survival-Rekordzeit passt nicht zum gespeicherten Replay (Zeit = Ticks/60, beides schreibt der Client atomar) -> Abweichung > 2 s
+//  4) Streak-Level kein ganzer Wert >= 1 oder > 1000
+// Sicherheitsnetze: Befund muss in ZWEI Scans (>= 30 s Abstand) identisch bestehen; vorher Backup (Profil/Survival/Streak) in sanctions/{uid}/backup,
+// damit "Unban" alles wiederherstellt; Admin, Bot und bereits Gebannte werden nie angefasst.
+const CHEAT_MAX_ELO_PER_WIN = 50, CHEAT_START_ELO = 1500, CHEAT_MAX_STREAK_LEVEL = 1000, CHEAT_REPLAY_TOL_S = 2, CHEAT_CONFIRM_MS = 30000;
+let _cheatPending = {}, _cheatScanning = false, _cheatIv = null;
+function _cheatPlayerEvidence(p) {
+  const out = [], num = v => typeof v === "number" && isFinite(v);
+  if (!num(p.elo)) out.push("ELO is not a valid number");
+  else {
+    if (p.elo > 5000) out.push("ELO " + p.elo + " > 5000");
+    if (p.elo < 100) out.push("ELO " + p.elo + " < 100");
+  }
+  const wOk = num(p.wins) && p.wins >= 0 && Number.isInteger(p.wins), lOk = num(p.losses) && p.losses >= 0 && Number.isInteger(p.losses);
+  if (p.wins !== undefined && !wOk) out.push("invalid wins: " + p.wins);
+  if (p.losses !== undefined && !lOk) out.push("invalid losses: " + p.losses);
+  if (num(p.elo) && wOk && p.elo > CHEAT_START_ELO + CHEAT_MAX_ELO_PER_WIN * p.wins) out.push("ELO " + Math.round(p.elo) + " impossible with " + p.wins + " wins (max " + (CHEAT_START_ELO + CHEAT_MAX_ELO_PER_WIN * p.wins) + ")");
+  return out;
+}
+async function _cheatCollect() {
+  const R = _modRPC(), found = {};
+  const add = (uid, name, why) => { (found[uid] = found[uid] || { name: name || uid, why: [] }).why.push(why); };
+  const [players, survival, streakB, sanc] = await Promise.all([R.get("players"), R.get("survival"), R.get("streakBoard"), R.get("sanctions")]);
+  const skip = uid => uid === MOD_ADMIN_UID || uid === "bot__online_bot" || String(uid).indexOf("bot__") === 0 || (sanc && sanc[uid] && sanc[uid].banned);
+  Object.entries(players || {}).forEach(([uid, p]) => { if (!p || skip(uid)) return; _cheatPlayerEvidence(p).forEach(w => add(uid, p.name, w)); });
+  Object.entries(streakB || {}).forEach(([uid, r]) => {
+    if (!r || skip(uid)) return;
+    const L = r.level;
+    if (!(typeof L === "number" && isFinite(L) && Number.isInteger(L) && L >= 1 && L <= CHEAT_MAX_STREAK_LEVEL)) add(uid, r.name || (players && players[uid] && players[uid].name), "impossible streak level: " + L);
+  });
+  // Survival: Zeit gegen Replay pruefen (je 5 parallel)
+  const sv = Object.entries(survival || {}).filter(([uid, r]) => r && !skip(uid));
+  for (let i = 0; i < sv.length; i += 5) {
+    await Promise.all(sv.slice(i, i + 5).map(async ([uid, r]) => {
+      const t = r.time;
+      if (!(typeof t === "number" && isFinite(t) && t > 0)) { add(uid, r.name, "invalid survival time: " + t); return; }
+      let rec = null;
+      try { const raw = await R.get("survivalReplays/" + uid); rec = raw && JSON.parse(raw); } catch (e) { return; }   // kein/kaputtes Replay = kein Beweis
+      if (!rec || typeof rec.n !== "number" || !isFinite(rec.n)) return;
+      const rt = rec.n / 60;
+      if (Math.abs(rt - t) > CHEAT_REPLAY_TOL_S) add(uid, r.name, "survival time " + t.toFixed(1) + "s does not match replay (" + rt.toFixed(1) + "s)");
+    }));
+  }
+  return found;
+}
+async function _cheatBanOne(uid, name, why) {
+  const R = _modRPC();
+  const [pl, sv, sk] = await Promise.all([R.get("players/" + uid), R.get("survival/" + uid), R.get("streakBoard/" + uid)]);
+  await R.modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null }, autoBan: { why: why, ts: Date.now() } });
+  await R.modSetSanction(uid, { banned: true, banReason: "Cheating detected (automatic).", bannedAt: Date.now() });
+  await _modPurge(uid, name);
+  await new Promise(r => setTimeout(r, 4000));
+  await _modPurge(uid, name);
+}
+async function _cheatScan(manual) {
+  if (!_modIsAdmin() || !_modRPC() || _cheatScanning) return null;
+  _cheatScanning = true;
+  const report = { banned: [], pending: [], clean: true };
+  try {
+    const found = await _cheatCollect(), now = Date.now();
+    for (const uid of Object.keys(_cheatPending)) if (!found[uid]) delete _cheatPending[uid];   // Befund verschwunden -> kein Verdacht mehr
+    for (const [uid, f] of Object.entries(found)) {
+      report.clean = false;
+      const sig = f.why.slice().sort().join(" | "), pend = _cheatPending[uid];
+      if (pend && pend.sig === sig && now - pend.t >= CHEAT_CONFIRM_MS) {
+        try { await _cheatBanOne(uid, f.name, f.why); report.banned.push({ uid, name: f.name, why: f.why }); delete _cheatPending[uid]; }
+        catch (e) { console.warn("auto-ban failed", uid, e); }
+      } else {
+        if (!pend || pend.sig !== sig) _cheatPending[uid] = { sig, t: now };
+        report.pending.push({ uid, name: f.name, why: f.why });
+      }
+    }
+  } catch (e) { console.warn("cheat scan failed", e); report.error = e && e.message; }
+  _cheatScanning = false;
+  return report;
+}
+async function _cheatScanTwice() {
+  let r = await _cheatScan(true);
+  if (r && r.pending.length) { await new Promise(x => setTimeout(x, CHEAT_CONFIRM_MS + 1000)); r = await _cheatScan(true); }
+  return r;
+}
+function _cheatStartAuto() {
+  if (_cheatIv || !_modIsAdmin()) return;
+  setTimeout(() => _cheatScan(false), 20000);
+  _cheatIv = setInterval(() => _cheatScan(false), 5 * 60 * 1000);
+}
+window.addEventListener("dobAuthReady", () => setTimeout(_cheatStartAuto, 1500));
+window.addEventListener("dobRPCReady", () => setTimeout(_cheatStartAuto, 1500));
+async function _modScanBtn() {
+  const btn = document.getElementById("modScanBtn"); if (btn) { btn.disabled = true; btn.textContent = "Scanning… (~30 s)"; }
+  const r = await _cheatScanTwice();
+  if (btn) { btn.disabled = false; btn.textContent = "🔍 Scan for cheaters"; }
+  if (!r) { alert("Scan not possible (admin only / already running)."); return; }
+  if (r.error) { alert("Scan failed: " + r.error); return; }
+  let msg = r.clean ? "No cheaters found." : "";
+  if (r.banned.length) msg += "Banned + wiped:\n" + r.banned.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n") + "\n\n";
+  if (r.pending.length) msg += "Suspicious but not confirmed (not banned):\n" + r.pending.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n");
+  alert(msg.trim()); await _modPanelLoad();
 }
 async function modDeleteChatMsg(key) {
   if (!confirm("Delete this chat message?")) return;
