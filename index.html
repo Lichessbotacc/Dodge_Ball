@@ -670,6 +670,13 @@ body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
 body.mode-tv #homeBtn:hover{transform:none;}
+#streakOverlay{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:900;text-align:center;pointer-events:none;font-family:var(--font-display,sans-serif);color:#fff;text-shadow:0 4px 24px rgba(0,0,0,.7);}
+#streakOverlay .sk-title{font-size:clamp(34px,7vw,64px);font-weight:800;letter-spacing:3px;}
+#streakOverlay .sk-sub{margin-top:8px;font-size:clamp(16px,3vw,24px);color:#ffd7a0;}
+#streakOverlay .sk-btns{margin-top:22px;display:flex;gap:12px;justify-content:center;pointer-events:auto;}
+#streakOverlay.sk-over{pointer-events:auto;background:rgba(10,12,18,.82);padding:26px 38px;border-radius:18px;border:1px solid rgba(255,157,0,.55);box-shadow:0 18px 60px rgba(0,0,0,.6);}
+#streakOverlay .sk-new{margin-top:6px;color:#00e676;font-weight:700;letter-spacing:2px;}
+
 .ch-btn{margin-left:8px;border:1px solid rgba(255,215,0,.55);background:rgba(255,215,0,.12);color:#ffd700;border-radius:8px;padding:1px 8px;font-size:13px;line-height:20px;cursor:pointer;flex:none;}
 .ch-btn:hover{background:rgba(255,215,0,.28);}
 .ch-btn.ch-busy,.ch-btn:disabled{opacity:.35;cursor:not-allowed;filter:grayscale(1);}
@@ -841,6 +848,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <h1>DarkOnBalls</h1>
         <div id="menuMain" class="menuPage">
           <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
+          <button onclick="startStreak()">🔥 Streak</button>
           <button onclick="showMenuPage('menuOffline')" style="display:none" id="btnOfflineMenu">🎮 Offline</button> <!-- Offline vorübergehend ausgeblendet: style="display:none" entfernen zum Einblenden -->
           <button onclick="openSettings()">⚙️ Settings</button>
         </div>
@@ -1950,7 +1958,7 @@ function escapeHtml(v) {
 // Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
 // (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
 function currentPresenceStatus() {
-  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt" };
+  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streak" };
   try {
     if (survivalActive) return "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
@@ -3083,6 +3091,7 @@ function clearAllTimers() {
   if (survivalIntervalId) { clearInterval(survivalIntervalId); survivalIntervalId = null; }
   if (coinIntervalId)     { clearInterval(coinIntervalId);     coinIntervalId     = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
+  if (typeof streakCleanup === "function") streakCleanup();
 }
 
 // ═══════════════════════════════════════════════
@@ -4727,6 +4736,175 @@ function startSurvivalMode() {
 // ═══════════════════════════════════════════════
 //  MIRROR DUEL
 // ═══════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════
+//  STREAK MODE  (komplett eigener Modus: nur Bots, kein Elo, keine Online-Daten)
+//  Du spielst 1v1 gegen Bots. Jeder Sieg = +1 Streak und die Runde wird schwerer
+//  (Bot besser, Baelle schneller, ab Level 4 verfolgende Baelle). Eine Niederlage beendet die Serie.
+//  Alle Zahlen zum Feintunen stehen in STREAK_CFG.
+// ═══════════════════════════════════════════════
+const STREAK_CFG = {
+  botSkillStart: 0.10, botSkillStep: 0.065, botSkillMax: 0.97,   // Bot-Faehigkeit 0..1 pro Level
+  ballSpeedStart: 0.85, ballSpeedStep: 0.045, ballSpeedMax: 2.1, // Ballgeschwindigkeit (Faktor)
+  ballsStart: 3, ballsEveryLevels: 3, ballsMax: 10,              // Baelle zu Rundenbeginn
+  spawnStartMs: 6500, spawnStepMs: 220, spawnMinMs: 2600, totalBallsMax: 26,
+  chaserFromLevel: 4, chaserEvery: 3, chaserMax: 4, chaserLifeMs: 9000, // verfolgende Baelle
+  introMs: 1600, betweenMs: 1500
+};
+let streak = null;
+const streakBestKey = "dobStreakBest";
+function streakReadBest() { try { return parseInt(localStorage.getItem(streakBestKey) || "0", 10) || 0; } catch (e) { return 0; } }
+function streakSetOverlay(html) {
+  let o = document.getElementById("streakOverlay");
+  if (!html) { if (o) o.remove(); return null; }
+  if (!o) { o = document.createElement("div"); o.id = "streakOverlay"; document.body.appendChild(o); }
+  o.className = ""; o.innerHTML = html;
+  return o;
+}
+function streakCleanup() {
+  if (streak && streak.timers) { streak.timers.forEach(clearTimeout); streak.timers = []; }
+  const o = document.getElementById("streakOverlay"); if (o) o.remove();
+}
+function streakLevel() { return streak ? streak.wins + 1 : 1; }
+function streakHud() {
+  const ui = document.getElementById("ui"); if (!ui || !streak) return;
+  ui.innerHTML = `🔥 ${tr("Streak")}: <b id="sk_w">${streak.wins}</b><br>${tr("Best")}: <span id="sk_b">${Math.max(streak.best, streak.wins)}</span><br>${tr("Round")}: <span id="sk_r">${streakLevel()}</span><br>${tr("Bot level")}: <span id="sk_l">${streakLevel()}</span>`;
+}
+function streakSpawnMs(L) { return Math.max(STREAK_CFG.spawnMinMs, STREAK_CFG.spawnStartMs - STREAK_CFG.spawnStepMs * (L - 1)); }
+function streakChaserTarget(L) {
+  const C = STREAK_CFG;
+  return L < C.chaserFromLevel ? 0 : Math.min(C.chaserMax, 1 + Math.floor((L - C.chaserFromLevel) / C.chaserEvery));
+}
+function streakMakeBall(L, chase) {
+  const C = STREAK_CFG;
+  const b = makeBallAt(players);   // Platzierung mit Abstand zu den Spielern
+  const mul = Math.min(C.ballSpeedMax, C.ballSpeedStart + C.ballSpeedStep * (L - 1));
+  const spd = (3 + Math.random() * 2.5) * mul, ang = Math.random() * Math.PI * 2;
+  b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
+  if (chase) {
+    b.chase = true; b.born = Date.now();
+    b.radius = 13 + Math.random() * 6;
+    b.cspd = spd * 0.8;
+    b.turn = Math.min(0.06, 0.018 + 0.0018 * L);   // max. Drehung pro Tick (rad) -> wird schwerer
+  }
+  return b;
+}
+function streakStartRound() {
+  const C = STREAK_CFG, L = streakLevel();
+  const sk = Math.min(C.botSkillMax, C.botSkillStart + C.botSkillStep * (L - 1));
+  players = []; balls = []; myTrail = []; eliminated = [];
+  const me = createPlayer(W() * 0.25, H() / 2, myBallColor, "Player");
+  const bot = createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot");
+  bot.skill = { aim: sk, reaction: sk, movement: sk, awareness: sk, aggression: sk };
+  bot.speed = 2.2 + sk * 5.5; bot.awareness = 55 + sk * 130;
+  bot.dodgePower = 0.4 + sk * 2.6; bot.randomness = (1 - sk) * 5;
+  players.push(me, bot);
+  const n = Math.min(C.ballsMax, C.ballsStart + Math.floor((L - 1) / C.ballsEveryLevels));
+  for (let i = 0; i < n; i++) balls.push(streakMakeBall(L, false));
+  const nc = streakChaserTarget(L);
+  for (let i = 0; i < nc; i++) balls.push(streakMakeBall(L, true));
+  streak.phase = "intro"; streak.phaseUntil = Date.now() + C.introMs;
+  streakHud();
+  streakSetOverlay(`<div class="sk-title">${tr("ROUND")} ${L}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}${nc ? " · 🟠 " + tr("chasing balls") : ""}</div>`);
+}
+function startStreak() {
+  clearAllTimers();
+  waitingQueue = []; matches = []; playerMatchMap.clear();
+  spectateModeActive = false; spectateMatchId = null;
+  followMode = "none"; targetName = null; humanRemovedFromQueue = false;
+  coins = []; mirrorBot = null; myTrail = [];
+  ["coinHUD", "opponentInfo", "spectatorInfo", "profileModal", "winnerOverlay", "onlineHUD"].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = "none"; });
+  mode = "streak";
+  document.body.classList.remove("mode-online", "mode-tv");
+  const et = document.getElementById("eloTable"); if (et) et.style.display = "none";
+  streak = { wins: 0, best: streakReadBest(), phase: "intro", phaseUntil: 0, nextSpawn: 0, timers: [] };
+  hideAllScreensForGame();
+  balls = []; players = []; eliminated = [];
+  running = true; startTime = Date.now();
+  streakStartRound();
+}
+function streakHit(p) {
+  for (const b of balls) {
+    const dx = p.x - b.x, dy = p.y - b.y;
+    if (Math.sqrt(dx * dx + dy * dy) < p.radius + b.radius) return true;
+  }
+  return false;
+}
+function updateStreak() {
+  if (!streak) return;
+  const C = STREAK_CFG, now = Date.now();
+  if (streak.phase === "intro") {
+    if (now >= streak.phaseUntil) { streak.phase = "play"; streak.nextSpawn = now + streakSpawnMs(streakLevel()); streakSetOverlay(null); }
+    return;
+  }
+  if (streak.phase !== "play") return;
+  const L = streakLevel();
+  const me = players.find(p => p.name === "Player"), bot = players.find(p => p.name === "Bot");
+
+  if (bot && bot.alive) updateAI(bot, balls);
+  for (const p of players) {
+    p.x = Math.max(p.radius, Math.min(W() - p.radius, p.x));
+    p.y = Math.max(p.radius, Math.min(H() - p.radius, p.y));
+  }
+
+  // neue Baelle / Ersatz fuer abgelaufene Verfolger
+  if (now >= streak.nextSpawn) {
+    streak.nextSpawn = now + streakSpawnMs(L);
+    const chasers = balls.filter(b => b.chase).length;
+    if (chasers < streakChaserTarget(L)) balls.push(streakMakeBall(L, true));
+    else if (balls.length < C.totalBallsMax) balls.push(streakMakeBall(L, false));
+  }
+
+  // Verfolger lenken zum Spieler und laufen nach einer Weile ab
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i];
+    if (!b.chase) continue;
+    if (now - b.born > C.chaserLifeMs) { balls.splice(i, 1); continue; }
+    if (me && me.alive) {
+      const want = Math.atan2(me.y - b.y, me.x - b.x), cur = Math.atan2(b.vy, b.vx);
+      let d = want - cur;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      const na = cur + Math.max(-b.turn, Math.min(b.turn, d));
+      b.vx = Math.cos(na) * b.cspd; b.vy = Math.sin(na) * b.cspd;
+    }
+  }
+
+  for (const b of balls) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+    if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W() - b.radius; }
+    if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+    if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H() - b.radius; }
+  }
+
+  // Beide gleichzeitig getroffen = Niederlage fuer dich (keine Streak-Rettung durch Gleichstand)
+  const meHit = me && me.alive && streakHit(me), botHit = bot && bot.alive && streakHit(bot);
+  if (meHit) { me.alive = false; streakEnd(); return; }
+  if (botHit) { bot.alive = false; streakRoundWon(); }
+}
+function streakRoundWon() {
+  streak.phase = "won"; streak.wins++;
+  if (streak.wins > streak.best) { streak.best = streak.wins; try { localStorage.setItem(streakBestKey, String(streak.best)); } catch (e) {} }
+  streakHud();
+  streakSetOverlay(`<div class="sk-title" style="color:#00e676">✓ ${tr("ROUND WON")}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}</div>`);
+  streak.timers.push(setTimeout(() => { if (mode === "streak" && streak && streak.phase === "won") streakStartRound(); }, STREAK_CFG.betweenMs));
+}
+function streakEnd() {
+  streak.phase = "over"; running = false;
+  const isNew = streak.wins > 0 && streak.wins >= streak.best;
+  streakHud();
+  const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${tr("STREAK ENDED")}</div>
+    <div class="sk-sub">${streak.wins} ${tr("wins in a row")} · ${tr("Best")}: ${streak.best}</div>
+    ${isNew ? `<div class="sk-new">★ ${tr("NEW BEST")} ★</div>` : ""}
+    <div class="sk-btns"><button id="skAgain">${tr("Try again")}</button><button id="skHome">🏠 ${tr("Home")}</button></div>`);
+  if (o) {
+    o.className = "sk-over";
+    o.querySelector("#skAgain").addEventListener("click", () => startStreak());
+    o.querySelector("#skHome").addEventListener("click", () => exitToMenu());
+  }
+}
+
 function startMirrorMode() {
   mode = "mirror"; players = []; mirrorBot = null; myTrail = [];
   const me = createPlayer(W() * 0.3, H() / 2, myBallColor, "YOU");
@@ -5108,6 +5286,7 @@ function update() {
     if (me && me.alive) checkOnlineCollision(me);
     return;
   }
+  if (mode === "streak") { updateStreak(); return; }
   if (mode === "multi") {
     const p1 = players[0], p2 = players[1];
     if (p1 && p1.alive) {
@@ -5691,7 +5870,14 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 
   for (const b of balls) {
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
-    ctx.fillStyle = "#ff4444"; ctx.fill();
+    if (b.chase) {
+      // verfolgender Ball (Streak): orange mit Ring, blinkt kurz vor dem Verschwinden
+      const left = (b.born + STREAK_CFG.chaserLifeMs) - Date.now();
+      ctx.globalAlpha = left < 2000 ? (Math.floor(left / 120) % 2 ? 0.35 : 0.9) : 1;
+      ctx.fillStyle = "#ff9d00"; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#fff6c8"; ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else { ctx.fillStyle = "#ff4444"; ctx.fill(); }
   }
 
   if (ballTrailEnabled) {
@@ -6155,7 +6341,7 @@ document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; })
 document.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
 
 canvas.addEventListener("mousemove", e => {
-  if (running && ["single","tournament","coin","mirror","online","survival"].includes(mode)) {
+  if (running && ["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) {
     const pos = screenToVirtual(e.clientX, e.clientY);
     moveSingle(pos.x, pos.y);
   }
@@ -6164,7 +6350,7 @@ canvas.addEventListener("mousemove", e => {
 canvas.addEventListener("touchmove", e => {
   e.preventDefault();
   if (!running) return;
-  if (!["single","tournament","coin","mirror","online","survival"].includes(mode)) return;
+  if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
   const pos   = screenToVirtual(touch.clientX, touch.clientY);
   moveSingle(pos.x, pos.y);
@@ -6173,7 +6359,7 @@ canvas.addEventListener("touchmove", e => {
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
   if (!running) return;
-  if (!["single","tournament","coin","mirror","online","survival"].includes(mode)) return;
+  if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
   const pos   = screenToVirtual(touch.clientX, touch.clientY);
   moveSingle(pos.x, pos.y);
@@ -6358,7 +6544,7 @@ const DICT = { de: {
   "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
   "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","Streak":"Streak","Best":"Bestwert","Round":"Runde","Bot level":"Bot-Level","ROUND":"RUNDE","ROUND WON":"RUNDE GEWONNEN","STREAK ENDED":"STREAK BEENDET","wins in a row":"Siege in Folge","NEW BEST":"NEUER BESTWERT","Try again":"Nochmal","Home":"Menü","chasing balls":"verfolgende Bälle","🔥 Streak":"🔥 Streak","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
   "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
