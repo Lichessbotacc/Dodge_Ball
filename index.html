@@ -3184,6 +3184,7 @@ let onlineSearchStartTime = 0;
 let onlineBotMatchTimeout = null;
 let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
 let onlineSimTick = 0;
+let onlineMatchStamp = 0;
 let onlineRound = 0, postUnsub = null, rematchSent = false, lastPostChat = 0;
 let onlineBallIv = null;
 
@@ -4030,6 +4031,7 @@ function joinMatch(matchId, opp, matchData) {
   onlineVsBot         = false;
 
   onlineRound  = matchData.round || 0;
+  onlineMatchStamp = Number(matchData.createdAt) || 0;
   onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
   onlineIsHost = (onlineRole === "p1");
 
@@ -4465,7 +4467,7 @@ async function handleOnlineResult(winnerName, change) {
     const loserUid  = won ? oppUid : myUid;
     // FIX: BOTH players record the result (idempotent via roundKey), so a host that leaves
     // right after the match no longer loses the score. Errors are logged instead of swallowed.
-    const roundKey = onlineMatchId + ":" + onlineRound;
+    const roundKey = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
     const showH2H = (score) => {
       const scoreHUD = document.getElementById("onlineScoreHUD");
       if (scoreHUD) scoreHUD.textContent = `${score[myUid] || 0} - ${score[oppUid] || 0}`;
@@ -4527,6 +4529,9 @@ async function handleOnlineResult(winnerName, change) {
     }
   }
 
+  if (!onlineVsBot && onlineOpponent && Number.isFinite(Number(onlineOpponent.elo))) {
+    onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - eloChange) : onlineOpponent.elo + eloChange;
+  }
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -4722,11 +4727,17 @@ function handlePostMatch(d) {
   }
   if ((d.round || 0) > onlineRound && d.status === "waiting") {
     onlineRound = d.round;
+    onlineMatchStamp = Number(d.createdAt) || 0;
     const u = [...onlineUnsubscribes]; onlineUnsubscribes = []; postUnsub = null;
     u.forEach(f => { try { f(); } catch(e) {} });
     document.getElementById("winnerOverlay").style.display = "none";
     onlineResultHandled = false;
-    showVSScreen(onlineAccount.name, onlineAccount.elo, onlineOpponent.name, onlineOpponent.elo, () => startOnlineGame(d));
+    const _go = () => showVSScreen(onlineAccount.name, onlineAccount.elo, onlineOpponent.name, onlineOpponent.elo, () => startOnlineGame(d));
+    if (fbReady && onlineOpponent && onlineOpponent.uid) {
+      dbGet("players/" + onlineOpponent.uid).then(pp => {
+        if (pp && Number.isFinite(Number(pp.elo))) onlineOpponent.elo = Number(pp.elo);
+      }).catch(() => {}).then(_go);
+    } else _go();
   }
 }
 
