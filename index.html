@@ -502,9 +502,13 @@ h2::after{
   background:linear-gradient(160deg,#1b1b29,#111119);
   border:1px solid var(--line);border-radius:18px;padding:30px 38px;
   color:white;min-width:300px;max-width:380px;position:relative;
+  max-height:88vh;max-height:88dvh;display:flex;flex-direction:column;box-sizing:border-box;
   box-shadow:0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,255,136,0.06);
 }
 #profileCard h2{margin-bottom:18px;font-size:26px;}
+#profileStats{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;padding-right:6px;}
+#profileStats::-webkit-scrollbar{width:6px;}
+#profileStats::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.25);border-radius:3px;}
 #profileCard h2::after{margin-left:0;}
 .prof-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);}
 .prof-label{color:var(--text-dim);font-size:15px;font-family:var(--font-display);letter-spacing:.4px;}
