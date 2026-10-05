@@ -2312,8 +2312,8 @@ const DAILY_CHALLENGES = [
   { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 55, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
   // Overdrive: 5 Baelle, Tempo waechst ohne Obergrenze (accMax riesig)
   { icon: "🚀", name: "Overdrive",          groups: [{ n: 5, v: 1.8, acc: 0.0018, accMax: 1e9, col: "#ffd24a" }] },
-  // Fireworks: Spawnabstand wird mit jedem Feuerwerk laenger (respawnGrow Ticks pro Spawn)
-  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 3, respawn: 90, respawnGrow: 6, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
+  // Fireworks: Spawnabstand wird mit jedem Feuerwerk ganz langsam kuerzer (-0.5 Tick pro Spawn, bis min. 10 Ticks), kein Limit gleichzeitiger Feuerwerke
+  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
 ];
 // ── Welcher Modus ist an welchem Tag dran? ──
 // 1) Mod-Festlegung dailyPick/{tag} (Index) hat Vorrang.  2) Sonst Zufall (pro Tag fest per Seed, fuer alle Spieler gleich),
@@ -2423,7 +2423,7 @@ function dailyTick() {
     let alive = 0; for (const b of balls) if (b.gi === gi) alive++;
     if (alive >= (g.cap != null ? g.cap : g.n)) return;
     if (g.from === "echo" && T < (g.delay || 150)) return;   // erst spawnen, wenn es eine Spur zum Nachziehen gibt
-    _dailyRun.next[gi] = T + g.respawn + (g.respawnGrow || 0) * _dailyRun.cnt[gi]++;
+    _dailyRun.next[gi] = T + Math.max(g.respawnMin || 1, g.respawn + (g.respawnGrow || 0) * _dailyRun.cnt[gi]++);
     const nb = dailyMakeBall(g, gi, T, false); balls.push(nb); dailyRec(nb, T);
   });
 }
