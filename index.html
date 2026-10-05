@@ -1700,7 +1700,7 @@ function renderPresence(playersData) {
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
       )
       .forEach(p => {
-        if ((p.status === "Survival" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu"; p._ghost = true;   // Geist: Stream tot
+        if ((p.status === "Survival" || p.status === "Daily" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu"; p._ghost = true;   // Geist: Stream tot
         const key = String(p.name || "").toLowerCase();
         const prev = _seen.get(key);
         const better = !prev
@@ -1756,7 +1756,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "Playing Streaks" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -2131,7 +2131,7 @@ function currentPresenceStatus() {
   const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks" };
   try {
     if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
-    if (survivalActive) return "Survival";
+    if (survivalActive) return _dailyKey ? "Daily" : "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
@@ -2350,6 +2350,7 @@ function survPushLive(done, finalTime) {
   _survLiveAt = now;
   const me = players[0]; if (!me) return;
   const d = { name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius, x: Math.round(me.x), y: Math.round(me.y), t: survTick, done: !!done };
+  if (_dailyKey) d.k = "daily";
   if (done) d.time = finalTime;
   d.b = JSON.stringify(balls.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius })));
   RPC.setSurvivalLive(d).catch(() => {});
@@ -6994,7 +6995,7 @@ async function startOnlineTV(targetUid) {
       watchViewerCount("surv_" + survId.slice(5), true);
       lastPacketSeen = Date.now(); gotPacket = false; curMeta = null;
       const suid = survId.slice(5);
-      const isSk = survD.k === "streak";
+      const isSk = survD.k === "streak", isDl = survD.k === "daily";
       let skRd = -1;
       const sp = createPlayer(isSk ? W() * 0.25 : W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
       const spBot = isSk ? createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot") : null;
@@ -7011,9 +7012,9 @@ async function startOnlineTV(targetUid) {
       const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
       setT("onlineNameMe", dn(survD.name)); setT("onlineNameOpp", ""); setT("onlineRankMe", "(" + survElo + ")"); setT("onlineRankOpp", "");
       if (isSk) { setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (survD.L || 1)); setT("onlineScoreHUD", "🔥 " + (survD.w || 0)); }
-      else { setT("onlineStatusHUD", "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60)); }
+      else { setT("onlineStatusHUD", isDl ? "📺 Live Daily" : "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60)); }
       if (hud) hud.style.display = "flex";
-      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE ${isSk ? "STREAKS" : "SURVIVAL"} (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
+      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE ${isSk ? "STREAKS" : isDl ? "DAILY" : "SURVIVAL"} (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
       onlineTvInnerUnsubscribe = dbOn("survivalLive/" + suid, (d) => {
         if (survId !== onlineTvCurrentMatchId) return;
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
@@ -7022,7 +7023,7 @@ async function startOnlineTV(targetUid) {
           tvFreezeBalls = true;
           showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
           badMatches.set(survId, Date.now() + 15000);
-          specText.innerHTML = (isSk ? "Streaks" : "Survival run") + " finished. Searching for next game...";
+          specText.innerHTML = (isSk ? "Streaks" : isDl ? "Daily run" : "Survival run") + " finished. Searching for next game...";
           holdUntil = Date.now() + 6000;
           clearTimeout(holdTimer);
           holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
@@ -8097,7 +8098,7 @@ async function liveAdminCleanup() {
       if (!o || o.sig !== sig) { _liveSeen[uid] = { sig, at: now }; continue; }
       if (now - o.at > 30000) {      // 30 s ohne jede Bewegung (Spieler/Baelle) -> Spiel loeschen, Status zuruecksetzen
         await R.modRemoveLive(uid);
-        try { const st = await R.get("players/" + uid + "/status"); if (st === "Survival" || st === "Playing Streaks") await R.modSetIdle(uid); } catch (e) {}
+        try { const st = await R.get("players/" + uid + "/status"); if (st === "Survival" || st === "Daily" || st === "Playing Streaks") await R.modSetIdle(uid); } catch (e) {}
         delete _liveSeen[uid];
       }
     }
