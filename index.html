@@ -858,7 +858,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startSurvival()">🏝 Survival</button>
           <button id="dailyBtn" onclick="startSurvival(true)">📅 Daily Challenge</button>
-          <button onclick="startStreak()">🔥 Streak</button>
+          <button onclick="startStreak()">🔥 Streaks</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
@@ -971,7 +971,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
-        <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streak</button>
+        <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streaks</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
       </div>
@@ -1699,7 +1699,7 @@ function renderPresence(playersData) {
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
       )
       .forEach(p => {
-        if ((p.status === "Survival" || p.status === "Playing Streak") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu"; p._ghost = true;   // Geist: Stream tot
+        if ((p.status === "Survival" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu"; p._ghost = true;   // Geist: Stream tot
         const key = String(p.name || "").toLowerCase();
         const prev = _seen.get(key);
         const better = !prev
@@ -1755,7 +1755,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "Playing Streak" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Playing Streaks" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -2127,14 +2127,14 @@ function escapeHtml(v) {
 // Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
 // (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
 function currentPresenceStatus() {
-  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streak" };
+  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks" };
   try {
     if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
     if (survivalActive) return "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
-    if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streak";
+    if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streaks";
     if (running && !(mode === "online" && onlineResultHandled)) {
       if (mode === "online") {
         if (onlineVsBot) return "1v1 vs Bot";
@@ -2560,8 +2560,8 @@ async function loadStreakBoard() {
       .filter(r => r.level > 0)
       .sort((a, b) => b.level - a.level || a.ts - b.ts)         // gleiches Level: wer es zuerst erreicht hat steht oben
       .slice(0, 100);
-    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No streak records yet</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No Streaks records yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
@@ -2583,9 +2583,9 @@ async function loadDailyBoard() {
       .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
       .filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No runs yet today – be the first!</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="watchDailyReplay('${key}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${key}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadDailyWinsBoard() {
@@ -2618,9 +2618,9 @@ async function loadSurvivalBoard() {
         return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === key) === i;
       }).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No survival records yet</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 
@@ -3880,7 +3880,7 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}${rk.elo}</span></div>
       <div class="prof-row"><span class="prof-label">League</span><span class="prof-val">${leagueBadgeHTML(p.leagueTier)}</span></div>
       <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) + rk.surv : "–"}</span></div>
-      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec + rk.streak : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streaks Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec + rk.streak : "–"}</span></div>
       <div class="prof-row"><span class="prof-label">👑 Daily Challenge Wins</span><span class="prof-val">${dailyWinsN}${dailyWinsN > 0 ? rk.dw : ""}</span></div>
       <div style="height:1px;background:rgba(255,255,255,0.18);margin:10px 0;"></div>
       <div class="prof-row"><span class="prof-label">Total Games</span><span class="prof-val">${totalGames}</span></div>
@@ -3890,14 +3890,14 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Highest Elo</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Lowest Elo</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Highest League</span><span class="prof-val">${leagueBadgeHTML(p.leagueBest ?? p.leagueTier)}</span></div>
-      <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Longest Winstreaks</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Current Winstreaks</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">🏝 Survival Runs</span><span class="prof-val">${Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0)}</span></div>
-      <div class="prof-row"><span class="prof-label">🔥 Streak Runs</span><span class="prof-val">${Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0)}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streaks Runs</span><span class="prof-val">${Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0)}</span></div>
     `;
 
     document.getElementById("profileModal").style.display = "flex";
@@ -5494,7 +5494,7 @@ function streakCleanup() {
 function streakLevel() { return streak ? streak.wins + 1 : 1; }
 function streakHud() {
   const ui = document.getElementById("ui"); if (!ui || !streak) return;
-  ui.innerHTML = `🔥 ${tr("Streak")}: <b id="sk_w">${streak.wins}</b><br>${tr("Best")}: <span id="sk_b">${Math.max(streak.best, streak.wins)}</span><br>${tr("Round")}: <span id="sk_r">${streakLevel()}</span><br>${tr("Bot level")}: <span id="sk_l">${streakLevel()}</span>`;
+  ui.innerHTML = `🔥 ${tr("Streaks")}: <b id="sk_w">${streak.wins}</b><br>${tr("Best")}: <span id="sk_b">${Math.max(streak.best, streak.wins)}</span><br>${tr("Round")}: <span id="sk_r">${streakLevel()}</span><br>${tr("Bot level")}: <span id="sk_l">${streakLevel()}</span>`;
 }
 function streakChaserTarget(L) {
   const C = STREAK_CFG;
@@ -5546,7 +5546,7 @@ function streakStartRound() {
   streak.phase = "intro"; streak.phaseUntil = Date.now() + C.introMs;
   campGenReset();
   streakHud();
-  streakSetOverlay(`<div class="sk-title">${tr("ROUND")} ${L}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}${nc ? " · 🟠 " + tr("chasing balls") : ""}</div>`);
+  streakSetOverlay(`<div class="sk-title">${tr("ROUND")} ${L}</div><div class="sk-sub">${tr("Streaks")}: ${streak.wins}${nc ? " · 🟠 " + tr("chasing balls") : ""}</div>`);
 }
 function startStreak() {
   if (!guestGate("streak")) return;
@@ -5640,7 +5640,7 @@ function streakRoundWon() {
   streakSrv.target = Math.max(streakSrv.target, streak.wins); streakFlush();
   if (streak.wins > streak.best) { streak.best = streak.wins; try { localStorage.setItem(streakBestKey, String(streak.best)); } catch (e) {} }
   streakHud();
-  streakSetOverlay(`<div class="sk-title" style="color:#00e676">✓ ${tr("ROUND WON")}</div><div class="sk-sub">${tr("Streak")}: ${streak.wins}</div>`);
+  streakSetOverlay(`<div class="sk-title" style="color:#00e676">✓ ${tr("ROUND WON")}</div><div class="sk-sub">${tr("Streaks")}: ${streak.wins}</div>`);
   streak.timers.push(setTimeout(() => { if (mode === "streak" && streak && streak.phase === "won") streakStartRound(); }, STREAK_CFG.betweenMs));
 }
 function streakEnd() {
@@ -5651,7 +5651,7 @@ function streakEnd() {
   streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
   streakHud();
-  const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${tr("STREAK ENDED")}</div>
+  const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${tr("STREAKS ENDED")}</div>
     <div class="sk-sub">${streak.wins} ${tr("wins in a row")} · ${tr("Best")}: ${streak.best}</div>
     ${isNew ? `<div class="sk-new">★ ${tr("NEW BEST")} ★</div>` : ""}
     <div class="sk-btns"><button id="skAgain">${tr("Try again")}</button><button id="skHome">🏠 ${tr("Home")}</button></div>`);
@@ -6465,7 +6465,7 @@ function openProfile(name) {
     <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:lime">${p.stats.wins}</span></div>
     <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${p.stats.losses}</span></div>
     <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
-    <div class="prof-row"><span class="prof-label">Best Streak</span><span class="prof-val">${p.stats.bestStreak}</span></div>
+    <div class="prof-row"><span class="prof-label">Best Streaks</span><span class="prof-val">${p.stats.bestStreak}</span></div>
     <div class="prof-row"><span class="prof-label">ELO Gained</span><span class="prof-val" style="color:lime">+${Math.round(p.stats.totalEloGain)}</span></div>
     <div class="prof-row"><span class="prof-label">ELO Lost</span><span class="prof-val" style="color:#ff4444">-${Math.round(p.stats.totalEloLoss)}</span></div>
     <div class="prof-row"><span class="prof-label">Status</span><span class="prof-val">${inMatch?"⚔️ vs "+opp?.name:"⏳ Waiting"}</span></div>
@@ -6872,7 +6872,7 @@ async function startOnlineTV(targetUid) {
       "padding:22px 38px;color:#f0f0f5;font-family:var(--font-display);box-shadow:0 10px 40px rgba(0,0,0,0.6);backdrop-filter:blur(8px);";
     const title = document.createElement("div");
     title.style.cssText = "font-size:15px;letter-spacing:2px;opacity:.7;margin-bottom:8px;";
-    title.textContent = survTime ? (String(survTime).indexOf("🔥") === 0 ? "STREAK ENDED" : "SURVIVAL ENDED") : winner ? "MATCH FINISHED" : "MATCH ENDED";
+    title.textContent = survTime ? (String(survTime).indexOf("🔥") === 0 ? "STREAKS ENDED" : "SURVIVAL ENDED") : winner ? "MATCH FINISHED" : "MATCH ENDED";
     const big = document.createElement("div");
     big.style.cssText = "font-size:30px;font-weight:700;";
     if (survTime) {
@@ -6981,7 +6981,7 @@ async function startOnlineTV(targetUid) {
       players = spBot ? [sp, spBot] : [sp]; balls = [];
       const skUi = (d) => {
         const u = document.getElementById("ui"); if (!u || mode !== "online_tv") return;
-        if (!document.getElementById("sk_w")) u.innerHTML = `🔥 ${tr("Streak")}: <b id="sk_w">0</b><br>${tr("Round")}: <span id="sk_r">1</span><br>${tr("Bot level")}: <span id="sk_l">1</span>`;
+        if (!document.getElementById("sk_w")) u.innerHTML = `🔥 ${tr("Streaks")}: <b id="sk_w">0</b><br>${tr("Round")}: <span id="sk_r">1</span><br>${tr("Bot level")}: <span id="sk_l">1</span>`;
         const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
         set("sk_w", d.w || 0); set("sk_r", d.L || 1); set("sk_l", d.L || 1);
       };
@@ -6989,10 +6989,10 @@ async function startOnlineTV(targetUid) {
       const hud = document.getElementById("onlineHUD");
       const setT = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
       setT("onlineNameMe", dn(survD.name)); setT("onlineNameOpp", ""); setT("onlineRankMe", "(" + survElo + ")"); setT("onlineRankOpp", "");
-      if (isSk) { setT("onlineStatusHUD", "📺 Live Streak · " + tr("Round") + " " + (survD.L || 1)); setT("onlineScoreHUD", "🔥 " + (survD.w || 0)); }
+      if (isSk) { setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (survD.L || 1)); setT("onlineScoreHUD", "🔥 " + (survD.w || 0)); }
       else { setT("onlineStatusHUD", "📺 Live Survival"); setT("onlineScoreHUD", survFmt((survD.t || 0) / 60)); }
       if (hud) hud.style.display = "flex";
-      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE ${isSk ? "STREAK" : "SURVIVAL"} (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
+      specText.innerHTML = `<div style="text-align:center;line-height:1.4;"><b style="color:gold;">📺 LIVE ${isSk ? "STREAKS" : "SURVIVAL"} (${survElo} ELO)</b><br><span style="color:#00ff88">${escapeHtml(dn(survD.name))}</span></div>`;
       onlineTvInnerUnsubscribe = dbOn("survivalLive/" + suid, (d) => {
         if (survId !== onlineTvCurrentMatchId) return;
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
@@ -7001,7 +7001,7 @@ async function startOnlineTV(targetUid) {
           tvFreezeBalls = true;
           showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
           badMatches.set(survId, Date.now() + 15000);
-          specText.innerHTML = (isSk ? "Streak" : "Survival run") + " finished. Searching for next game...";
+          specText.innerHTML = (isSk ? "Streaks" : "Survival run") + " finished. Searching for next game...";
           holdUntil = Date.now() + 6000;
           clearTimeout(holdTimer);
           holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
@@ -7017,7 +7017,7 @@ async function startOnlineTV(targetUid) {
           tvFreezeBalls = d.ph !== "play";   // Intro/Rundensieg: die Baelle stehen auch beim Spieler still
           feedNetPlayer(sp, { x: d.x, y: d.y, alive: d.ma !== false }, 250);
           feedNetPlayer(spBot, { x: d.bx, y: d.by, alive: d.ba !== false }, 250);
-          setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streak · " + tr("Round") + " " + (d.L || 1));
+          setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (d.L || 1));
           skUi(d);
           if (d.b) { try { applyStreakTvBalls(JSON.parse(d.b)); } catch(e) {} }
           return;
@@ -7355,10 +7355,10 @@ const DICT = { de: {
   "You are watching – choose a TV mode":"Du schaust zu – wähle einen TV-Modus","Waiting for next match…":"Warte auf das nächste Match…","💀 You died! Waiting for result…":"💀 Du bist gestorben! Warte auf das Ergebnis…",
   "Message…":"Nachricht…","Account required to write…":"Account zum Schreiben nötig…","View profile":"Profil ansehen",
   "Total Games":"Spiele gesamt","Wins":"Siege","Losses":"Niederlagen","Winrate":"Siegquote","Highest Elo":"Höchste Elo","Lowest Elo":"Niedrigste Elo",
-  "Longest Winstreak":"Längste Siegesserie","Current Winstreak":"Aktuelle Siegesserie","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
-  "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streak":"Beste Serie","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
+  "Longest Winstreaks":"Längste Siegesserien","Current Winstreaks":"Aktuelle Siegesserien","Best Win":"Bester Sieg","Worst Loss":"Schlimmste Niederlage",
+  "Total Elo Won":"Elo gewonnen","Total Elo Lost":"Elo verloren","Matches":"Matches","Best Streaks":"Beste Serien","ELO Gained":"ELO gewonnen","ELO Lost":"ELO verloren",
   "Status":"Status","Speed":"Tempo","Awareness":"Wahrnehmung","Skill":"Skill",
-  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","No streak records yet":"Noch keine Streak-Rekorde","Streak":"Streak","Best":"Bestwert","Round":"Runde","Bot level":"Bot-Level","ROUND":"RUNDE","ROUND WON":"RUNDE GEWONNEN","STREAK ENDED":"STREAK BEENDET","wins in a row":"Siege in Folge","NEW BEST":"NEUER BESTWERT","Try again":"Nochmal","Home":"Menü","chasing balls":"verfolgende Bälle","🔥 Streak":"🔥 Streak","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
+  "MATCH FINISHED":"MATCH BEENDET","MATCH ENDED":"MATCH ABGEBROCHEN","No winner (opponent left)":"Kein Gewinner (Gegner hat verlassen)","Idle in Menu":"Im Menü","No Streaks records yet":"Noch keine Streaks-Rekorde","Streaks":"Streaks","Best":"Bestwert","Round":"Runde","Bot level":"Bot-Level","ROUND":"RUNDE","ROUND WON":"RUNDE GEWONNEN","STREAKS ENDED":"STREAKS BEENDET","wins in a row":"Siege in Folge","NEW BEST":"NEUER BESTWERT","Try again":"Nochmal","Home":"Menü","chasing balls":"verfolgende Bälle","🔥 Streaks":"🔥 Streaks","You already have an open challenge":"Du hast schon eine offene Herausforderung","Cancel challenge":"Herausforderung abbrechen","Challenge cancelled":"Herausforderung abgebrochen","1v1 CHALLENGE":"1v1-HERAUSFORDERUNG","Accept":"Annehmen","Decline":"Ablehnen","Challenge to a 1v1":"Zu einem 1v1 herausfordern","Currently in a match":"Ist gerade in einem Match","Log in to challenge players":"Melde dich an, um Spieler herauszufordern","You are in a match right now":"Du bist gerade in einem Match","Challenge already sent – wait a moment":"Herausforderung schon gesendet – kurz warten","Player is in a match right now":"Spieler ist gerade in einem Match","Could not send challenge":"Herausforderung konnte nicht gesendet werden","A match between you two is already running":"Zwischen euch läuft schon ein Match","Could not start the match":"Match konnte nicht gestartet werden","Searching for match":"Sucht ein Match","1v1 vs Bot":"1v1 gegen Bot","In 1v1 Match":"Im 1v1-Match","Watching Online TV":"Schaut Online-TV",
   "Local Multiplayer":"Lokaler Mehrspieler","Tournament":"Turnier","Coin Hunt":"Münzjagd","AI Spectate ":"KI zuschauen",
   "League":"Liga","Highest League":"Höchste Liga","🏅 Weekly League":"🏅 Wochenliga","Week ends in":"Woche endet in","Player":"Spieler","Last week":"Letzte Woche","Stayed in":"Geblieben in","Promotion zone":"Aufstiegszone","Relegation zone":"Abstiegszone","Top":"Top","Bottom":"Letzte","min.":"mind.","Loading league…":"Lade Liga…","+1 league win":"+1 Ligasieg","Win a match to enter this week's league group.":"Gewinne ein Match, um in die Liga-Gruppe dieser Woche zu kommen.","Every win counts, including wins against the Online Bot.":"Jeder Sieg zählt, auch gegen den Online-Bot.","Promoted to":"Aufgestiegen in","Relegated to":"Abgestiegen in","Silver":"Silber","Platinum":"Platin"
 }};
@@ -7880,12 +7880,12 @@ async function _modPurge(uid, name) {
 async function _modBan(uid, s, p) {
   if (s.banned) {
     await _modRPC().modSetSanction(uid, { banned: null, banReason: null, autoBan: null });
-    if (s.backup && confirm("Restore this player's backed-up data (profile, survival record, streak)?")) { await _modRPC().modRestoreUser(uid, s.backup); await _modRPC().modSetSanction(uid, { backup: null }); }
+    if (s.backup && confirm("Restore this player's backed-up data (profile, survival record, Streaks)?")) { await _modRPC().modRestoreUser(uid, s.backup); await _modRPC().modSetSanction(uid, { backup: null }); }
     return;
   }
   const nm = (p && p.name) || uid;
   const reason = prompt("Ban reason (shown to the player):", "Inappropriate username"); if (reason === null) _modCancel();
-  if (!confirm("Ban " + nm + " and DELETE all their data (leaderboards, league, survival, streak, chat)?")) _modCancel();
+  if (!confirm("Ban " + nm + " and DELETE all their data (leaderboards, league, survival, Streaks, chat)?")) _modCancel();
   try {
     const [pl, sv, sk] = await Promise.all([_modRPC().get("players/" + uid), _modRPC().get("survival/" + uid), _modRPC().get("streakBoard/" + uid)]);
     await _modRPC().modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null } });
@@ -7927,7 +7927,7 @@ async function _cheatCollect() {
   Object.entries(streakB || {}).forEach(([uid, r]) => {
     if (!r || skip(uid)) return;
     const L = r.level;
-    if (!(typeof L === "number" && isFinite(L) && Number.isInteger(L) && L >= 1 && L <= CHEAT_MAX_STREAK_LEVEL)) add(uid, r.name || (players && players[uid] && players[uid].name), "impossible streak level: " + L);
+    if (!(typeof L === "number" && isFinite(L) && Number.isInteger(L) && L >= 1 && L <= CHEAT_MAX_STREAK_LEVEL)) add(uid, r.name || (players && players[uid] && players[uid].name), "impossible Streaks level: " + L);
   });
   // Survival: Zeit gegen Replay pruefen (je 5 parallel)
   const sv = Object.entries(survival || {}).filter(([uid, r]) => r && !skip(uid));
@@ -8076,7 +8076,7 @@ async function liveAdminCleanup() {
       if (!o || o.sig !== sig) { _liveSeen[uid] = { sig, at: now }; continue; }
       if (now - o.at > 30000) {      // 30 s ohne jede Bewegung (Spieler/Baelle) -> Spiel loeschen, Status zuruecksetzen
         await R.modRemoveLive(uid);
-        try { const st = await R.get("players/" + uid + "/status"); if (st === "Survival" || st === "Playing Streak") await R.modSetIdle(uid); } catch (e) {}
+        try { const st = await R.get("players/" + uid + "/status"); if (st === "Survival" || st === "Playing Streaks") await R.modSetIdle(uid); } catch (e) {}
         delete _liveSeen[uid];
       }
     }
