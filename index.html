@@ -2668,7 +2668,7 @@ function clampEloChange(delta) {
 
 // ═══════════════════════════════════════════════
 //  DISCONNECT PENALTY (online 1v1 vs. real players)
-//  • Opponent sends no sign of life for 8 s (20 s before the start) -> forfeit: they lose, you win.
+//  • Opponent sends no sign of life for 3 s (also before the start) -> forfeit: they lose, you win.
 //  • Leaving mid-match (menu / reload) -> the leaver loses exactly the ELO of a normal loss.
 //  • Tab closed / connection lost -> Firebase marks the match as forfeited instantly (onDisconnect);
 //    the penalty is applied at the latest on the next start (marker in localStorage).
@@ -2683,8 +2683,8 @@ function forfeitChange(iAmWinner) {
   const me = onlineAccount ? onlineAccount.elo : 1500, opp = onlineOpponent ? onlineOpponent.elo : 1500;
   return iAmWinner ? normalEloChange(me, opp) : normalEloChange(opp, me);
 }
-const OPP_TIMEOUT_PLAYING_MS  = 8000;
-const OPP_TIMEOUT_WAITING_MS  = 20000;
+const OPP_TIMEOUT_PLAYING_MS  = 3000;      // kein Lebenszeichen fuer 3 s -> sofort verloren
+const OPP_TIMEOUT_WAITING_MS  = 3000;      // auch vor dem Start: nicht im Match erschienen -> nach 3 s verloren
 let onlineDisarm = null;
 function readActiveMatchMarker() { try { return JSON.parse(localStorage.getItem("dobActiveMatch") || "null"); } catch (e) { return null; } }
 function setActiveMatchMarker(id, loss) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, ts: Date.now() })); } catch (e) {} }
@@ -4706,7 +4706,7 @@ function startOnlineGame(matchData) {
     if (mode !== "online" || !running) return;
     const limit = wdStatus === "playing" ? OPP_TIMEOUT_PLAYING_MS : OPP_TIMEOUT_WAITING_MS;
     if (Date.now() - wdLastBeat > limit) { clearInterval(wdIv); forfeitOpponent(); }
-  }, 1000);
+  }, 500);
   onlineUnsubscribes.push(() => clearInterval(wdIv));
 
   // CHANGED: listens on onlineMatches/{matchId} via the guarded RPC.
@@ -4720,7 +4720,7 @@ function startOnlineGame(matchData) {
     if (data.dq === "camp" && data.winner && data.winner !== myName && !document.getElementById("campMsg"))
       campBanner("campMsg", "🚫 " + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000);
     if (data.status !== wdStatus) { wdStatus = data.status; wdLastBeat = Date.now(); }
-    const wdNow = String(data["ping_" + wdOppRole]) + "|" + JSON.stringify(data[wdOppRole + "State"] || null) + "|" + (!onlineIsHost ? data.ballState : "");
+    const wdNow = String(data["ping_" + wdOppRole]) + "|" + String(data[wdOppRole + "Ready"]) + "|" + JSON.stringify(data[wdOppRole + "State"] || null) + "|" + (!onlineIsHost ? data.ballState : "");
     if (wdNow !== wdSig) { wdSig = wdNow; wdLastBeat = Date.now(); }
 
     if (onlineIsHost && data.status === "waiting" && data.p1Ready && data.p2Ready) {
@@ -4778,7 +4778,8 @@ function startOnlineGame(matchData) {
       const median = sorted[Math.floor(sorted.length/2)];
       document.getElementById("pingDisplay").textContent = "📶 " + median + " ms";
     } catch(e) {}
-  }, 2500);
+  }, 1000);
+  RPC.setMatchPath(onlineMatchId, "ping_" + onlineRole, Date.now()).catch(() => {});      // sofortiges erstes Lebenszeichen
 }
 
 function makeOnlineBall() {
