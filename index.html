@@ -1427,6 +1427,13 @@ async function rpcModPurgeUser(uid, name) {
   res.forEach((r, i) => { if (r.status === "rejected") failed.push(list[i]); });
   return { total: list.length, failed };
 }
+async function rpcModApplyLeague(updates) {
+  requireAdmin();
+  const keys = Object.keys(updates || {});
+  if (!keys.length || keys.length > 3000) throw new Error("Bad league update.");
+  for (const k of keys) if (!/^players\/[A-Za-z0-9_-]{6,128}\/(leagueTier|leagueBest|leagueWeek|leagueGroup|leagueLastResult)$/.test(k)) throw new Error("Bad path: " + k);
+  return update(ref(db), updates);
+}
 async function rpcModRestoreUser(uid, backup) {
   requireAdmin();
   uid = String(uid || "");
@@ -1439,7 +1446,7 @@ async function rpcModRestoreUser(uid, backup) {
 }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -2744,6 +2751,11 @@ setInterval(() => {
   if (!((m && m.style.display === "flex") || (l && l.style.display === "flex"))) return;
   leagueResolvePrevious().catch(() => {});
 }, 10000);
+setInterval(() => {
+  if (!onlineAccount || !onlineAccount.leagueLastResult) return;
+  const m = document.getElementById("menu");
+  if (m && m.style.display === "flex") { try { leagueCelebrate(onlineAccount.leagueLastResult); } catch (e) {} }
+}, 8000);
 function leagueEnsureJoined() {
   if (_leagueBusy) return _leagueBusy;
   _leagueBusy = (async () => {
@@ -7652,6 +7664,56 @@ async function _modScanBtn() {
   if (r.pending.length) msg += "Suspicious but not confirmed (not banned):\n" + r.pending.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n");
   alert(msg.trim()); await _modPanelLoad();
 }
+// ═══ LIGA: Auswertung fuer ALLE Spieler (auch offline) – laeuft auf deinem Admin-Client ═══
+// Die Spieler-Eintraege darf nur der Besitzer oder der Admin schreiben. Deshalb setzt dein Client nach Wochenende bei jedem noch nicht
+// ausgewerteten Spieler die neue Liga (Rangliste/Profil zeigen sie sofort). Wer sich spaeter einloggt, sieht trotzdem den Glueckwunsch-Screen.
+let _lgAdminBusy = false;
+async function leagueAdminResolveAll() {
+  if (!_modIsAdmin() || !_modRPC() || _lgAdminBusy) return 0;
+  if (Date.now() < leagueWeekStart() + LEAGUE_GRACE_MS + 30000) return 0;
+  _lgAdminBusy = true;
+  let applied = 0;
+  try {
+    const R = _modRPC(), cur = leagueWeekId(), me = _modMyUid();
+    const [wl, players] = await Promise.all([R.get("weeklyLeague"), R.get("players")]);
+    const up = {};
+    for (const [week, tiers] of Object.entries(wl || {})) {
+      if (!(week < cur)) continue;
+      for (const [t, groups] of Object.entries(tiers || {})) {
+        const tier = Number(t);
+        for (const [gid, members] of Object.entries(groups || {})) {
+          const list = leagueSortMembers(Object.values(members || {})), size = list.length;
+          list.forEach((m, idx) => {
+            const p = players && players[m.uid];
+            if (!p || m.uid === me) return;                                   // eigener Account wird von deinem normalen Client ausgewertet
+            if (p.leagueWeek !== week || p.leagueGroup !== gid || (p.leagueTier || 0) !== tier) return;   // schon ausgewertet
+            const wins = m.wins || 0, outcome = leagueOutcome(idx, size, wins, tier);
+            let nt = tier;
+            if (outcome === "up")   nt = Math.min(LEAGUES.length - 1, tier + 1);
+            if (outcome === "down") nt = Math.max(0, tier - 1);
+            const b = "players/" + m.uid + "/";
+            up[b + "leagueTier"] = nt;
+            up[b + "leagueBest"] = Math.max(p.leagueBest || 0, nt);
+            up[b + "leagueWeek"] = null;
+            up[b + "leagueGroup"] = null;
+            up[b + "leagueLastResult"] = { week, rank: idx + 1, size, wins, outcome, from: tier, to: nt, group: gid };
+            applied++;
+          });
+        }
+      }
+    }
+    // in Bloecken schreiben (max. ~500 Spieler pro Schreibvorgang)
+    const keys = Object.keys(up);
+    for (let i = 0; i < keys.length; i += 2500) {
+      const part = {}; keys.slice(i, i + 2500).forEach(k => part[k] = up[k]);
+      await R.modApplyLeague(part);
+    }
+    if (applied) { try { leagueToast("🏅 " + applied + " league results applied", "#00ff88"); } catch (e) {} }
+  } catch (e) { console.warn("league admin resolve failed", e); applied = 0; }
+  _lgAdminBusy = false;
+  return applied;
+}
+window.addEventListener("dobAuthReady", () => setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000));
 async function modDeleteChatMsg(key) {
   if (!confirm("Delete this chat message?")) return;
   try { await _modRPC().modDeleteChat(key); delete chatAll[key]; renderChat(true); }
