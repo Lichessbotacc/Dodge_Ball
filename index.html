@@ -1570,6 +1570,7 @@ async function onFirebaseAndAuthReady() {
   // of trusting a client-chosen name as the database key.
   if (onlineAccount) {
     if (window._dobAuth && window._dobAuth.isPasswordAccount()) markDeviceAccount(onlineAccount.name);
+    await pullAccountFromServer();      // erst Serverstand holen, damit ein veralteter lokaler Stand nichts ueberschreibt
     if (readActiveMatchMarker()) {      // last session ended in the middle of an online match
       const mk0 = readActiveMatchMarker();
       clearActiveMatchMarker();
@@ -2158,7 +2159,7 @@ function syncPresence(force) {
   updatePlayerStatus(s).catch(() => {});
 }
 setInterval(() => syncPresence(false), 2000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); else { try { syncPresence(true); } catch (e) {} try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { try { const m = document.getElementById("menu"); if (m && m.style.display === "flex" && !onlineMatchId) pullAccountFromServer(); } catch (e) {} } if (!document.hidden) syncPresence(true); else { try { syncPresence(true); } catch (e) {} try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
 window.addEventListener("pagehide", () => { try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} });
 
 
@@ -3311,6 +3312,25 @@ function saveAccountLocal() {
   if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
 }
 
+// Cross-device sync: the server copy is the source of truth for stats. Without this, a device with an old local
+// copy pushed its stale numbers over the newer ones from another device (set() overwrites the whole record).
+// League fields are skipped here because leagueAdoptServer() has its own logic for them.
+const _SYNC_SKIP = new Set(["uid", "status", "lastActive", "updatedAt", "leagueTier", "leagueBest", "leagueWeek", "leagueGroup", "leagueLastResult"]);
+async function pullAccountFromServer() {
+  if (!fbReady || !myUid || !onlineAccount) return false;
+  try {
+    const sv = await dbGet("players/" + myUid);
+    if (!sv || typeof sv !== "object") return false;
+    const merged = Object.assign({}, onlineAccount);
+    for (const k of Object.keys(sv)) if (!_SYNC_SKIP.has(k)) merged[k] = sv[k];
+    ["survPlayed", "streakPlayed"].forEach(k => { merged[k] = Math.max(Number(sv[k]) || 0, Number(onlineAccount[k]) || 0); });   // Run-Zaehler nie zuruecksetzen
+    onlineAccount = sanitizeAccount(merged);
+    saveAccountLocal();
+    try { updateAccountBtn(); } catch (e) {}
+    return true;
+  } catch (e) { console.warn("account pull failed", e); return false; }
+}
+
 // CHANGED: writes to players/{myUid} via the guarded RPC (own data
 // only), and stores `name` as a field rather than as the key.
 async function pushAccountToFirebase() {
@@ -4258,6 +4278,7 @@ async function startSearchingOnline() {
     return;
   }
   await cleanStaleMatches();
+  await pullAccountFromServer();
   onlineSearchStartTime = Date.now();
 
   await RPC.setOwnQueueEntry({
