@@ -723,6 +723,11 @@ body.mode-tv #homeBtn:hover{transform:none;}
 .newsItem .nTitle{font-weight:700;font-size:15px;color:#ffd700;}
 .newsItem .nDate{font-size:11px;color:#8b93a6;margin-bottom:4px;}
 .newsItem .nText{font-size:14px;white-space:pre-wrap;word-break:break-word;}
+.newsReact{display:flex;gap:8px;margin-top:8px;}
+.newsReact button{margin:0;padding:4px 12px;font-size:13px;min-width:62px;opacity:.75;}
+.newsReact button.on{opacity:1;}
+.newsReact button.up.on{border-color:#00ff88;box-shadow:0 0 10px rgba(0,255,136,.45);background:rgba(0,255,136,.14);}
+.newsReact button.down.on{border-color:#ff4d4d;box-shadow:0 0 10px rgba(255,77,77,.45);background:rgba(255,77,77,.14);}
 
 
 /* ═════ WEEKLY LEAGUE (redesign) ═════ */
@@ -1435,7 +1440,21 @@ async function rpcGetChatBefore(beforeKey, n) {
 }
 // ── News: lesen darf jeder, schreiben nur der Admin (per Database Rules erzwungen!) ──
 async function rpcNewsPush(data) { requireUid(); return push(ref(db, "news"), data); }
-async function rpcNewsRemove(id) { requireUid(); return remove(ref(db, "news/" + id)); }
+async function rpcNewsRemove(id) {
+  requireUid();
+  await remove(ref(db, "news/" + id));
+  try { await remove(ref(db, "newsReactions/" + id)); } catch (e) {}   // Reaktionen der geloeschten News aufraeumen
+}
+// News-Reaktion: genau EIN Knoten pro Spieler (newsReactions/{newsId}/{uid}) -> pro News nur ein Haken ODER ein Kreuz.
+// value: "up" (gruener Haken) | "down" (rotes Kreuz) | null (Reaktion zuruecknehmen)
+async function rpcNewsReact(newsId, value) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(newsId))) throw new Error("Bad news id.");
+  const r = ref(db, "newsReactions/" + newsId + "/" + uid);
+  if (value === "up" || value === "down") return set(r, value);
+  return remove(r);
+}
 // ── Mod/Admin: nur mit Admin-UID (die Database Rules erzwingen das zusätzlich serverseitig) ──
 const MOD_ADMIN_UID_RPC = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";
 function requireNotBanned() { if (window.__dobBanned) throw new Error("Account banned."); }
@@ -1497,7 +1516,7 @@ async function rpcModRestoreUser(uid, backup) {
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
-  newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
+  newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
@@ -7537,7 +7556,7 @@ const DISCORD_URL = "https://discord.gg/w62CNMSbYd";
 //  wird das ERST durch die Firebase Database Rules (siehe Anleitung).
 // ═══════════════════════════════════════════════
 const NEWS_ADMIN_UID = "6O1c9OKTRlbwzDlPuBG2ceMRdz63";   // <- HIER deine UID eintragen (wird dir im News-Fenster angezeigt)
-let _newsData = null, _newsUnsub = null;
+let _newsData = null, _newsUnsub = null, _newsReactData = {}, _newsReactUnsub = null;
 
 function _newsMyUid() { try { return (window.dobMyUid && window.dobMyUid()) || null; } catch (e) { return null; } }
 function _newsIsAdmin() { const u = _newsMyUid(); return !!(u && NEWS_ADMIN_UID && u === NEWS_ADMIN_UID); }
@@ -7559,10 +7578,39 @@ function _newsStart() {
     if (ov && ov.style.display === "flex") _newsRender();
   });
 }
-if (window._dobRPC) _newsStart(); else window.addEventListener("dobRPCReady", _newsStart);
+function _newsReactStart() {
+  if (_newsReactUnsub || !window._dobRPC) return;
+  _newsReactUnsub = window._dobRPC.on("newsReactions", d => {
+    _newsReactData = d || {};
+    const ov = document.getElementById("newsOverlay");
+    if (ov && ov.style.display === "flex") _newsRender();
+  });
+}
+async function newsReact(newsId, value) {
+  const me = _newsMyUid();
+  const cur = me && _newsReactData[newsId] ? _newsReactData[newsId][me] : null;
+  try { await window._dobRPC.newsReact(newsId, cur === value ? null : value); }   // gleichen Button nochmal = Reaktion zuruecknehmen, anderer Button = wechseln
+  catch (e) { alert("Reaction failed: " + e.message); }
+}
+function _newsReactBar(n) {
+  const bar = document.createElement("div"); bar.className = "newsReact";
+  const r = _newsReactData[n.id] || {}, me = _newsMyUid(), mine = me ? r[me] : null;
+  let up = 0, down = 0;
+  Object.values(r).forEach(v => { if (v === "up") up++; else if (v === "down") down++; });
+  [["up", "✅", up], ["down", "❌", down]].forEach(([val, icon, cnt]) => {
+    const b = document.createElement("button");
+    b.className = val + (mine === val ? " on" : "");
+    b.textContent = icon + " " + cnt;
+    b.onclick = () => newsReact(n.id, val);
+    bar.appendChild(b);
+  });
+  return bar;
+}
+if (window._dobRPC) { _newsStart(); _newsReactStart(); } else window.addEventListener("dobRPCReady", () => { _newsStart(); _newsReactStart(); });
 
 function _newsRender() {
   const list = document.getElementById("newsList"); if (!list) return;
+  const _st = list.scrollTop;
   list.textContent = "";
   const items = _newsItems(), admin = _newsIsAdmin();
   if (!items.length) {
@@ -7573,6 +7621,7 @@ function _newsRender() {
     if (n.title) { const t = document.createElement("div"); t.className = "nTitle"; t.textContent = n.title; d.appendChild(t); }
     const dt = document.createElement("div"); dt.className = "nDate"; dt.textContent = n.ts ? new Date(n.ts).toLocaleString() : ""; d.appendChild(dt);
     const tx = document.createElement("div"); tx.className = "nText"; tx.textContent = n.text; d.appendChild(tx);
+    d.appendChild(_newsReactBar(n));
     if (admin) {
       const del = document.createElement("button");
       del.textContent = "🗑 Delete"; del.style.cssText = "margin:6px 0 0;padding:4px 10px;font-size:12px;";
@@ -7581,6 +7630,7 @@ function _newsRender() {
     }
     list.appendChild(d);
   });
+  list.scrollTop = _st;
   const ed = document.getElementById("newsEditor"), hint = document.getElementById("newsUidHint");
   ed.style.display = admin ? "block" : "none";
   const me = _newsMyUid();
@@ -7605,7 +7655,7 @@ function openNews() {
     document.body.appendChild(ov);
   }
   ov.style.display = "flex";
-  _newsStart(); _newsRender();
+  _newsStart(); _newsReactStart(); _newsRender();
   const items = _newsItems();
   try { if (items.length) localStorage.setItem("dob_news_seen", String(items[0].ts || 0)); } catch (e) {}
   _newsUpdateDot();
