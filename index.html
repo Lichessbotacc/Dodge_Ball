@@ -2909,6 +2909,17 @@ function leagueCountdownText() {
   const d = Math.floor(ms / 86400000), h = Math.floor((ms % 86400000) / 3600000), m = Math.floor((ms % 3600000) / 60000);
   return tr("Week ends in") + " " + (d ? d + "d " : "") + h + "h " + m + "m";
 }
+// Ein Liga-Eintrag entsteht nur durch einen Sieg. Eintraege mit 0 Siegen (z.B. Abbruch zwischen Beitritt und Sieg-Eintrag) zaehlen nicht.
+function leagueCleanGroup(g) {
+  const o = {};
+  for (const [k, m] of Object.entries(g || {})) if (m && ((Number(m.wins) || 0) > 0 || m.uid === myUid)) o[k] = m;
+  return o;
+}
+function leagueCleanGroups(groups) {
+  const o = {};
+  for (const [id, g] of Object.entries(groups || {})) { const c = leagueCleanGroup(g); if (Object.keys(c).length) o[id] = c; }
+  return o;
+}
 function leagueSortMembers(list) {
   return [...list].filter(m => m && m.uid).sort((a, b) =>
     (b.wins || 0) - (a.wins || 0) ||
@@ -2978,7 +2989,7 @@ async function leagueResolvePrevious() {
   if (Date.now() < leagueWeekStart() + LEAGUE_GRACE_MS) return;      // kurze Karenz: Nachzuegler-Siege der alten Woche sollen noch ankommen
   const tier = onlineAccount.leagueTier || 0;
   let grp;
-  try { grp = await dbGet(`weeklyLeague/${w}/${tier}/${g}`); }
+  try { grp = await dbGet(`weeklyLeague/${w}/${tier}/${g}`); if (grp) grp = leagueCleanGroup(grp); }
   catch (e) { console.warn("league resolve read failed", e); return; }      // try again later
   let outcome = "stay", rank = 0, size = 0, wins = 0;
   if (grp) {
@@ -3002,12 +3013,13 @@ async function leagueResolvePrevious() {
 }
 
 // Join a group of the current week (happens with the first counted win)
+let _lgJoinedWithWin = false;
 async function leagueJoinCurrent() {
   if (!fbReady || !onlineAccount || !myUid) return;
   const week = leagueWeekId();
   if (onlineAccount.leagueWeek === week && onlineAccount.leagueGroup) return;
   const tier = onlineAccount.leagueTier || 0;
-  const groups = (await dbGet(`weeklyLeague/${week}/${tier}`)) || {};
+  const groups = leagueCleanGroups(await dbGet(`weeklyLeague/${week}/${tier}`));
   let gid = null;
   for (const [id, g] of Object.entries(groups)) if (g && g[myUid]) { gid = id; break; }     // already a member (e.g. other device)
   if (!gid) {
@@ -3019,7 +3031,8 @@ async function leagueJoinCurrent() {
   }
   if (!gid) gid = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   if (!(groups[gid] && groups[gid][myUid])) {
-    await RPC.setLeagueMember(week, tier, gid, { uid: myUid, name: onlineAccount.name, wins: 0, joinedAt: Date.now() });
+    await RPC.setLeagueMember(week, tier, gid, { uid: myUid, name: onlineAccount.name, wins: 1, lastWinAt: Date.now(), joinedAt: Date.now() });
+    _lgJoinedWithWin = true;      // der erste Sieg ist damit schon eingetragen
   }
   leagueHistoryAdd(week, tier, gid);
   onlineAccount.leagueWeek = week;
@@ -3073,9 +3086,11 @@ function leagueEnsureJoined() {
 // Counts one online win (including wins against the Online Bot) for the weekly league
 async function leagueRecordWin() {
   if (!fbReady || !onlineAccount || !myUid) return;
+  _lgJoinedWithWin = false;
   await leagueEnsureJoined();
   const week = onlineAccount.leagueWeek, gid = onlineAccount.leagueGroup, tier = onlineAccount.leagueTier || 0;
   if (!week || !gid) return;
+  if (_lgJoinedWithWin) { _lgJoinedWithWin = false; lastLeagueNote = tr("+1 league win") + " (1)"; updateWinnerLeagueLine(); return; }
   const cur = (await dbGet(`weeklyLeague/${week}/${tier}/${gid}/${myUid}`)) || { joinedAt: Date.now() };
   const wins = (cur.wins || 0) + 1;
   await RPC.setLeagueMember(week, tier, gid, { uid: myUid, name: onlineAccount.name, wins, lastWinAt: Date.now(), joinedAt: cur.joinedAt || Date.now() });
@@ -3109,7 +3124,7 @@ async function renderLeague() {
   const vt = leagueViewTier == null ? tier : leagueViewTier, L = leagueByTier(vt);     // vt = angeschaute Liga
   const ws = leagueWeekStart(Date.now()), pct = Math.min(100, Math.max(0, (Date.now() - ws) / (leagueWeekEnd(Date.now()) - ws) * 100));
   const grpId = onlineAccount.leagueWeek === week ? onlineAccount.leagueGroup : null;
-  const groups = (await dbGet(`weeklyLeague/${week}/${vt}`)) || {};
+  const groups = leagueCleanGroups(await dbGet(`weeklyLeague/${week}/${vt}`));
   const gids = Object.keys(groups).filter(id => groups[id] && Object.keys(groups[id]).length)
     .sort((a, b) => ((vt === tier && b === grpId) - (vt === tier && a === grpId)) || Object.keys(groups[b]).length - Object.keys(groups[a]).length || (a < b ? -1 : 1));
   const shownGid = (leagueViewGid && gids.includes(leagueViewGid)) ? leagueViewGid
@@ -3276,7 +3291,7 @@ async function leagueShowLastRanking(r) {
   let list = [];
   {
     try {
-      const grp = await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`);
+      const grp = leagueCleanGroup(await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`));
       list = grp ? leagueSortMembers(Object.values(grp)) : [];
     } catch (e) { body.textContent = tr("Error while loading"); return; }
   }
