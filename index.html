@@ -4944,12 +4944,19 @@ async function handleOnlineResult(winnerName, change) {
     const loserUid  = won ? oppUid : myUid;
     // FIX: BOTH players record the result (idempotent via roundKey), so a host that leaves
     // right after the match no longer loses the score. Errors are logged instead of swallowed.
-    const roundKey = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
+    // Rundenschluessel direkt aus dem Match-Dokument auf dem Server holen (statt aus lokalem Zustand):
+    // Hat ein Client nach einem Rematch die neue Runde verpasst, bekam er einen anderen Schluessel als der Gegner
+    // und beide Clients haben denselben Sieg gezaehlt (6-0 -> 8-0).
+    const _rkMid = onlineMatchId, _rkLocal = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
+    const roundKeyP = (async () => {
+      try { const md = await RPC.getMatch(_rkMid); if (md) return _rkMid + ":" + (Number(md.createdAt) || 0) + ":" + (md.round || 0); } catch (e) {}
+      return _rkLocal;
+    })();
     const showH2H = (score) => {
       const scoreHUD = document.getElementById("onlineScoreHUD");
       if (scoreHUD) scoreHUD.textContent = `${score[myUid] || 0} - ${score[oppUid] || 0}`;
     };
-    recordHeadToHeadWin(winnerUid, loserUid, roundKey).then(showH2H).catch(e => {
+    roundKeyP.then(roundKey => recordHeadToHeadWin(winnerUid, loserUid, roundKey)).then(showH2H).catch(e => {
       console.warn("h2h write failed", e);
       getHeadToHeadScore(myUid, oppUid).then(showH2H).catch(() => {});
     });
