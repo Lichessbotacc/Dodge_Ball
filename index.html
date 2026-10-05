@@ -2601,11 +2601,12 @@ async function watchDailyReplay(day, uid, label) {
 async function _endDaily(t, camped, rec) {
   if (_dailyTest) { _survInfo = { daily: true, key: dailyKeyNow(), best: t, isRecord: false, saved: true, top: [], rank: 0, test: true }; if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped); return; }
   const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0;
-  try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}
+  try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}   // nur Notfall-Wert (offline/Gast)
   try {
     if (fbReady && myUid && onlineAccount) {
       const old = await dbGet("daily/" + key + "/" + myUid);
-      best = Math.max(best, (old && Number(old.time)) || 0);
+      best = (old && Number(old.time)) || 0;   // Datenbank ist massgeblich: wurden die Zeiten geloescht, zaehlt die alte lokale Bestzeit nicht mehr
+      if (!old) { try { localStorage.removeItem("dobDaily"); } catch (e) {} }
       if (t > best && t >= 1) {
         await RPC.saveDaily(key, t, onlineAccount.name); isRecord = true; best = t;
         try { await RPC.saveDailyReplay(key, JSON.stringify(rec)); } catch (e) { console.warn("daily replay save failed", e); }
