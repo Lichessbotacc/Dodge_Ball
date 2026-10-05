@@ -2302,25 +2302,18 @@ let _dailyKey = null;
 // col=Farbe, burst={n,v,r,life,col} (Feuerwerk beim Ablaufen).
 // Verfolger laufen wie im Streak-Modus ab (9 s = 540 Ticks) und spawnen alle 1,5 s (90 Ticks) nach.
 const DAILY_CHALLENGES = [
-  { icon: "⚡", name: "20 Fast Balls",      groups: [{ n: 20, v: 7.5 }] },
   { icon: "🐌", name: "50 Slow Balls",      groups: [{ n: 50, v: 1.6 }] },
-  { icon: "🪨", name: "5 Giants",           groups: [{ n: 5, v: 3.2, r: [55, 70] }] },
-  { icon: "🐝", name: "80 Tiny Swarm",      groups: [{ n: 80, v: 3, r: [7, 9] }] },
+  { icon: "🪨", name: "10 Giants",          groups: [{ n: 10, v: 3.2, r: [55, 70] }] },
+  { icon: "🐝", name: "80 Tiny Swarm",      playerR: 8, groups: [{ n: 80, v: 3, r: [8, 8] }] },   // playerR: dein Ball ist genau so gross wie die anderen
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
-  { icon: "🌀", name: "16 Balls + 6 Hunters", groups: [{ n: 16, v: 4.2 }, { n: 6, v: 3, h: 0.03, r: [14, 18], life: 540, respawn: 90 }] },
-  { icon: "🎱", name: "40 Pinballs",        groups: [{ n: 40, v: 4.2, r: [12, 18] }] },
-  { icon: "☄️", name: "20 Fast + 5 Hunters", groups: [{ n: 20, v: 6.2 }, { n: 5, v: 3.4, h: 0.034, r: [16, 20], life: 540, respawn: 90 }] },
-  { icon: "🧱", name: "30 Balls",           groups: [{ n: 30, v: 3.5 }] },
-  // ── neue, ungewoehnliche Challenges ──
   { icon: "🪃", name: "Boomerangs",         groups: [{ n: 22, v: 4.6, rot: 0.02, rotRand: true, col: "#ff8a5c" }] },
-  { icon: "⚙️", name: "Saw Blades",         groups: [{ n: 16, v: 4.2, rot: 0.055, rotRand: true, r: [16, 22], col: "#cfd8dc" }] },
   { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
-  { icon: "🎈", name: "Popcorn Bloaters",   groups: [{ n: 14, v: 2.4, r: [6, 8], grow: 0.075, rMax: 52, life: 600, respawn: 45, stagger: true, col: "#ff66cc" }] },
-  { icon: "🏀", name: "Ball Pit",           groups: [{ n: 34, v: 3, g: 0.11, r: [14, 22], col: "#ffb347" }] },
-  { icon: "👣", name: "Echo Trail",         groups: [{ n: 6, v: 3.4 }, { n: 0, cap: 8, respawn: 55, life: 420, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
-  { icon: "🚀", name: "Overdrive",          groups: [{ n: 12, v: 1.8, acc: 0.0018, accMax: 10, col: "#ffd24a" }] },
-  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 3, respawn: 90, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] },
-  { icon: "🦟", name: "Hornet Swarm",       groups: [{ n: 14, v: 3.4, h: 0.02, r: [7, 9], life: 540, respawn: 45 }] }
+  // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
+  { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 55, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
+  // Overdrive: 5 Baelle, Tempo waechst ohne Obergrenze (accMax riesig)
+  { icon: "🚀", name: "Overdrive",          groups: [{ n: 5, v: 1.8, acc: 0.0018, accMax: 1e9, col: "#ffd24a" }] },
+  // Fireworks: Spawnabstand wird mit jedem Feuerwerk laenger (respawnGrow Ticks pro Spawn)
+  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 3, respawn: 90, respawnGrow: 6, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
 ];
 // ── Welcher Modus ist an welchem Tag dran? ──
 // 1) Mod-Festlegung dailyPick/{tag} (Index) hat Vorrang.  2) Sonst Zufall (pro Tag fest per Seed, fuer alle Spieler gleich),
@@ -2335,7 +2328,8 @@ function dailyIdxFor(key, depth) {
   const ck = key + "|" + JSON.stringify(_dailyPicks);
   if (_dailyIdxCache[ck] !== undefined) return _dailyIdxCache[ck];
   const recent = new Set();
-  if (depth < 16) for (let i = 1; i <= 14; i++) recent.add(dailyIdxFor(_dayAdd(key, -i), depth + 1));   // Tiefe begrenzt die Rekursion
+  const WIN = Math.min(14, N - 1);   // bei wenigen Modi kann das Fenster nicht groesser als N-1 sein
+  if (depth < 16) for (let i = 1; i <= WIN; i++) recent.add(dailyIdxFor(_dayAdd(key, -i), depth + 1));   // Tiefe begrenzt die Rekursion
   let cand = []; for (let i = 0; i < N; i++) if (!recent.has(i)) cand.push(i);
   if (!cand.length) cand = DAILY_CHALLENGES.map((_, i) => i);
   const r = dailySeed("pick|" + key) % cand.length;
@@ -2387,7 +2381,7 @@ function dailyMakeBall(g, gi, T, initial) {
   return b;
 }
 function makeDailyBalls(ch) {
-  _dailyRun = { ch, next: ch.groups.map(g => g.respawn || 0) };
+  _dailyRun = { ch, next: ch.groups.map(g => g.respawn || 0), cnt: ch.groups.map(() => 0) };
   const out = [];
   ch.groups.forEach((g, gi) => { for (let i = 0; i < g.n; i++) out.push(dailyMakeBall(g, gi, 0, true)); });
   return out;
@@ -2428,7 +2422,8 @@ function dailyTick() {
     if (!g.respawn || T < _dailyRun.next[gi]) return;
     let alive = 0; for (const b of balls) if (b.gi === gi) alive++;
     if (alive >= (g.cap != null ? g.cap : g.n)) return;
-    _dailyRun.next[gi] = T + g.respawn;
+    if (g.from === "echo" && T < (g.delay || 150)) return;   // erst spawnen, wenn es eine Spur zum Nachziehen gibt
+    _dailyRun.next[gi] = T + g.respawn + (g.respawnGrow || 0) * _dailyRun.cnt[gi]++;
     const nb = dailyMakeBall(g, gi, T, false); balls.push(nb); dailyRec(nb, T);
   });
 }
@@ -2489,6 +2484,7 @@ function startSurvival(daily, testIdx) {
   const me = createPlayer(W() / 2, H() / 2, myBallColor, myPlayName());
   players.push(me);
   survTick = 0; survivalActive = true;
+  if (_dailyKey) { const _ch = dailyActiveCh(); if (_ch.playerR) { me.radius = _ch.playerR; } }
   if (_dailyKey) { balls = makeDailyBalls(dailyActiveCh()); dailyCountdown(); } else _dailyCdUntil = 0;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
