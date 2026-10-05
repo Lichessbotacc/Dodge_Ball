@@ -857,6 +857,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startSurvival()">🏝 Survival</button>
+          <button id="dailyBtn" onclick="startSurvival(true)">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streak</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
@@ -1381,6 +1382,13 @@ async function rpcSaveSurvival(time, replayStr, name) {
     ["survivalReplays/" + uid]: String(replayStr)
   });
 }
+// Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
+async function rpcSaveDaily(day, time, name) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: Date.now() });
+}
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
 async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
@@ -1464,7 +1472,7 @@ async function rpcModRestoreUser(uid, backup) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -2215,7 +2223,68 @@ function survFmt(t) {
   const m = Math.floor(t / 60), s = t - m * 60;
   return m ? m + ":" + (s < 10 ? "0" : "") + s.toFixed(1) : s.toFixed(1) + "s";
 }
-function startSurvival() {
+let _dailyKey = null;
+// Tages-Challenges: feste Ballanzahl, konstantes Tempo, keine neuen Baelle. n=Anzahl, v=Tempo (px/Tick), r=[min,max] Radius, h=Verfolger (turn = Lenkung rad/Tick)
+const DAILY_CHALLENGES = [
+  { icon: "⚡", name: "20 Fast Balls",      groups: [{ n: 20, v: 6.5 }] },
+  { icon: "🎯", name: "10 Hunters",         groups: [{ n: 10, v: 2.4, h: 0.02, r: [14, 18] }] },
+  { icon: "🐌", name: "50 Slow Balls",      groups: [{ n: 50, v: 1.3 }] },
+  { icon: "🪨", name: "5 Giants",           groups: [{ n: 5, v: 3.2, r: [55, 70] }] },
+  { icon: "🐝", name: "80 Tiny Swarm",      groups: [{ n: 80, v: 3, r: [7, 9] }] },
+  { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
+  { icon: "🌀", name: "12 Balls + 4 Hunters", groups: [{ n: 12, v: 3.5 }, { n: 4, v: 2.6, h: 0.025, r: [14, 18] }] },
+  { icon: "🐺", name: "25 Slow Hunters",    groups: [{ n: 25, v: 1.5, h: 0.03, r: [12, 15] }] },
+  { icon: "🎱", name: "40 Pinballs",        groups: [{ n: 40, v: 4.2, r: [12, 18] }] },
+  { icon: "☄️", name: "15 Fast + 3 Hunters", groups: [{ n: 15, v: 5.5 }, { n: 3, v: 3, h: 0.028, r: [16, 20] }] },
+  { icon: "🧱", name: "30 Balls",           groups: [{ n: 30, v: 3.5 }] }
+];
+function dailyChallengeFor(key) { const d = Date.parse(key + "T00:00:00Z") / 86400000; return DAILY_CHALLENGES[((Math.floor(d) % DAILY_CHALLENGES.length) + DAILY_CHALLENGES.length) % DAILY_CHALLENGES.length]; }
+function makeDailyBalls(ch) {
+  const rng = Math.random, out = [], me = players[0], cx = me ? me.x : W() / 2, cy = me ? me.y : H() / 2, mr = me ? me.radius : 12;
+  for (const g of ch.groups) for (let i = 0; i < g.n; i++) {
+    const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10;
+    let x = cx, y = cy, tries = 0;
+    do { x = r + rng() * (W() - 2 * r); y = r + rng() * (H() - 2 * r); } while (Math.hypot(x - cx, y - cy) < mr + r + 220 && tries++ < 200);
+    const a = rng() * Math.PI * 2, b = { x, y, radius: r, vx: Math.cos(a) * g.v, vy: Math.sin(a) * g.v };
+    if (g.h) { b.chase = true; b.born = Date.now() + 1e10; b.dch = { spd: g.v, turn: g.h }; }   // chase+born: orange Optik, laeuft nie ab
+    out.push(b);
+  }
+  return out;
+}
+let _dailyCdUntil = 0;
+function dailyCountdown() {
+  _dailyCdUntil = Date.now() + 3000;
+  const old = document.getElementById("dailyCd"); if (old) old.remove();
+  const el = document.createElement("div"); el.id = "dailyCd";
+  el.style.cssText = "position:fixed;inset:0;z-index:160;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;color:#fff;text-shadow:0 0 30px rgba(0,255,136,.8);font-family:system-ui,sans-serif;";
+  document.body.appendChild(el);
+  const ch = dailyChallengeFor(_dailyKey);
+  const tick = () => {
+    const left = _dailyCdUntil - Date.now();
+    if (left <= 0 || !survivalActive) { el.remove(); _dailyCdUntil = 0; return; }
+    el.innerHTML = '<div style="font-size:22px;font-weight:700;margin-bottom:8px;">' + ch.icon + ' ' + ch.name + '</div><div style="font-size:120px;font-weight:800;line-height:1;">' + Math.ceil(left / 1000) + '</div>';
+    setTimeout(tick, 100);
+  };
+  tick();
+}
+function dailySteer() {
+  const me = players[0]; if (!me || !me.alive) return;
+  for (const b of balls) {
+    if (!b.dch) continue;
+    const want = Math.atan2(me.y - b.y, me.x - b.x), cur = Math.atan2(b.vy, b.vx);
+    let d = want - cur;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    const na = cur + Math.max(-b.dch.turn, Math.min(b.dch.turn, d));
+    b.vx = Math.cos(na) * b.dch.spd; b.vy = Math.sin(na) * b.dch.spd;
+  }
+}
+function updDailyBtn() { const b = document.getElementById("dailyBtn"); if (!b) return; const c = dailyChallengeFor(dailyKeyNow()); b.textContent = "📅 Daily: " + c.icon + " " + c.name; }
+setInterval(updDailyBtn, 30000); setTimeout(updDailyBtn, 300); setTimeout(updDailyBtn, 2000);
+function dailyKeyNow() { return new Date().toISOString().slice(0, 10); }   // UTC-Tag: fuer alle gleich
+function dailySeed(k) { let h = 2166136261; for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) % 1000000000 + 1; }
+function startSurvival(daily) {
+  _dailyKey = daily === true ? dailyKeyNow() : null;
   if (!guestGate("survival")) return;
   countModeRun("survPlayed");
   try { cleanupOnline(); } catch (e) {}
@@ -2227,13 +2296,14 @@ function startSurvival() {
   running = true; startTime = Date.now();
   onlineVsBot = true; onlineIsHost = true; onlineMatchId = null; onlineOpponent = null;   // keine Netzwerk-Schreibzugriffe im Match
   onlineResultHandled = false; campReset(); onlineMatchStatus = null; onlineSimTick = 0; myTrail = [];
-  onlineRng = makeLCG(Math.floor(Math.random() * 1e9) + 1);
+  onlineRng = makeLCG(_dailyKey ? dailySeed(_dailyKey) : Math.floor(Math.random() * 1e9) + 1);
   onlineBallSpawnTimer = Date.now();
-  const md = document.getElementById("mode"); if (md) md.textContent = "Survival";
+  const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? "Daily: " + dailyChallengeFor(_dailyKey).name : "Survival";
   document.getElementById("onlineHUD").style.display = "none";
   const me = createPlayer(W() / 2, H() / 2, myBallColor, myPlayName());
   players.push(me);
   survTick = 0; survivalActive = true;
+  if (_dailyKey) { balls = makeDailyBalls(dailyChallengeFor(_dailyKey)); dailyCountdown(); } else _dailyCdUntil = 0;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
   const hud = document.createElement("div");
@@ -2293,6 +2363,7 @@ async function endSurvival(camped) {
   stopViewerCount();
   _survInfo = null;
   setTimeout(() => renderSurvivalResult(t, camped), 900);
+  if (_dailyKey) { await _endDaily(t, camped); return; }
   let best = 0, isRecord = false, saved = true;
   try {
     if (fbReady && myUid && onlineAccount) {
@@ -2307,6 +2378,24 @@ async function endSurvival(camped) {
   _survInfo = { best, isRecord, saved };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
+async function _endDaily(t, camped) {
+  const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0;
+  try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}
+  try {
+    if (fbReady && myUid && onlineAccount) {
+      const old = await dbGet("daily/" + key + "/" + myUid);
+      best = Math.max(best, (old && Number(old.time)) || 0);
+      if (t > best && t >= 1) { await RPC.saveDaily(key, t, onlineAccount.name); isRecord = true; best = t; }
+    } else if (t > best) { isRecord = true; best = t; }
+  } catch (e) { saved = false; if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
+  try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
+  try {
+    const all = await dbGet("daily/" + key);
+    if (all) { const arr = Object.entries(all).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 5); rank = arr.findIndex(x => x.u === myUid) + 1; }
+  } catch (e) {}
+  _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
+  if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
+}
 function renderSurvivalResult(t, camped) {
   let ov = document.getElementById("survivalResult");
   if (!ov) {
@@ -2315,16 +2404,20 @@ function renderSurvivalResult(t, camped) {
     document.body.appendChild(ov);
   }
   const i = _survInfo;
-  const line = !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
+  const dly = i && i.daily;
+  const line = dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
+    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
+    + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">📅 DAILY · ' + _dailyKey + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyChallengeFor(_dailyKey).icon + ' ' + dailyChallengeFor(_dailyKey).name + '</div>' : '')
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
-    + '<div style="font-size:15px;margin-bottom:16px;">' + line + '</div>'
+    + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
+    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div>' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + '</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
-    + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
+    + (i && i.best && !dly ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
-  ov.querySelector("#survRetry").onclick = () => startSurvival();
+  ov.querySelector("#survRetry").onclick = () => startSurvival(!!_dailyKey);
   ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
   const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => watchSurvivalReplay(myUid, "My record");
 }
@@ -5721,13 +5814,16 @@ function update() {
   }
 
   if (mode === "online") {
+    if (survivalActive && _dailyKey && _dailyCdUntil > Date.now()) return;   // Daily-Countdown: Baelle und Zeit stehen still
     { const vk = survivalActive ? (myUid ? "surv_" + myUid : null) : onlineMatchId; if (vk && vk !== _viewKey) watchViewerCount(vk, false); }
     campTick();
     if (survivalActive) survivalTick();
     pushMyPosition();
     onlineSimTick++;
 
-    if (onlineIsHost) {
+    const _isDaily = survivalActive && !!_dailyKey;
+    if (_isDaily) dailySteer();
+    if (onlineIsHost && !_isDaily) {
       if (Date.now() - onlineBallSpawnTimer > ONLINE_SPAWN_MS) {
         onlineBallSpawnTimer = Date.now();
         const nb = makeOnlineBall(); balls.push(nb);
@@ -6507,7 +6603,7 @@ function moveSingle(x, y) {
   }
 
   if (mode === "online") {
-    const meOnline = players.find(p => p.name === onlineAccount?.name);
+    const meOnline = survivalActive ? players[0] : players.find(p => p.name === onlineAccount?.name);   // Survival/Daily: immer der eigene Ball
     if (meOnline && meOnline.alive) {
       meOnline.x = Math.max(meOnline.radius, Math.min(W()-meOnline.radius, x));
       meOnline.y = Math.max(meOnline.radius, Math.min(H()-meOnline.radius, y));
