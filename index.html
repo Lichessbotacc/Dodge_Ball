@@ -1607,7 +1607,29 @@ setTimeout(async () => {
   else { try { await RPC.get("players/" + myUid); why = "Connected, but the player list does not arrive."; } catch (e) { why = "Server error: " + (e.code || e.message); } }
   if (!window._lastPlayersData) panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#ff8844;font-size:12px;'>⚠ " + why + " Reload the page.</span>";
 }, 10000);
+const _liveTrack = {};   // uid -> { sig, at, absent }
+let _liveTrackUnsub = null;
+function _liveAlive(uid) {
+  const o = _liveTrack[uid], now = Date.now();
+  if (!o) return true;                                   // noch keine Daten -> nicht vorschnell ausblenden
+  if (o.absent) return now - o.absent < 10000;           // Eintrag fehlt seit <10 s (Start/Wechsel)
+  return now - o.at < 20000;                             // Eintrag aendert sich noch
+}
+function _startLiveTrack() {
+  if (_liveTrackUnsub || !fbReady) return;
+  _liveTrackUnsub = dbOn("survivalLive", (d) => {
+    d = d || {}; const now = Date.now();
+    for (const [uid, v] of Object.entries(d)) {
+      const sig = String(v && v.t) + ":" + String(v && v.x) + ":" + String(v && v.y);
+      const o = _liveTrack[uid];
+      if (!o || o.sig !== sig || o.absent) _liveTrack[uid] = { sig, at: now };
+    }
+    for (const uid of Object.keys(_liveTrack)) if (!d[uid] && !_liveTrack[uid].absent) _liveTrack[uid] = { absent: now };
+    if (window._lastPlayersData) renderPresence(window._lastPlayersData);
+  });
+}
 function renderPresence(playersData) {
+  _startLiveTrack();
   {
     const panel = document.getElementById("onlinePlayersPanel");
     if (!panel) return;
@@ -1625,6 +1647,7 @@ function renderPresence(playersData) {
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
       )
       .forEach(p => {
+        if ((p.status === "Survival" || p.status === "Playing Streak") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu";   // Geist: Stream tot
         const key = String(p.name || "").toLowerCase();
         const prev = _seen.get(key);
         const better = !prev
@@ -2036,6 +2059,7 @@ function escapeHtml(v) {
 function currentPresenceStatus() {
   const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streak" };
   try {
+    if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
     if (survivalActive) return "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
     const _m = document.getElementById("menu");
@@ -2064,7 +2088,7 @@ function syncPresence(force) {
   updatePlayerStatus(s).catch(() => {});
 }
 setInterval(() => syncPresence(false), 2000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); else { try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); else { try { syncPresence(true); } catch (e) {} try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
 window.addEventListener("pagehide", () => { try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} });
 
 
