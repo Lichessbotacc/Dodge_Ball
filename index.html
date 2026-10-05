@@ -1371,6 +1371,7 @@ async function rpcClearTvViewing(key) { const uid = requireUid(); return remove(
 // Survival LIVE (fuer Online TV): nur der eigene Knoten survivalLive/{uid}
 async function rpcSetSurvivalLive(data) { requireNotBanned(); const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
 function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
+async function rpcModRemoveLive(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); return remove(ref(db, "survivalLive/" + uid)); }
 async function rpcRemoveSurvivalLive() { const uid = requireUid(); return remove(ref(db, "survivalLive/" + uid)); }
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
@@ -1446,7 +1447,7 @@ async function rpcModRestoreUser(uid, backup) {
 }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -2063,7 +2064,8 @@ function syncPresence(force) {
   updatePlayerStatus(s).catch(() => {});
 }
 setInterval(() => syncPresence(false), 2000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); else { try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
+window.addEventListener("pagehide", () => { try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} });
 
 
 // ═══ ZUSCHAUER-ANZEIGE (klein, unten rechts) ═══
@@ -7750,6 +7752,23 @@ async function leagueAdminResolveAll() {
   return applied;
 }
 window.addEventListener("dobAuthReady", () => setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000));
+// Geister-Streams (Streak/Survival-Eintraege, die nicht mehr aktualisiert werden, z.B. Tab im Hintergrund/Handy gesperrt) loeschen
+const _liveSeen = {};
+async function liveAdminCleanup() {
+  if (!_modIsAdmin() || !_modRPC()) return;
+  try {
+    const R = _modRPC(), d = (await R.get("survivalLive")) || {}, now = Date.now(), me = _modMyUid();
+    for (const [uid, v] of Object.entries(d)) {
+      const sig = String(v && v.t) + ":" + String(v && v.x) + ":" + String(v && v.y);
+      const o = _liveSeen[uid];
+      if (!o || o.sig !== sig) { _liveSeen[uid] = { sig, at: now }; continue; }
+      if (v && v.done) { if (now - o.at > 30000) { await R.modRemoveLive(uid); delete _liveSeen[uid]; } continue; }
+      if (now - o.at > 25000) { await R.modRemoveLive(uid); delete _liveSeen[uid]; }
+    }
+    for (const uid of Object.keys(_liveSeen)) if (!d[uid]) delete _liveSeen[uid];
+  } catch (e) { console.warn("live cleanup failed", e); }
+}
+window.addEventListener("dobAuthReady", () => setTimeout(() => setInterval(liveAdminCleanup, 10000), 15000));
 async function modDeleteChatMsg(key) {
   if (!confirm("Delete this chat message?")) return;
   try { await _modRPC().modDeleteChat(key); delete chatAll[key]; renderChat(true); }
