@@ -1612,20 +1612,23 @@ const _liveTrack = {};   // uid -> { sig, at, absent }
 let _liveTrackUnsub = null;
 function _liveAlive(uid) {
   const o = _liveTrack[uid], now = Date.now();
-  if (!o) return true;                                   // noch keine Daten -> nicht vorschnell ausblenden
-  if (o.absent) return now - o.absent < 10000;           // Eintrag fehlt seit <10 s (Start/Wechsel)
+  if (!o) return !(window._liveReady && now - window._liveReady > 10000);   // nie einen Live-Eintrag gesehen -> tot (nach kurzer Wartezeit)
+  if (o.absent) return now - o.absent < 10000 && now - (o.at || 0) < 30000;   // Eintrag fehlt seit <10 s (Start/Wechsel)
   return now - o.at < 30000;                             // Eintrag aendert sich noch
 }
 function _startLiveTrack() {
   if (_liveTrackUnsub || !fbReady) return;
   _liveTrackUnsub = dbOn("survivalLive", (d) => {
     d = d || {}; const now = Date.now();
+    if (!window._liveReady) window._liveReady = now;
     for (const [uid, v] of Object.entries(d)) {
       const sig = String(v && v.x) + ":" + String(v && v.y) + ":" + String(v && v.bx) + ":" + String(v && v.by) + ":" + String(v && v.b);
       const o = _liveTrack[uid];
-      if (!o || o.sig !== sig || o.absent) _liveTrack[uid] = { sig, at: now };
+      if (!o) _liveTrack[uid] = { sig, at: now };
+      else if (o.sig !== sig) _liveTrack[uid] = { sig, at: now };
+      else if (o.absent) _liveTrack[uid] = { sig, at: o.at, last: o.at };      // neu angelegt, aber gleicher eingefrorener Zustand
     }
-    for (const uid of Object.keys(_liveTrack)) if (!d[uid] && !_liveTrack[uid].absent) _liveTrack[uid] = { absent: now };
+    for (const uid of Object.keys(_liveTrack)) if (!d[uid] && !_liveTrack[uid].absent) { const o = _liveTrack[uid]; _liveTrack[uid] = { absent: now, sig: o.sig, at: o.at }; }
     if (window._lastPlayersData) renderPresence(window._lastPlayersData);
   });
 }
@@ -7796,7 +7799,7 @@ async function leagueAdminResolveAll() {
   _lgAdminBusy = false;
   return applied;
 }
-window.addEventListener("dobAuthReady", () => setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000));
+setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000);
 // Geister-Streams (Streak/Survival-Eintraege, die nicht mehr aktualisiert werden, z.B. Tab im Hintergrund/Handy gesperrt) loeschen
 const _liveSeen = {};
 async function liveAdminCleanup() {
@@ -7816,7 +7819,7 @@ async function liveAdminCleanup() {
     for (const uid of Object.keys(_liveSeen)) if (!d[uid]) delete _liveSeen[uid];
   } catch (e) { console.warn("live cleanup failed", e); }
 }
-window.addEventListener("dobAuthReady", () => setTimeout(() => setInterval(liveAdminCleanup, 10000), 15000));
+setInterval(liveAdminCleanup, 10000);   // Start unabhaengig vom Auth-Event; prueft intern, ob Admin
 async function modDeleteChatMsg(key) {
   if (!confirm("Delete this chat message?")) return;
   try { await _modRPC().modDeleteChat(key); delete chatAll[key]; renderChat(true); }
