@@ -374,6 +374,7 @@ button::before{
   transform:translateX(-120%);
   transition:opacity .2s ease;
 }
+@media (hover:hover) and (pointer:fine){
 button:hover{
   background:linear-gradient(150deg,#242436,#161620);
   border-color:rgba(0,255,136,0.4);
@@ -381,6 +382,7 @@ button:hover{
   transform:translateY(-2px);
 }
 button:hover::before{opacity:1;animation:btnSheen .9s ease forwards;}
+}
 button:active{transform:translateY(0) scale(.98);}
 @keyframes btnSheen{
   0%{transform:translateX(-120%);}
@@ -396,7 +398,7 @@ button:active{transform:translateY(0) scale(.98);}
   box-shadow:0 2px 10px rgba(0,0,0,0.3);
   transition:background .15s, color .15s, border-color .15s, transform .15s;
 }
-#homeBtn:hover{background:rgba(255,255,255,0.16);color:#fff;border-color:rgba(0,255,136,0.45);transform:translateX(-50%) translateY(-1px);}
+@media (hover:hover) and (pointer:fine){#homeBtn:hover{background:rgba(255,255,255,0.16);color:#fff;border-color:rgba(0,255,136,0.45);transform:translateX(-50%) translateY(-1px);}}
 
 #menu,#settings,#offlineSettings,#accountScreen,#leaderboardScreen,#leagueScreen,#onlineWait,#matchResult,#vsScreen,#winnerOverlay,#gameOver{
   position:absolute;inset:0;display:none;flex-direction:column;
@@ -514,7 +516,7 @@ h2::after{
 .prof-label{color:var(--text-dim);font-size:15px;font-family:var(--font-display);letter-spacing:.4px;}
 .prof-val{font-size:15px;font-weight:bold;color:var(--neon-green);font-family:var(--font-hud);}
 #profileClose{position:absolute;top:14px;right:18px;cursor:pointer;font-size:20px;color:var(--text-dim);transition:color .15s, transform .15s;}
-#profileClose:hover{color:#fff;transform:rotate(90deg);}
+@media (hover:hover) and (pointer:fine){#profileClose:hover{color:#fff;transform:rotate(90deg);}}
 
 #coinHUD{
   display:none;position:absolute;top:20px;left:50%;transform:translateX(-50%);
@@ -535,14 +537,14 @@ h2::after{
   border-bottom:1px solid rgba(255,255,255,0.06);font-size:16px;
   font-family:var(--font-hud);transition:background .15s;
 }
-.lb-row:hover{background:rgba(255,255,255,0.04);}
+@media (hover:hover) and (pointer:fine){.lb-row:hover{background:rgba(255,255,255,0.04);}}
 .lb-row:first-child{
   font-weight:bold;color:var(--neon-gold);background:rgba(255,215,0,0.08);
   font-family:var(--font-display);letter-spacing:.5px;
 }
-.lb-row:first-child:hover{background:rgba(255,215,0,0.08);}
+@media (hover:hover) and (pointer:fine){.lb-row:first-child:hover{background:rgba(255,215,0,0.08);}}
 .lb-me{background:rgba(0,255,136,0.14);}
-.lb-me:hover{background:rgba(0,255,136,0.14);}
+@media (hover:hover) and (pointer:fine){.lb-me:hover{background:rgba(0,255,136,0.14);}}
 
 input[type=text],input[type=number],input[type=password],select{
   padding:12px 18px;font-size:18px;border-radius:10px;
@@ -569,7 +571,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
   transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease;
   padding:0;margin:0;
 }
-.color-swatch:hover{transform:scale(1.12);}
+@media (hover:hover) and (pointer:fine){.color-swatch:hover{transform:scale(1.12);}}
 .color-swatch.active{
   border-color:#fff;
   transform:scale(1.15);
@@ -660,7 +662,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 .socialLink{display:flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;border-radius:999px;color:#f0f0f5;text-decoration:none;
   font-family:var(--font-display);font-size:13px;background:rgba(16,18,26,0.75);border:1px solid rgba(255,255,255,0.12);
   backdrop-filter:blur(8px);transition:transform .15s ease,border-color .15s ease;}
-.socialLink:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.35);}
+@media (hover:hover) and (pointer:fine){.socialLink:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.35);}}
 
 /* ── Liga-Namen im Chat ── */
 #chatMessages b.nm-t1,#chatMessages b.nm-t2,#chatMessages b.nm-t3{position:relative;background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent!important;font-weight:800;letter-spacing:.2px}
@@ -695,7 +697,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
 #streakOverlay .sk-new{margin-top:6px;color:#00e676;font-weight:700;letter-spacing:2px;}
 
 .ch-btn{margin-left:8px;border:1px solid rgba(255,215,0,.55);background:rgba(255,215,0,.12);color:#ffd700;border-radius:8px;padding:1px 8px;font-size:13px;line-height:20px;cursor:pointer;flex:none;}
-.ch-btn:hover{background:rgba(255,215,0,.28);}
+@media (hover:hover) and (pointer:fine){.ch-btn:hover{background:rgba(255,215,0,.28);}}
 .ch-btn.ch-busy,.ch-btn:disabled{opacity:.35;cursor:not-allowed;filter:grayscale(1);}
 #challengeBox{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(120px + env(safe-area-inset-bottom,0px));z-index:950;min-width:260px;max-width:92vw;padding:14px 18px 10px;border-radius:16px;background:rgba(14,16,24,.96);border:1px solid #ffd700;box-shadow:0 12px 40px rgba(0,0,0,.6),0 0 24px rgba(255,215,0,.18);color:#fff;font-family:var(--font-display,sans-serif);animation:chPop .25s ease;}
 @keyframes chPop{from{opacity:0;transform:translateX(-50%) translateY(14px) scale(.96);}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}}
@@ -764,7 +766,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
 .lg-zone.down{background:rgba(255,68,68,.14);color:var(--neon-red);}
 .lg-zone.mid{background:rgba(255,255,255,.05);color:var(--text-dim);}
 .lg-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;transition:background .15s;}
-.lg-row:hover{background:rgba(255,255,255,.06);}
+@media (hover:hover) and (pointer:fine){.lg-row:hover{background:rgba(255,255,255,.06);}}
 .lg-row.me{background:rgba(0,255,136,.12);box-shadow:inset 3px 0 0 var(--neon-green);}
 .lg-rank{width:30px;font-family:var(--font-hud);font-size:14px;color:var(--text-dim);text-align:center;}
 .lg-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-family:var(--font-display);color:#0a0a10;background:var(--lc);flex:none;}
@@ -798,6 +800,8 @@ body.mode-tv #homeBtn:hover{transform:none;}
 .lg-cel-sub{font-family:var(--font-display);font-size:22px;font-weight:700;margin-bottom:10px;}
 .lg-cel-meta{font-size:13px;color:var(--text-dim);margin-top:4px;}
 .lg-cel-box button{margin-top:16px;}
+@media (hover:hover) and (pointer:fine){.pr-row:hover{background:rgba(255,255,255,0.08);}}
+.pr-row,.lb-row,.lg-row,#chatMessages b[data-uid]{-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
 </style>
 </head>
 <body>
@@ -1652,7 +1656,7 @@ function renderPresence(playersData) {
     if (!panel) return;
 
     if (!playersData) {
-      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
       return;
     }
 
@@ -1675,7 +1679,7 @@ function renderPresence(playersData) {
     const activeList = [..._seen.values()];
 
     if (activeList.length === 0) {
-      panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
       return;
     }
 
@@ -1694,7 +1698,7 @@ function renderPresence(playersData) {
         : "";
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
-             onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''"
+             class="pr-row"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
           <span style="display:flex;align-items:center;">${((typeof _modIsAdmin === "function" && _modIsAdmin()) && (p.status === "Survival" || p.status === "Playing Streak" || p._ghost)) ? `<span style="color:#667;font-size:10px;margin-right:4px;">${(() => { const o = _liveTrack[p.uid]; return !o ? "no live" : o.absent ? "live gone " + Math.round((Date.now() - o.absent) / 1000) + "s" : "still " + Math.round((Date.now() - o.at) / 1000) + "s"; })()}</span>` : ""}<span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
@@ -1702,7 +1706,7 @@ function renderPresence(playersData) {
       `;
     });
     html += "</div>";
-    panel.innerHTML = html;
+    if (panel._lastHtml !== html) { panel._lastHtml = html; panel.innerHTML = html; }
   }
 }
 
@@ -1949,19 +1953,20 @@ function chatStyleName(el, uid) {
 function recolorChatNames() {
   document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
 }
+function _modIsAdminSafe(){ try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch(e){ return false; } }
 function renderChat(keepScroll) {
   const box = document.getElementById("chatMessages");
   if (!box) return;
   const prevH = box.scrollHeight, prevTop = box.scrollTop;
   const atBottom = prevH - prevTop - box.clientHeight < 40;
-  box.innerHTML = "";
+  const _realBox = box, _frag = document.createElement("div");
   const list = Object.entries(chatAll).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0) || (a[0] < b[0] ? -1 : 1));
-  if (!list.length) { box.textContent = "No messages yet."; return; }
+  if (!list.length) { _realBox._sig = null; _realBox.textContent = "No messages yet."; return; }
   if (chatNoMoreOlder) {
     const top = document.createElement("div");
     top.style.cssText = "font-size:10px;color:#8b93a6;text-align:center;";
     top.textContent = "— Beginning of chat —";
-    box.appendChild(top);
+    _frag.appendChild(top);
   }
   let prevSender = null;
   for (const [mkey, m] of list) {
@@ -1984,8 +1989,10 @@ function renderChat(keepScroll) {
     if (m.uid) {
       nm.style.cursor = "pointer";
       nm.title = "View profile";
-      nm.onmouseenter = () => nm.style.textDecoration = "underline";
-      nm.onmouseleave = () => nm.style.textDecoration = "none";
+      if (window.matchMedia && matchMedia("(hover:hover) and (pointer:fine)").matches) {
+        nm.onmouseenter = () => nm.style.textDecoration = "underline";
+        nm.onmouseleave = () => nm.style.textDecoration = "none";
+      }
       nm.onclick = () => openOnlineProfile(m.uid);
     }
     const tx = document.createElement("span");
@@ -2006,8 +2013,12 @@ function renderChat(keepScroll) {
       db_.style.cssText = "margin:0 0 0 4px;padding:0 5px;font-size:11px;"; db_.onclick = () => modDeleteChatMsg(mkey);
       row.append(mb, db_);
     }
-    box.appendChild(row);
+    _frag.appendChild(row);
   }
+  const _sig = _frag.innerHTML + (_modIsAdminSafe() ? "|a" : "");
+  if (_realBox._sig === _sig) return;   // nichts geändert -> DOM nicht anfassen (sonst gehen Taps auf iPad verloren)
+  _realBox._sig = _sig;
+  box.replaceChildren(..._frag.childNodes);
   if (keepScroll) box.scrollTop = prevTop + (box.scrollHeight - prevH);   // beim Nachladen oben: Position halten
   else if (atBottom || chatFirst) box.scrollTop = box.scrollHeight;
   chatFirst = false;
