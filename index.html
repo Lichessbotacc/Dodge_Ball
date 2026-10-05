@@ -881,7 +881,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <div id="menuOnline" class="menuPage" style="display:none">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startSurvival()">🏝 Survival</button>
-          <button id="dailyBtn" onclick="startSurvival(true)">📅 Daily Challenge</button>
+          <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
@@ -1435,6 +1435,14 @@ async function rpcClaimDailyWin(day) {
   return set(ref(db, "dailyWins/" + uid + "/" + day), true);
 }
 // Admin: alle Daily-Laeufe (Zeiten) und Daily-Replays loeschen
+// Admin: Daily-Modus fuer einen Tag festlegen (idx = Index in DAILY_CHALLENGES) oder Festlegung entfernen (idx = null)
+async function rpcModSetDailyPick(day, idx) {
+  requireAdmin();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  if (idx === null) return remove(ref(db, "dailyPick/" + day));
+  idx = Number(idx); if (!Number.isInteger(idx) || idx < 0 || idx > 500) throw new Error("Bad mode.");
+  return set(ref(db, "dailyPick/" + day), idx);
+}
 async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
@@ -1533,7 +1541,7 @@ async function rpcModRestoreUser(uid, backup) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
@@ -2314,7 +2322,34 @@ const DAILY_CHALLENGES = [
   { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 3, respawn: 90, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] },
   { icon: "🦟", name: "Hornet Swarm",       groups: [{ n: 14, v: 3.4, h: 0.02, r: [7, 9], life: 540, respawn: 45 }] }
 ];
-function dailyChallengeFor(key) { const d = Date.parse(key + "T00:00:00Z") / 86400000; return DAILY_CHALLENGES[((Math.floor(d) % DAILY_CHALLENGES.length) + DAILY_CHALLENGES.length) % DAILY_CHALLENGES.length]; }
+// ── Welcher Modus ist an welchem Tag dran? ──
+// 1) Mod-Festlegung dailyPick/{tag} (Index) hat Vorrang.  2) Sonst Zufall (pro Tag fest per Seed, fuer alle Spieler gleich),
+// der nie einen Modus der letzten 14 Tage nimmt (Festlegungen des Mods zaehlen als "dran gewesen").
+let _dailyPicks = {};   // aus der Datenbank geladen: { "2026-10-06": 3, ... }
+function _dayAdd(key, n) { return new Date(Date.parse(key + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10); }
+const _dailyIdxCache = {};
+function dailyIdxFor(key, depth) {
+  depth = depth || 0;
+  const N = DAILY_CHALLENGES.length, ov = _dailyPicks[key];
+  if (Number.isInteger(ov) && ov >= 0 && ov < N) return ov;
+  const ck = key + "|" + JSON.stringify(_dailyPicks);
+  if (_dailyIdxCache[ck] !== undefined) return _dailyIdxCache[ck];
+  const recent = new Set();
+  if (depth < 16) for (let i = 1; i <= 14; i++) recent.add(dailyIdxFor(_dayAdd(key, -i), depth + 1));   // Tiefe begrenzt die Rekursion
+  let cand = []; for (let i = 0; i < N; i++) if (!recent.has(i)) cand.push(i);
+  if (!cand.length) cand = DAILY_CHALLENGES.map((_, i) => i);
+  const r = dailySeed("pick|" + key) % cand.length;
+  return (_dailyIdxCache[ck] = cand[r]);
+}
+let _dailyTest = null;   // nur Admin: Testlauf eines beliebigen Modus (wird nie gespeichert)
+function dailyChallengeFor(key) { return DAILY_CHALLENGES[dailyIdxFor(key)]; }
+function dailyActiveCh() { return _dailyTest || dailyChallengeFor(_dailyKey); }
+async function dailyPicksRefresh() {
+  try { const v = (typeof RPC !== "undefined" && RPC) ? await RPC.get("dailyPick") : null; _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); } catch (e) { console.warn("dailyPick load failed", e); }
+  try { updDailyBtn(); } catch (e) {}
+}
+async function startDaily() { await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]); startSurvival(true); }
+setInterval(dailyPicksRefresh, 60000); setTimeout(dailyPicksRefresh, 1500); setTimeout(dailyPicksRefresh, 5000);
 let _dailyRun = null;
 function dailyMakeBall(g, gi, T, initial) {
   const rng = Math.random, me = players[0];
@@ -2405,7 +2440,7 @@ function dailyCountdown() {
   const el = document.createElement("div"); el.id = "dailyCd";
   el.style.cssText = "position:fixed;inset:0;z-index:160;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;color:#fff;text-shadow:0 0 30px rgba(0,255,136,.8);font-family:system-ui,sans-serif;";
   document.body.appendChild(el);
-  const ch = dailyChallengeFor(_dailyKey);
+  const ch = dailyActiveCh();
   const tick = () => {
     const left = _dailyCdUntil - Date.now();
     if (left <= 0 || !survivalActive) { el.remove(); _dailyCdUntil = 0; if (survivalActive) startTime = Date.now(); return; }
@@ -2433,8 +2468,9 @@ function dailyKeyNow() {   // Kalendertag in deutscher Zeit (Europe/Berlin), Wec
   catch (e) { return new Date().toISOString().slice(0, 10); }
 }
 function dailySeed(k) { let h = 2166136261; for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) % 1000000000 + 1; }
-function startSurvival(daily) {
+function startSurvival(daily, testIdx) {
   _dailyKey = daily === true ? dailyKeyNow() : null;
+  _dailyTest = (daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null;
   if (!guestGate("survival")) return;
   countModeRun("survPlayed");
   try { cleanupOnline(); } catch (e) {}
@@ -2448,12 +2484,12 @@ function startSurvival(daily) {
   onlineResultHandled = false; campReset(); onlineMatchStatus = null; onlineSimTick = 0; myTrail = [];
   onlineRng = makeLCG(_dailyKey ? dailySeed(_dailyKey) : Math.floor(Math.random() * 1e9) + 1);
   onlineBallSpawnTimer = Date.now();
-  const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? "Daily: " + dailyChallengeFor(_dailyKey).name : "Survival";
+  const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? (_dailyTest ? "Test: " : "Daily: ") + dailyActiveCh().name : "Survival";
   document.getElementById("onlineHUD").style.display = "none";
   const me = createPlayer(W() / 2, H() / 2, myBallColor, myPlayName());
   players.push(me);
   survTick = 0; survivalActive = true;
-  if (_dailyKey) { balls = makeDailyBalls(dailyChallengeFor(_dailyKey)); dailyCountdown(); } else _dailyCdUntil = 0;
+  if (_dailyKey) { balls = makeDailyBalls(dailyActiveCh()); dailyCountdown(); } else _dailyCdUntil = 0;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
   if (_dailyKey) for (const b of balls) dailyRec(b, 1);
@@ -2567,6 +2603,7 @@ async function watchDailyReplay(day, uid, label) {
   playSurvivalReplay(rec, label);
 }
 async function _endDaily(t, camped, rec) {
+  if (_dailyTest) { _survInfo = { daily: true, key: dailyKeyNow(), best: t, isRecord: false, saved: true, top: [], rank: 0, test: true }; if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped); return; }
   const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0;
   try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}
   try {
@@ -2601,7 +2638,7 @@ function renderSurvivalResult(t, camped) {
     : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
-    + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">📅 DAILY · ' + _dailyKey + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyChallengeFor(_dailyKey).icon + ' ' + dailyChallengeFor(_dailyKey).name + '</div>' : '')
+    + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
@@ -2609,7 +2646,7 @@ function renderSurvivalResult(t, camped) {
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
     + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
-  ov.querySelector("#survRetry").onclick = () => startSurvival(!!_dailyKey);
+  ov.querySelector("#survRetry").onclick = () => { if (_dailyKey && _dailyTest) startSurvival(true, DAILY_CHALLENGES.indexOf(_dailyTest)); else if (_dailyKey) startDaily(); else startSurvival(false); };
   ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
   const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => (_survInfo && _survInfo.daily) ? watchDailyReplay(_survInfo.key, myUid, "My best today") : watchSurvivalReplay(myUid, "My record");
 }
@@ -7980,7 +8017,7 @@ function _modRender() {
   }
 }
 setInterval(_modRender, 1000);
-setInterval(() => { _modWatch(); _modAdminBtn(); }, 3000);
+setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); }, 3000);
 if (_modRPC()) _modWatch();
 
 // ═══ ADMIN: Button im Menü + Mod-Panel ═══
@@ -7994,8 +8031,54 @@ function _modAdminBtn() {
   b.onclick = () => openModPanel();
   nb.insertAdjacentElement("afterend", b);
 }
+function _dailyAdminBtn() {
+  const ex = document.getElementById("dailyAdminBtn");
+  if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
+  if (ex) return;
+  const mb = document.getElementById("modBtn"); if (!mb) return;
+  const b = document.createElement("button"); b.id = "dailyAdminBtn"; b.textContent = "📅 Daily Admin";
+  b.style.cssText = "position:absolute;top:146px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;";
+  b.onclick = () => openDailyAdmin();
+  mb.insertAdjacentElement("afterend", b);
+}
 
 let _modPlayers = {}, _modSanc = {};
+// ═══ ADMIN: Daily-Modi festlegen + testen ═══
+function closeDailyAdmin() { const ov = document.getElementById("dailyAdminOv"); if (ov) ov.style.display = "none"; }
+async function openDailyAdmin() {
+  if (!_modIsAdmin()) return;
+  await dailyPicksRefresh();
+  let ov = document.getElementById("dailyAdminOv");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "dailyAdminOv";
+    ov.style.cssText = "position:fixed;inset:0;z-index:15000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);";
+    ov.addEventListener("click", e => { if (e.target === ov) closeDailyAdmin(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  const today = dailyKeyNow(), days = [];
+  for (let i = 0; i < 8; i++) days.push(_dayAdd(today, i));
+  const optHtml = '<option value="">🎲 Random (not in last 14 days)</option>' + DAILY_CHALLENGES.map((c, i) => '<option value="' + i + '">' + c.icon + ' ' + escapeHtml(c.name) + '</option>').join("");
+  let h = '<div style="width:min(620px,95vw);max-height:88vh;overflow-y:auto;background:#0d0f16;border:1px solid rgba(255,255,255,0.12);border-top:3px solid #ffd700;border-radius:14px;padding:16px;color:#e6e9f2;text-align:left;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">📅 Daily Modes (admin)</b><button onclick="closeDailyAdmin()" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+    + '<div style="font-size:12px;color:#8b93a6;margin:8px 0;">Pick a mode per day. "Random" = automatic. Choose a day in the past 14 days only if you want it to count as played.</div>';
+  days.forEach(d => {
+    const set_ = Number.isInteger(_dailyPicks[d]), cur = dailyChallengeFor(d);
+    h += '<div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><span style="width:90px;font-size:13px;">' + d + (d === today ? ' ⭐' : '') + '</span>'
+      + '<select data-day="' + d + '" onchange="dailyAdminSet(this)" style="flex:1;margin:0;padding:6px;font-size:13px;">' + optHtml.replace('value="' + (set_ ? _dailyPicks[d] : '') + '"', 'value="' + (set_ ? _dailyPicks[d] : '') + '" selected') + '</select>'
+      + '<span style="font-size:12px;color:#ffd700;min-width:150px;">→ ' + cur.icon + ' ' + escapeHtml(cur.name) + '</span></div>';
+  });
+  h += '<hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;"><b>🧪 Test any mode (only you, never saved)</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'
+    + DAILY_CHALLENGES.map((c, i) => '<button onclick="dailyAdminTest(' + i + ')" style="margin:0;padding:6px 10px;font-size:13px;">' + c.icon + ' ' + escapeHtml(c.name) + '</button>').join("")
+    + '</div></div>';
+  ov.innerHTML = h;
+}
+async function dailyAdminSet(sel) {
+  if (!_modIsAdmin()) return;
+  try { await _modRPC().modSetDailyPick(sel.dataset.day, sel.value === "" ? null : Number(sel.value)); await openDailyAdmin(); }
+  catch (e) { alert("Failed: " + (e && e.message) + " (Database Rules for dailyPick set?)"); }
+}
+function dailyAdminTest(i) { if (!_modIsAdmin()) return; closeDailyAdmin(); startSurvival(true, i); }
 function closeModPanel() { const ov = document.getElementById("modPanelOv"); if (ov) ov.style.display = "none"; }
 async function openModPanel(prefill) {
   if (!_modIsAdmin()) return;
