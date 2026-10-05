@@ -2312,12 +2312,6 @@ const DAILY_CHALLENGES = [
   // Overdrive: 5 Baelle, Tempo waechst ohne Obergrenze (accMax riesig)
   { icon: "🚀", name: "Overdrive",          groups: [{ n: 5, v: 1.8, acc: 0.0018, accMax: 1e9, col: "#ffd24a" }] },
   // Fireworks: Spawnabstand wird mit jedem Feuerwerk ganz langsam kuerzer (-0.5 Tick pro Spawn, bis min. 10 Ticks), kein Limit gleichzeitiger Feuerwerke
-  // ── Licht-Modi: light = { type:"torch", r } (nur Kreis um dich sichtbar) | { type:"storm", near, period, flash } (dunkel, Blitze zeigen alles) ──
-  { icon: "🔦", name: "Flashlight",         light: { type: "torch", r: 190 }, groups: [{ n: 30, v: 3.5, r: [12, 20] }] },
-  { icon: "🌩️", name: "Lightning Storm",    light: { type: "storm", near: 80, period: 300, flash: 40 }, groups: [{ n: 26, v: 4, r: [12, 18] }] },
-  { icon: "🌧️", name: "Acid Rain",          groups: [{ n: 0, cap: 99999, respawn: 8, life: 420, from: "top", v: 4.5, r: [6, 9], col: "#7dffb0" }] },
-  { icon: "🎈", name: "Inflation",          groups: [{ n: 7, v: 2.6, r: [8, 10], grow: 0.02, rMax: 85, col: "#ff66cc" }] },
-  { icon: "🕳️", name: "Ambush",             groups: [{ n: 0, cap: 99999, respawn: 45, life: 420, from: "near", v: 2.6, r: [16, 22], emerge: 60, col: "#c77dff" }] },
   { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
 ];
 // ── Welcher Modus ist an welchem Tag dran? ──
