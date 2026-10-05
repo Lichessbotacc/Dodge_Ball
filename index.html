@@ -1372,6 +1372,7 @@ async function rpcClearTvViewing(key) { const uid = requireUid(); return remove(
 async function rpcSetSurvivalLive(data) { requireNotBanned(); const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
 function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
 async function rpcModRemoveLive(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); return remove(ref(db, "survivalLive/" + uid)); }
+async function rpcModSetIdle(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); return update(ref(db, "players/" + uid), { status: "Idle in Menu" }); }
 async function rpcRemoveSurvivalLive() { const uid = requireUid(); return remove(ref(db, "survivalLive/" + uid)); }
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
@@ -1447,7 +1448,7 @@ async function rpcModRestoreUser(uid, backup) {
 }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1613,14 +1614,14 @@ function _liveAlive(uid) {
   const o = _liveTrack[uid], now = Date.now();
   if (!o) return true;                                   // noch keine Daten -> nicht vorschnell ausblenden
   if (o.absent) return now - o.absent < 10000;           // Eintrag fehlt seit <10 s (Start/Wechsel)
-  return now - o.at < 20000;                             // Eintrag aendert sich noch
+  return now - o.at < 30000;                             // Eintrag aendert sich noch
 }
 function _startLiveTrack() {
   if (_liveTrackUnsub || !fbReady) return;
   _liveTrackUnsub = dbOn("survivalLive", (d) => {
     d = d || {}; const now = Date.now();
     for (const [uid, v] of Object.entries(d)) {
-      const sig = String(v && v.t) + ":" + String(v && v.x) + ":" + String(v && v.y);
+      const sig = String(v && v.x) + ":" + String(v && v.y) + ":" + String(v && v.bx) + ":" + String(v && v.by) + ":" + String(v && v.b);
       const o = _liveTrack[uid];
       if (!o || o.sig !== sig || o.absent) _liveTrack[uid] = { sig, at: now };
     }
@@ -2091,6 +2092,26 @@ setInterval(() => syncPresence(false), 2000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncPresence(true); else { try { syncPresence(true); } catch (e) {} try { if (fbReady && myUid && (_skLiveOn || (typeof mode !== "undefined" && (mode === "survival" || mode === "streak")))) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} } });
 window.addEventListener("pagehide", () => { try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} });
 
+
+// Watchdog: Streak/Survival, in dem sich 30 s (sichtbarer Tab) nichts bewegt (Spieler + Baelle), wird abgebrochen und geloescht
+(function () {
+  let sig = "", still = 0, last = Date.now();
+  setInterval(() => {
+    const now = Date.now(), dt = now - last; last = now;
+    let solo = false;
+    try { solo = !!survivalActive || (mode === "streak" && streak && streak.phase !== "over" && document.body.classList.contains("ingame")); } catch (e) {}
+    if (!solo || document.hidden) { still = 0; sig = ""; return; }
+    let cur = "";
+    try { cur = (players || []).map(p => Math.round(p.x) + "," + Math.round(p.y)).join(";") + "|" + (balls || []).map(b => Math.round(b.x) + "," + Math.round(b.y)).join(";"); } catch (e) {}
+    if (cur !== sig) { sig = cur; still = 0; return; }
+    still += Math.min(dt, 5000);
+    if (still >= 30000) {
+      still = 0;
+      try { if (fbReady && myUid) { RPC.removeSurvivalLive().catch(() => {}); updatePlayerStatus("Idle in Menu").catch(() => {}); } } catch (e) {}
+      try { exitToMenu(); } catch (e) { location.reload(); }
+    }
+  }, 2000);
+})();
 
 // ═══ ZUSCHAUER-ANZEIGE (klein, unten rechts) ═══
 // Spieler (1v1 / Survival) sehen, wie viele gerade zuschauen; TV-Zuschauer tragen sich selbst ein und sehen die Gesamtzahl.
@@ -7783,11 +7804,14 @@ async function liveAdminCleanup() {
   try {
     const R = _modRPC(), d = (await R.get("survivalLive")) || {}, now = Date.now(), me = _modMyUid();
     for (const [uid, v] of Object.entries(d)) {
-      const sig = String(v && v.t) + ":" + String(v && v.x) + ":" + String(v && v.y);
+      const sig = String(v && v.x) + ":" + String(v && v.y) + ":" + String(v && v.bx) + ":" + String(v && v.by) + ":" + String(v && v.b);
       const o = _liveSeen[uid];
       if (!o || o.sig !== sig) { _liveSeen[uid] = { sig, at: now }; continue; }
-      if (v && v.done) { if (now - o.at > 30000) { await R.modRemoveLive(uid); delete _liveSeen[uid]; } continue; }
-      if (now - o.at > 25000) { await R.modRemoveLive(uid); delete _liveSeen[uid]; }
+      if (now - o.at > 30000) {      // 30 s ohne jede Bewegung (Spieler/Baelle) -> Spiel loeschen, Status zuruecksetzen
+        await R.modRemoveLive(uid);
+        try { const st = await R.get("players/" + uid + "/status"); if (st === "Survival" || st === "Playing Streak") await R.modSetIdle(uid); } catch (e) {}
+        delete _liveSeen[uid];
+      }
     }
     for (const uid of Object.keys(_liveSeen)) if (!d[uid]) delete _liveSeen[uid];
   } catch (e) { console.warn("live cleanup failed", e); }
