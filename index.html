@@ -2275,6 +2275,7 @@ function makeDailyBalls(ch) {
 let _dailyCdUntil = 0;
 function dailyCountdown() {
   _dailyCdUntil = Date.now() + 3000;
+  startTime = _dailyCdUntil;   // Time-Anzeige beginnt erst nach dem Countdown
   const old = document.getElementById("dailyCd"); if (old) old.remove();
   const el = document.createElement("div"); el.id = "dailyCd";
   el.style.cssText = "position:fixed;inset:0;z-index:160;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;color:#fff;text-shadow:0 0 30px rgba(0,255,136,.8);font-family:system-ui,sans-serif;";
@@ -2282,7 +2283,7 @@ function dailyCountdown() {
   const ch = dailyChallengeFor(_dailyKey);
   const tick = () => {
     const left = _dailyCdUntil - Date.now();
-    if (left <= 0 || !survivalActive) { el.remove(); _dailyCdUntil = 0; return; }
+    if (left <= 0 || !survivalActive) { el.remove(); _dailyCdUntil = 0; if (survivalActive) startTime = Date.now(); return; }
     el.innerHTML = '<div style="font-size:22px;font-weight:700;margin-bottom:8px;">' + ch.icon + ' ' + ch.name + '</div><div style="font-size:120px;font-weight:800;line-height:1;">' + Math.ceil(left / 1000) + '</div>';
     setTimeout(tick, 100);
   };
@@ -5885,7 +5886,7 @@ function update() {
   if (mode === "tournament") { updateTournament(); return; }
 
   const el = document.getElementById("time");
-  if (el) el.textContent = mode === "online_tv" ? tvClockSec() : Math.floor((Date.now() - startTime) / 1000);
+  if (el) el.textContent = mode === "online_tv" ? tvClockSec() : Math.max(0, Math.floor((Date.now() - startTime) / 1000));
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
   if (mode === "online_tv") {
