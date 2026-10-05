@@ -661,6 +661,19 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
   font-family:var(--font-display);font-size:13px;background:rgba(16,18,26,0.75);border:1px solid rgba(255,255,255,0.12);
   backdrop-filter:blur(8px);transition:transform .15s ease,border-color .15s ease;}
 .socialLink:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.35);}
+
+/* ── Liga-Namen im Chat ── */
+#chatMessages b.nm-t1,#chatMessages b.nm-t2,#chatMessages b.nm-t3{position:relative;background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent!important;font-weight:800;letter-spacing:.2px}
+#chatMessages b.nm-t1{background-image:linear-gradient(100deg,#8f9bb0 0%,#f4f8ff 22%,#aab6c9 40%,#ffffff 52%,#8f9bb0 70%,#dfe8f5 100%);animation:nmShine 4.5s linear infinite;filter:drop-shadow(0 0 3px rgba(200,215,235,.35))}
+#chatMessages b.nm-t2{background-image:linear-gradient(100deg,#b8860b 0%,#ffe766 20%,#ffb300 38%,#fff6b0 50%,#e6a800 68%,#ffd700 100%);animation:nmShine 3.2s linear infinite;filter:drop-shadow(0 0 5px rgba(255,200,0,.55))}
+#chatMessages b.nm-t3{background-image:linear-gradient(100deg,#00e5ff 0%,#7cffe9 18%,#b388ff 36%,#ffffff 48%,#4fe0d0 62%,#4aa8ff 80%,#00e5ff 100%);background-size:300% 100%;animation:nmShine 2.6s linear infinite,nmPulse 2.2s ease-in-out infinite;filter:drop-shadow(0 0 6px rgba(79,224,208,.8))}
+#chatMessages b.nm-t3::after{content:"✦";position:absolute;right:-12px;top:-5px;font-size:9px;-webkit-text-fill-color:#aef;color:#aef;animation:nmSpark 1.8s ease-in-out infinite}
+#chatMessages b.nm-t2::after{content:"✦";position:absolute;right:-11px;top:-4px;font-size:8px;-webkit-text-fill-color:#ffe98a;color:#ffe98a;animation:nmSpark 2.6s ease-in-out infinite}
+#chatMessages b.nm-t3,#chatMessages b.nm-t2{margin-right:12px}
+@keyframes nmShine{0%{background-position:150% 0}100%{background-position:-100% 0}}
+@keyframes nmPulse{0%,100%{filter:drop-shadow(0 0 4px rgba(79,224,208,.6))}50%{filter:drop-shadow(0 0 10px rgba(124,255,233,1))}}
+@keyframes nmSpark{0%,100%{opacity:.15;transform:scale(.6) rotate(0)}50%{opacity:1;transform:scale(1.2) rotate(45deg)}}
+@media (prefers-reduced-motion:reduce){#chatMessages b.nm-t1,#chatMessages b.nm-t2,#chatMessages b.nm-t3,#chatMessages b.nm-t2::after,#chatMessages b.nm-t3::after{animation:none}}
 #chatPanel,#onlinePlayersPanel{width:260px!important;}
 #onlinePlayersPanel{height:400px;max-height:400px;}
 @media (max-width:980px){#menu{flex-wrap:wrap;gap:20px;}#chatPanel,#onlinePlayersPanel{width:320px!important;}}
@@ -1922,8 +1935,19 @@ function chatLeagueColor(uid) {
   else if (uid && window._lastPlayersData && window._lastPlayersData[uid]) t = window._lastPlayersData[uid].leagueTier || 0;
   return leagueByTier(t).color;
 }
+function chatLeagueTier(uid) {
+  if (uid && myUid && uid === myUid && onlineAccount) return Math.max(0, Math.min(3, onlineAccount.leagueTier || 0));
+  if (uid && window._lastPlayersData && window._lastPlayersData[uid]) return Math.max(0, Math.min(3, window._lastPlayersData[uid].leagueTier || 0));
+  return 0;
+}
+function chatStyleName(el, uid) {
+  const t = chatLeagueTier(uid);
+  el.style.color = chatLeagueColor(uid);
+  el.classList.remove("nm-t1", "nm-t2", "nm-t3");
+  if (t > 0) el.classList.add("nm-t" + t);
+}
 function recolorChatNames() {
-  document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { el.style.color = chatLeagueColor(el.dataset.uid); });
+  document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
 }
 function renderChat(keepScroll) {
   const box = document.getElementById("chatMessages");
@@ -1956,7 +1980,7 @@ function renderChat(keepScroll) {
     nm.setAttribute("translate", "no");
     nm.textContent = m.name + ": ";
     nm.dataset.uid = m.uid || "";
-    nm.style.color = chatLeagueColor(m.uid);
+    chatStyleName(nm, m.uid);
     if (m.uid) {
       nm.style.cursor = "pointer";
       nm.title = "View profile";
