@@ -2731,10 +2731,10 @@ async function forfeitOpponent() {
 //  ANTI CORNER-CAMPING (online 1v1)
 //  • "Deep corner" = player centre inside a square of CAMP_ZONE * min(W,H) in any of the 4 corners.
 //  • Meter: +1 s per second in a corner (switching corners counts), only CAMP_DECAY s lost per second outside.
-//  • Warning from CAMP_WARN_MS (3 s), at CAMP_LIMIT_MS (6 s) the player has LOST the match (normal ELO loss) + message.
+//  • Warning from CAMP_WARN_MS (2.5 s), at CAMP_LIMIT_MS (5 s) the player has LOST the match (normal ELO loss) + message.
 //  • Every client checks itself (instant message) AND the opponent (+1.5 s grace) so it cannot be switched off.
 // ═══════════════════════════════════════════════
-const CAMP_ZONE = 0.14, CAMP_WARN_MS = 3000, CAMP_LIMIT_MS = 6000, CAMP_DECAY = 0.25;
+const CAMP_ZONE = 0.17, CAMP_WARN_MS = 2500, CAMP_LIMIT_MS = 5000, CAMP_DECAY = 0.25;
 let campState = null, onlineMatchStatus = null;
 function campReset() { campState = { me: { m: 0 }, opp: { m: 0 }, last: Date.now(), done: false }; campWarn(false); }
 function inDeepCorner(p) {
@@ -2791,7 +2791,7 @@ function campDisqualify(selfCamped) {
 //    • Neuer Modus mit eigenem Spielende? -> CAMP_ADAPTERS["meinmodus"] = { humans(), active(), frozen(p), kill(p) } eintragen,
 //      alle Felder sind optional (fehlt etwas, gilt der Standard).
 //    • Nicht ueberwacht: "online" (hat eigene Logik oben), "online_tv" (nur Zuschauer).
-//  Regeln (Zone, Warnung 3s, Limit 6s) sind dieselben wie online: CAMP_ZONE / CAMP_WARN_MS / CAMP_LIMIT_MS / CAMP_DECAY.
+//  Regeln (Zone, Warnung 2.5s, Limit 5s) sind dieselben wie online: CAMP_ZONE / CAMP_WARN_MS / CAMP_LIMIT_MS / CAMP_DECAY.
 // ═══════════════════════════════════════════════
 const CAMP_SKIP = { online: 1, online_tv: 1 };
 const CAMP_ADAPTERS = {
