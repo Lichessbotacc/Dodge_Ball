@@ -2303,7 +2303,7 @@ let _dailyKey = null;
 // Verfolger laufen wie im Streak-Modus ab (9 s = 540 Ticks) und spawnen alle 1,5 s (90 Ticks) nach.
 const DAILY_CHALLENGES = [
   { icon: "🐌", name: "50 Slow Balls",      groups: [{ n: 50, v: 1.6 }] },
-  { icon: "🪨", name: "10 Giants",          groups: [{ n: 10, v: 3.2, r: [55, 70] }] },
+  { icon: "🪨", name: "Giants",             groups: [{ n: 0, cap: 99999, respawn: 300, v: 3.2, r: [55, 70] }] },   // startet leer, alle 5 s (300 Ticks) kommt ein Riese dazu, keiner verschwindet
   { icon: "🐝", name: "80 Tiny Swarm",      playerR: 8, groups: [{ n: 80, v: 3, r: [8, 8] }] },   // playerR: dein Ball ist genau so gross wie die anderen
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
   { icon: "🪃", name: "Boomerangs",         groups: [{ n: 22, v: 4.6, rot: 0.02, rotRand: true, col: "#ff8a5c" }] },
