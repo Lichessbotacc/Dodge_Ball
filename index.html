@@ -1401,6 +1401,13 @@ async function rpcRemoveDailyReplay(day) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   return remove(ref(db, "dailyReplays/" + uid + "/" + day));
 }
+// Daily-Sieg: nur eigener Knoten dailyWins/{uid}/{YYYY-MM-DD}
+async function rpcClaimDailyWin(day) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  return set(ref(db, "dailyWins/" + uid + "/" + day), true);
+}
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
 async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
@@ -1484,7 +1491,7 @@ async function rpcModRestoreUser(uid, backup) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -2401,7 +2408,22 @@ async function dailyCleanup() {   // eigene Replays vergangener Tage loeschen
     if (all) for (const d of Object.keys(all)) if (d < today) await RPC.removeDailyReplay(d);
   } catch (e) { console.warn("daily cleanup failed", e); }
 }
-const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); } }, 4000);
+async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ich Erster? -> Sieg eintragen
+  if (!fbReady || !myUid || !RPC) return;
+  try {
+    const mine = (await dbGet("dailyWins/" + myUid)) || {}, base = Date.parse(dailyKeyNow() + "T12:00:00Z");
+    for (let i = 1; i <= 14; i++) {
+      const day = new Date(base - i * 86400000).toISOString().slice(0, 10);
+      if (mine[day]) continue;
+      const me = await dbGet("daily/" + day + "/" + myUid);
+      if (!me) continue;
+      const all = await dbGet("daily/" + day);
+      const arr = Object.entries(all || {}).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+      if (arr.length && arr[0].u === myUid) await RPC.claimDailyWin(day);
+    }
+  } catch (e) { console.warn("daily wins check failed", e); }
+}
+const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); dailyClaimWins(); } }, 4000);
 async function watchDailyReplay(day, uid, label) {
   if (!fbReady) return;
   let rec = null;
@@ -3771,6 +3793,8 @@ async function openOnlineProfile(uid) {
       const [sv, sk] = await Promise.all([dbGet("survival/" + uid).catch(() => null), dbGet("streakBoard/" + uid).catch(() => null)]);
       svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
     } catch (e) {}
+    let dailyWinsN = 0;
+    try { const dw = await dbGet("dailyWins/" + uid); dailyWinsN = dw ? Object.keys(dw).length : 0; } catch (e) {}
     const wins = p.wins ?? 0;
     const losses = p.losses ?? 0;
     const totalGames = wins + losses;
@@ -3782,25 +3806,24 @@ async function openOnlineProfile(uid) {
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">League</span><span class="prof-val">${leagueBadgeHTML(p.leagueTier)}</span></div>
-      <div class="prof-row"><span class="prof-label">Highest League</span><span class="prof-val">${leagueBadgeHTML(p.leagueBest ?? p.leagueTier)}</span></div>
+      <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">👑 Daily Challenge Wins</span><span class="prof-val">${dailyWinsN}</span></div>
+      <div style="height:1px;background:rgba(255,255,255,0.18);margin:10px 0;"></div>
       <div class="prof-row"><span class="prof-label">Total Games</span><span class="prof-val">${totalGames}</span></div>
       <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
       <div class="prof-row"><span class="prof-label">Losses</span><span class="prof-val" style="color:#ff4444">${losses}</span></div>
       <div class="prof-row"><span class="prof-label">Winrate</span><span class="prof-val">${winrate}%</span></div>
-
       <div class="prof-row"><span class="prof-label">Highest Elo</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Lowest Elo</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
-
+      <div class="prof-row"><span class="prof-label">Highest League</span><span class="prof-val">${leagueBadgeHTML(p.leagueBest ?? p.leagueTier)}</span></div>
       <div class="prof-row"><span class="prof-label">Longest Winstreak</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Current Winstreak</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
-
-            <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}</span></div>
+      <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Lost</span><span class="prof-val" style="color:#ff4444">-${p.totalEloLost ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) : "–"}</span></div>
       <div class="prof-row"><span class="prof-label">🏝 Survival Runs</span><span class="prof-val">${Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0)}</span></div>
-      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec : "–"}</span></div>
       <div class="prof-row"><span class="prof-label">🔥 Streak Runs</span><span class="prof-val">${Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0)}</span></div>
     `;
 
