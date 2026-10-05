@@ -1389,6 +1389,18 @@ async function rpcSaveDaily(day, time, name) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: Date.now() });
 }
+// Daily-Replay: nur eigener Knoten dailyReplays/{uid}/{YYYY-MM-DD}
+async function rpcSaveDailyReplay(day, str) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  return set(ref(db, "dailyReplays/" + uid + "/" + day), String(str));
+}
+async function rpcRemoveDailyReplay(day) {
+  const uid = requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  return remove(ref(db, "dailyReplays/" + uid + "/" + day));
+}
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
 async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
@@ -1472,7 +1484,7 @@ async function rpcModRestoreUser(uid, backup) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -2281,7 +2293,10 @@ function dailySteer() {
 }
 function updDailyBtn() { const b = document.getElementById("dailyBtn"); if (!b) return; const c = dailyChallengeFor(dailyKeyNow()); b.textContent = "📅 Daily: " + c.icon + " " + c.name; }
 setInterval(updDailyBtn, 30000); setTimeout(updDailyBtn, 300); setTimeout(updDailyBtn, 2000);
-function dailyKeyNow() { return new Date().toISOString().slice(0, 10); }   // UTC-Tag: fuer alle gleich
+function dailyKeyNow() {   // Kalendertag in deutscher Zeit (Europe/Berlin), Wechsel um 0:00 Uhr
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+  catch (e) { return new Date().toISOString().slice(0, 10); }
+}
 function dailySeed(k) { let h = 2166136261; for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) % 1000000000 + 1; }
 function startSurvival(daily) {
   _dailyKey = daily === true ? dailyKeyNow() : null;
@@ -2306,6 +2321,7 @@ function startSurvival(daily) {
   if (_dailyKey) { balls = makeDailyBalls(dailyChallengeFor(_dailyKey)); dailyCountdown(); } else _dailyCdUntil = 0;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
+  if (_dailyKey) for (const b of balls) survRec.s.push([1, Math.round(b.x), Math.round(b.y), +b.vx.toFixed(3), +b.vy.toFixed(3), +b.radius.toFixed(1)].concat(b.dch ? [b.dch.turn, b.dch.spd] : []));
   const hud = document.createElement("div");
   hud.id = "survivalHUD";
   hud.style.cssText = "position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:150;pointer-events:none;padding:6px 18px;border-radius:12px;background:rgba(12,12,18,.85);border:1px solid rgba(0,255,136,.5);color:#00ff88;font:700 22px var(--font-display),system-ui,sans-serif;";
@@ -2363,7 +2379,7 @@ async function endSurvival(camped) {
   stopViewerCount();
   _survInfo = null;
   setTimeout(() => renderSurvivalResult(t, camped), 900);
-  if (_dailyKey) { await _endDaily(t, camped); return; }
+  if (_dailyKey) { await _endDaily(t, camped, rec); return; }
   let best = 0, isRecord = false, saved = true;
   try {
     if (fbReady && myUid && onlineAccount) {
@@ -2378,20 +2394,39 @@ async function endSurvival(camped) {
   _survInfo = { best, isRecord, saved };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
-async function _endDaily(t, camped) {
+async function dailyCleanup() {   // eigene Replays vergangener Tage loeschen
+  if (!fbReady || !myUid || !RPC) return;
+  try {
+    const all = await dbGet("dailyReplays/" + myUid), today = dailyKeyNow();
+    if (all) for (const d of Object.keys(all)) if (d < today) await RPC.removeDailyReplay(d);
+  } catch (e) { console.warn("daily cleanup failed", e); }
+}
+const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); } }, 4000);
+async function watchDailyReplay(day, uid, label) {
+  if (!fbReady) return;
+  let rec = null;
+  try { const raw = await dbGet("dailyReplays/" + uid + "/" + day); rec = raw && JSON.parse(raw); } catch (e) {}
+  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay found."); return; }
+  playSurvivalReplay(rec, label);
+}
+async function _endDaily(t, camped, rec) {
   const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0;
   try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}
   try {
     if (fbReady && myUid && onlineAccount) {
       const old = await dbGet("daily/" + key + "/" + myUid);
       best = Math.max(best, (old && Number(old.time)) || 0);
-      if (t > best && t >= 1) { await RPC.saveDaily(key, t, onlineAccount.name); isRecord = true; best = t; }
+      if (t > best && t >= 1) {
+        await RPC.saveDaily(key, t, onlineAccount.name); isRecord = true; best = t;
+        try { await RPC.saveDailyReplay(key, JSON.stringify(rec)); } catch (e) { console.warn("daily replay save failed", e); }
+        dailyCleanup();
+      }
     } else if (t > best) { isRecord = true; best = t; }
   } catch (e) { saved = false; if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
-    if (all) { const arr = Object.entries(all).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 5); rank = arr.findIndex(x => x.u === myUid) + 1; }
+    if (all) { const arr = Object.entries(all).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
   } catch (e) {}
   _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
@@ -2413,13 +2448,13 @@ function renderSurvivalResult(t, camped) {
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
-    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div>' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + '</div>').join('') + '</div>' : '')
+    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + ' ▶</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
-    + (i && i.best && !dly ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
+    + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
   ov.querySelector("#survRetry").onclick = () => startSurvival(!!_dailyKey);
   ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
-  const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => watchSurvivalReplay(myUid, "My record");
+  const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => (_survInfo && _survInfo.daily) ? watchDailyReplay(_survInfo.key, myUid, "My best today") : watchSurvivalReplay(myUid, "My record");
 }
 async function watchSurvivalReplay(uid, label) {
   if (!fbReady) return;
@@ -2450,7 +2485,9 @@ function playSurvivalReplay(rec, label) {
   const reset = () => { bl = []; tick = 0; si = 0; t0 = performance.now(); };
   const step = () => {
     tick++;
-    while (si < S.length && S[si][0] === tick) { const q = S[si++]; bl.push({ x: q[1], y: q[2], vx: q[3], vy: q[4], radius: q[5] }); }
+    while (si < S.length && S[si][0] === tick) { const q = S[si++]; bl.push({ x: q[1], y: q[2], vx: q[3], vy: q[4], radius: q[5], h: q[6], hs: q[7] }); }
+    const pp = posAt(Math.min(tick, rec.n));
+    for (const b of bl) if (b.h) { let d = Math.atan2(pp[1] - b.y, pp[0] - b.x) - Math.atan2(b.vy, b.vx); while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; const na = Math.atan2(b.vy, b.vx) + Math.max(-b.h, Math.min(b.h, d)); b.vx = Math.cos(na) * b.hs; b.vy = Math.sin(na) * b.hs; }
     for (const b of bl) {
       b.x += b.vx; b.y += b.vy;
       if (b.x - b.radius < 0)  { b.vx =  Math.abs(b.vx); b.x = b.radius; }
@@ -2464,7 +2501,7 @@ function playSurvivalReplay(rec, label) {
     const target = Math.min(rec.n, Math.floor((performance.now() - t0) / (1000 / 60)));
     while (tick < target) step();
     c.clearRect(0, 0, Wd, Hd);
-    for (const b of bl) { c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = "#ff4444"; c.fill(); }
+    for (const b of bl) { c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = b.h ? "#ff9d00" : "#ff4444"; c.fill(); }
     const [px, py] = posAt(tick);
     c.beginPath(); c.arc(px, py, rec.r || 18, 0, Math.PI * 2); c.fillStyle = rec.c || "#00ff88"; c.fill();
     c.fillStyle = "#fff"; c.font = "700 28px system-ui,sans-serif"; c.textAlign = "left";
