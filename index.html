@@ -2467,6 +2467,12 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
   } catch (e) { console.warn("daily wins check failed", e); }
 }
 const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); dailyClaimWins(); } }, 4000);
+// Tageswechsel (0:00 Berlin) erkennen: Sieg von gestern sofort eintragen, ohne dass die Seite neu geladen werden muss
+let _dcLastDay = dailyKeyNow(), _dcBusy = false;
+async function _dcRecheck() { if (_dcBusy) return; _dcBusy = true; try { await dailyClaimWins(); dailyCleanup(); } finally { _dcBusy = false; } }
+function _dcCheckDayChange() { const k = dailyKeyNow(); if (k !== _dcLastDay) { _dcLastDay = k; _dcRecheck(); } }
+setInterval(_dcCheckDayChange, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) _dcCheckDayChange(); });
 async function watchDailyReplay(day, uid, label) {
   if (!fbReady) return;
   let rec = null;
