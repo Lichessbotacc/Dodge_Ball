@@ -1410,6 +1410,8 @@ async function rpcClaimDailyWin(day) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   return set(ref(db, "dailyWins/" + uid + "/" + day), true);
 }
+// Admin: alle Daily-Laeufe (Zeiten) und Daily-Replays loeschen
+async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
 async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db, "tvViewers/" + _tvKey(key) + "/" + uid); onDisconnect(r).remove(); return set(r, true); }
@@ -1493,7 +1495,7 @@ async function rpcModRestoreUser(uid, backup) {
   return update(ref(db), up);
 }
 window._dobRPC = {
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove,
   myUid, requireUid,
@@ -2562,10 +2564,16 @@ async function loadStreakBoard() {
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
+async function modDeleteAllDaily() {
+  if (!confirm("Delete ALL daily runs and replays of ALL players? This cannot be undone.")) return;
+  try { await RPC.modDeleteAllDaily(); try { localStorage.removeItem("dobDaily"); } catch (e) {} alert("All daily runs deleted."); loadDailyBoard(); }
+  catch (e) { alert("Delete failed: " + (e && e.message || e)); }
+}
 async function loadDailyBoard() {
   const t = document.getElementById("lbTable"), key = dailyKeyNow(), ch = dailyChallengeFor(key);
   t.innerHTML = '<div class="lb-row"><span style="margin:0 auto;">📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key + '</span></div>'
     + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
+  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button></div>');
   if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
