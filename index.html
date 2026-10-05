@@ -972,6 +972,8 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
         <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streak</button>
+        <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
+        <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
       </div>
       <div id="lbTable">
         <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
@@ -2539,7 +2541,9 @@ function lbShowTab(tab) {
   const e = document.getElementById("lbTabElo"), v = document.getElementById("lbTabSurv"), k = document.getElementById("lbTabStreak");
   if (e) e.style.borderColor = tab === "elo" ? "#00ff88" : ""; if (v) v.style.borderColor = tab === "surv" ? "#00ff88" : "";
   if (k) k.style.borderColor = tab === "streak" ? "#00ff88" : "";
-  if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else loadLeaderboard();
+  const dd = document.getElementById("lbTabDaily"), dw = document.getElementById("lbTabDailyWins");
+  if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
+  if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 async function loadStreakBoard() {
   const t = document.getElementById("lbTable");
@@ -2556,6 +2560,38 @@ async function loadStreakBoard() {
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No streak records yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
+  } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
+}
+async function loadDailyBoard() {
+  const t = document.getElementById("lbTable"), key = dailyKeyNow(), ch = dailyChallengeFor(key);
+  t.innerHTML = '<div class="lb-row"><span style="margin:0 auto;">📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key + '</span></div>'
+    + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
+  if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
+    const rows = Object.entries(dl || {})
+      .filter(([uid]) => !pl || pl[uid])
+      .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
+      .filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No runs yet today – be the first!</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="watchDailyReplay('${key}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+  } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
+}
+async function loadDailyWinsBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>👑 Wins</span><span></span></div>';
+  if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const [dw, pl] = await Promise.all([dbGet("dailyWins"), dbGet("players")]);
+    const rows = Object.entries(dw || {})
+      .filter(([uid]) => pl && pl[uid])
+      .map(([uid, days]) => ({ uid, wins: Object.keys(days || {}).length, name: pl[uid].name || "?" }))
+      .filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No daily wins yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.wins}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadSurvivalBoard() {
