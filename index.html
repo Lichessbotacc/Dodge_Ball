@@ -1701,7 +1701,7 @@ function renderPresence(playersData) {
              class="pr-row"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
-          <span style="display:flex;align-items:center;">${((typeof _modIsAdmin === "function" && _modIsAdmin()) && (p.status === "Survival" || p.status === "Playing Streak" || p._ghost)) ? `<span style="color:#667;font-size:10px;margin-right:4px;">${(() => { const o = _liveTrack[p.uid]; return !o ? "no live" : o.absent ? "live gone " + Math.round((Date.now() - o.absent) / 1000) + "s" : "still " + Math.round((Date.now() - o.at) / 1000) + "s"; })()}</span>` : ""}<span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
+          <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
       `;
     });
