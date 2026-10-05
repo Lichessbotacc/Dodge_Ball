@@ -2306,13 +2306,18 @@ const DAILY_CHALLENGES = [
   { icon: "🪨", name: "Giants",             groups: [{ n: 0, cap: 99999, respawn: 120, v: 3.2, r: [55, 70] }] },   // startet leer, alle 2 s (120 Ticks) kommt ein Riese dazu, keiner verschwindet
   { icon: "🐝", name: "80 Tiny Swarm",      playerR: 8, groups: [{ n: 80, v: 3, r: [8, 8] }] },   // playerR: dein Ball ist genau so gross wie die anderen
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
-  { icon: "🪃", name: "Boomerangs",         groups: [{ n: 22, v: 4.6, rot: 0.02, rotRand: true, col: "#ff8a5c" }] },
   { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
   // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
   { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 55, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
   // Overdrive: 5 Baelle, Tempo waechst ohne Obergrenze (accMax riesig)
   { icon: "🚀", name: "Overdrive",          groups: [{ n: 5, v: 1.8, acc: 0.0018, accMax: 1e9, col: "#ffd24a" }] },
   // Fireworks: Spawnabstand wird mit jedem Feuerwerk ganz langsam kuerzer (-0.5 Tick pro Spawn, bis min. 10 Ticks), kein Limit gleichzeitiger Feuerwerke
+  // ── Licht-Modi: light = { type:"torch", r } (nur Kreis um dich sichtbar) | { type:"storm", near, period, flash } (dunkel, Blitze zeigen alles) ──
+  { icon: "🔦", name: "Flashlight",         light: { type: "torch", r: 190 }, groups: [{ n: 30, v: 3.5, r: [12, 20] }] },
+  { icon: "🌩️", name: "Lightning Storm",    light: { type: "storm", near: 80, period: 300, flash: 40 }, groups: [{ n: 26, v: 4, r: [12, 18] }] },
+  { icon: "🌧️", name: "Acid Rain",          groups: [{ n: 0, cap: 99999, respawn: 8, life: 420, from: "top", v: 4.5, r: [6, 9], col: "#7dffb0" }] },
+  { icon: "🎈", name: "Inflation",          groups: [{ n: 7, v: 2.6, r: [8, 10], grow: 0.02, rMax: 85, col: "#ff66cc" }] },
+  { icon: "🕳️", name: "Ambush",             groups: [{ n: 0, cap: 99999, respawn: 45, life: 420, from: "near", v: 2.6, r: [16, 22], emerge: 60, col: "#c77dff" }] },
   { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
 ];
 // ── Welcher Modus ist an welchem Tag dran? ──
@@ -2345,6 +2350,27 @@ async function dailyPicksRefresh() {
 async function startDaily() { await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]); startSurvival(true); }
 setInterval(dailyPicksRefresh, 60000); setTimeout(dailyPicksRefresh, 1500); setTimeout(dailyPicksRefresh, 5000);
 let _dailyRun = null;
+// ── Licht-Modi: Sichtbarkeit (0..1) eines Balls, gleiche Funktion live und im Replay ──
+let _dailyLight = null;
+function dailyVis(L, b, px, py, tick) {
+  const torch = (R) => { const d = Math.hypot(b.x - px, b.y - py) - b.radius; return d <= R * 0.7 ? 1 : d >= R ? 0 : (R - d) / (R * 0.3); };
+  if (L.type === "torch") return torch(L.r);
+  if (L.type === "storm") {
+    const ph = (tick + L.period - 90) % L.period;   // erster Blitz nach 1,5 s
+    const fl = ph < L.flash ? (ph < L.flash * 0.6 ? 1 : (L.flash - ph) / (L.flash * 0.4)) : 0;
+    return Math.max(torch(L.near), fl);
+  }
+  return 1;
+}
+function dailyLightFx(c, L, px, py, tick, Wd, Hd) {   // Lichtschein um den Ball bzw. Blitz-Aufhellung
+  if (L.type === "torch") {
+    const g = c.createRadialGradient(px, py, 0, px, py, L.r); g.addColorStop(0, "rgba(255,244,200,0.16)"); g.addColorStop(1, "rgba(255,244,200,0)");
+    c.fillStyle = g; c.fillRect(px - L.r, py - L.r, L.r * 2, L.r * 2);
+  } else if (L.type === "storm") {
+    const ph = (tick + L.period - 90) % L.period;
+    if (ph < L.flash) { c.globalAlpha = 0.16 * (ph < L.flash * 0.6 ? 1 : (L.flash - ph) / (L.flash * 0.4)); c.fillStyle = "#cfe3ff"; c.fillRect(0, 0, Wd, Hd); c.globalAlpha = 1; }
+  }
+}
 function dailyMakeBall(g, gi, T, initial) {
   const rng = Math.random, me = players[0];
   const cx = me ? me.x : W() / 2, cy = me ? me.y : H() / 2, mr = me ? me.radius : 12;
@@ -2358,6 +2384,10 @@ function dailyMakeBall(g, gi, T, initial) {
   } else if (g.from === "echo") {   // Spawn an der Stelle, an der du vor g.delay Ticks warst
     const P = survRec && survRec.p, k = Math.floor((T - (g.delay || 150)) / 3);
     if (P && k >= 0 && P[2 * k + 1] !== undefined) { x = P[2 * k]; y = P[2 * k + 1]; }
+  }
+  if (x === null && g.from === "near") {   // direkt in deiner Naehe (130-230 px), wachsen dort aus dem Nichts
+    tries = 0;
+    do { const an = rng() * Math.PI * 2, d = 130 + rng() * 100; x = Math.min(W() - r, Math.max(r, cx + Math.cos(an) * d)); y = Math.min(H() - r, Math.max(r, cy + Math.sin(an) * d)); } while (Math.hypot(x - cx, y - cy) < 110 && tries++ < 30);
   }
   if (x === null) {
     x = cx; y = cy; tries = 0;
@@ -2488,6 +2518,7 @@ function startSurvival(daily, testIdx) {
   if (_dailyKey) { balls = makeDailyBalls(dailyActiveCh()); dailyCountdown(); } else _dailyCdUntil = 0;
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
+  _dailyLight = _dailyKey ? (dailyActiveCh().light || null) : null; if (_dailyLight) survRec.lt = _dailyLight;
   if (_dailyKey) for (const b of balls) dailyRec(b, 1);
   const hud = document.createElement("div");
   hud.id = "survivalHUD";
@@ -2698,9 +2729,12 @@ function playSurvivalReplay(rec, label) {
     const target = Math.min(rec.n, Math.floor((performance.now() - t0) / (1000 / 60)));
     while (tick < target) step();
     c.clearRect(0, 0, Wd, Hd);
+    const _L = rec.lt || null, _pp = posAt(Math.min(tick, rec.n)), _alive = tick < rec.n;
+    if (_L && _alive) dailyLightFx(c, _L, _pp[0], _pp[1], tick, Wd, Hd);
     for (const b of bl) {
+      const _v = (_L && _alive) ? dailyVis(_L, b, _pp[0], _pp[1], tick) : 1; if (_v <= 0) continue;
       let al = 1; if (b.exp) { const left = (b.exp - tick) * (1000 / 60); if (left < 2000) al = Math.floor(left / 120) % 2 ? 0.35 : 0.9; }
-      c.globalAlpha = al; c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = b.col || (b.h ? "#ff9d00" : "#ff4444"); c.fill(); c.globalAlpha = 1;
+      c.globalAlpha = al * _v; c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = b.col || (b.h ? "#ff9d00" : "#ff4444"); c.fill(); c.globalAlpha = 1;
     }
     const [px, py] = posAt(tick);
     c.beginPath(); c.arc(px, py, rec.r || 18, 0, Math.PI * 2); c.fillStyle = rec.c || "#00ff88"; c.fill();
@@ -6857,7 +6891,10 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     }
   }
 
+  const _lme = (_dailyLight && _dailyKey && survivalActive) ? players[0] : null, _lOn = !!(_lme && _lme.alive);
+  if (_lOn) dailyLightFx(ctx, _dailyLight, _lme.x, _lme.y, survTick, W(), H());
   for (const b of balls) {
+    const _lv = _lOn ? dailyVis(_dailyLight, b, _lme.x, _lme.y, survTick) : 1; if (_lv <= 0) continue;
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
     if (b.chase) {
       // verfolgender Ball (Streak): orange mit Ring, blinkt kurz vor dem Verschwinden
@@ -6869,7 +6906,7 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     } else {
       let al = 1;
       if (b.exp) { const left = (b.exp - survTick) * (1000 / 60); if (left < 2000) al = Math.floor(left / 120) % 2 ? 0.35 : 0.9; }   // Daily: blinkt kurz vor dem Verschwinden
-      ctx.globalAlpha = al; ctx.fillStyle = b.col || "#ff4444"; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.globalAlpha = al * _lv; ctx.fillStyle = b.col || "#ff4444"; ctx.fill(); ctx.globalAlpha = 1;
     }
   }
 
