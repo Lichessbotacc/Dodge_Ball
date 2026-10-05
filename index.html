@@ -3817,6 +3817,35 @@ async function loadLeaderboard() {
 
 // CHANGED: now takes a uid (not a name) and reads players/{uid}
 // directly — read-only, no write capability here at all.
+// Platzierungen (wie in den Ranglisten berechnet) fuer das Profil: Elo, Survival, Streak, Daily Wins
+async function profileRanks(uid) {
+  const out = { elo: "", surv: "", streak: "", dw: "" };
+  const tag = i => i >= 0 ? ' <span style="color:#ffd700;font-size:.85em;">#' + (i + 1) + '</span>' : "";
+  try {
+    const [pl, sv, sb, dw] = await Promise.all([dbGet("players"), dbGet("survival").catch(() => null), dbGet("streakBoard").catch(() => null), dbGet("dailyWins").catch(() => null)]);
+    if (!pl) return out;
+    const nk = n => String(dn(n)).trim().toLowerCase();
+    // Elo (gleiche Regeln wie Elo-Rangliste: min. 1 Partie, ein Eintrag pro Name)
+    const seen = new Map(), games = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
+    Object.entries(pl).map(([u, q]) => ({ uid: u, ...q })).filter(q => games(q) >= 1).forEach(q => {
+      const k = String(q.name || "").toLowerCase(), prev = seen.get(k);
+      if (!prev || q.uid === myUid || (prev.uid !== myUid && games(q) > games(prev))) seen.set(k, q);
+    });
+    out.elo = tag([...seen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500)).findIndex(q => q.uid === uid));
+    // Survival
+    const sr = Object.entries(sv || {}).filter(([u]) => pl[u]).map(([u, r]) => ({ uid: u, time: Number(r && r.time) || 0, name: pl[u].name || (r && r.name) || "?" }))
+      .filter(r => r.time > 0).sort((a, b) => b.time - a.time).filter((r, i, arr) => arr.findIndex(x => nk(x.name) === nk(r.name)) === i);
+    out.surv = tag(sr.findIndex(r => r.uid === uid));
+    // Streak
+    const kr = Object.entries(sb || {}).filter(([u]) => pl[u]).map(([u, r]) => ({ uid: u, level: Number(r && r.level) || 0, ts: Number(r && r.ts) || 0 }))
+      .filter(r => r.level > 0).sort((a, b) => b.level - a.level || a.ts - b.ts);
+    out.streak = tag(kr.findIndex(r => r.uid === uid));
+    // Daily Wins
+    const wr = Object.entries(dw || {}).filter(([u]) => pl[u]).map(([u, d]) => ({ uid: u, wins: Object.keys(d || {}).length })).filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins);
+    out.dw = tag(wr.findIndex(r => r.uid === uid));
+  } catch (e) { console.warn("profile ranks failed", e); }
+  return out;
+}
 async function openOnlineProfile(uid) {
   if (!fbReady) return;
   try {
@@ -3836,6 +3865,7 @@ async function openOnlineProfile(uid) {
       const [sv, sk] = await Promise.all([dbGet("survival/" + uid).catch(() => null), dbGet("streakBoard/" + uid).catch(() => null)]);
       svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
     } catch (e) {}
+    const rk = await profileRanks(uid);
     let dailyWinsN = 0;
     try { const dw = await dbGet("dailyWins/" + uid); dailyWinsN = dw ? Object.keys(dw).length : 0; } catch (e) {}
     const wins = p.wins ?? 0;
@@ -3847,11 +3877,11 @@ async function openOnlineProfile(uid) {
       `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(dn(p.name))}</span>`;
 
     document.getElementById("profileStats").innerHTML = `
-      <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}</span></div>
+      <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}${rk.elo}</span></div>
       <div class="prof-row"><span class="prof-label">League</span><span class="prof-val">${leagueBadgeHTML(p.leagueTier)}</span></div>
-      <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) : "–"}</span></div>
-      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec : "–"}</span></div>
-      <div class="prof-row"><span class="prof-label">👑 Daily Challenge Wins</span><span class="prof-val">${dailyWinsN}</span></div>
+      <div class="prof-row"><span class="prof-label">🏝 Survival Record</span><span class="prof-val" style="color:#00ff88">${svRec > 0 ? survFmt(svRec) + rk.surv : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">🔥 Streak Record</span><span class="prof-val" style="color:#00ff88">${skRec > 0 ? skRec + rk.streak : "–"}</span></div>
+      <div class="prof-row"><span class="prof-label">👑 Daily Challenge Wins</span><span class="prof-val">${dailyWinsN}${dailyWinsN > 0 ? rk.dw : ""}</span></div>
       <div style="height:1px;background:rgba(255,255,255,0.18);margin:10px 0;"></div>
       <div class="prof-row"><span class="prof-label">Total Games</span><span class="prof-val">${totalGames}</span></div>
       <div class="prof-row"><span class="prof-label">Wins</span><span class="prof-val" style="color:#00ff88">${wins}</span></div>
