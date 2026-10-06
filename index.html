@@ -1634,8 +1634,20 @@ async function rpcModRestoreUser(uid, backup) {
 }
 // ── Geraete-Sperre: gebannte Spieler koennen auf ihrem Geraet keinen neuen Account erstellen ──
 function _devClean(id) { return String(id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64); }
-async function rpcRegisterDevice(id) { requireNotBanned(); const uid = requireUid(); id = _devClean(id); if (id.length < 6) return; return set(ref(db, "deviceIds/" + uid + "/" + id), true); }
-async function rpcIsDeviceBanned(id) { id = _devClean(id); if (id.length < 6) return false; try { return (await get(ref(db, "bannedDevices/" + id))).exists(); } catch (e) { return false; } }
+function _devList(ids) { return (Array.isArray(ids) ? ids : [ids]).map(_devClean).filter(i => i.length >= 6); }
+// Registriert ALLE Geraete-IDs dieses Geraets unter der eigenen uid. Die Database Rules lehnen das ab, wenn eine ID in bannedDevices steht
+// -> ein neuer Account kann auf einem gebannten Geraet nie "freigeschaltet" werden (players/{uid} wird erst mit deviceIds/{uid} erlaubt).
+async function rpcRegisterDevice(ids) {
+  requireNotBanned(); const uid = requireUid(); ids = _devList(ids);
+  if (!ids.length) throw new Error("No device id.");
+  await Promise.all(ids.map(id => set(ref(db, "deviceIds/" + uid + "/" + id), true)));
+}
+// FAIL-CLOSED: Fehler werden NICHT mehr verschluckt (frueher: catch -> false = "nicht gebannt"). Der Aufrufer muss den Fehler behandeln.
+async function rpcIsDeviceBanned(ids) {
+  ids = _devList(ids); if (!ids.length) throw new Error("No device id.");
+  const snaps = await Promise.all(ids.map(id => get(ref(db, "bannedDevices/" + id))));
+  return snaps.some(sn => sn.exists());
+}
 async function rpcModBanDevice(uid) {
   requireAdmin(); uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) return 0;
@@ -4423,7 +4435,10 @@ async function createAccount() {
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
   if (!fbReady || !window._dobAuth)      { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
 
-  if (await deviceIsBanned()) { info.textContent = "This device has been banned. You cannot create a new account."; info.style.color = "#f44"; return; }
+  let _devBanned;
+  try { _devBanned = await deviceIsBanned(); }
+  catch (e) { info.textContent = "Could not verify your device. Please try again in a moment."; info.style.color = "#f44"; return; }   // fail-closed
+  if (_devBanned) { info.textContent = "This device has been banned. You cannot create a new account."; info.style.color = "#f44"; return; }
 
   info.style.color = "#aaa";
   info.textContent = "Creating account…";
@@ -4434,6 +4449,18 @@ async function createAccount() {
 
     const newUid = await window._dobAuth.register(name, password);
     myUid = newUid;
+
+    // Geraet registrieren, BEVOR irgendwelche Spielerdaten geschrieben werden. Die Database Rules erlauben players/{uid} und usernames/{name}
+    // fuer neue Accounts nur, wenn deviceIds/{uid} existiert - und das wird auf gebannten Geraeten serverseitig abgelehnt.
+    try { await ensureDeviceRegistered(); }
+    catch (devErr) {
+      try { await window._dobAuth.deleteAuthUser(); } catch (e2) {}      // frisch erstellten Auth-User wieder entfernen
+      myUid = (window.dobMyUid && window.dobMyUid()) || null;
+      const denied = devErr && (devErr.code === "PERMISSION_DENIED" || /permission_denied/i.test(String(devErr.message || devErr)));
+      info.textContent = denied ? "This device has been banned. You cannot create a new account." : "Could not register your device. Please try again.";
+      info.style.color = "#f44";
+      return;
+    }
 
     onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
     markDeviceAccount(name);
@@ -4471,6 +4498,7 @@ async function loginAccount() {
   try {
     const uid = await window._dobAuth.login(name, password);
     myUid = uid;
+    try { await ensureDeviceRegistered(); } catch (devErr) { console.warn("device register failed", devErr); }
 
     const data = await dbGet("players/" + uid);
     if (data) {
@@ -4508,22 +4536,46 @@ function deviceHasAccount() {
 }
 function markDeviceAccount(name) { try { localStorage.setItem("dobDeviceAccount", String(name || "1")); } catch (e) {} }
 // Geraete-ID (localStorage + Cookie): damit werden gebannte Geraete erkannt. Wer seine Browserdaten loescht, bekommt eine neue ID.
-function dobDeviceId() {
-  let id = "";
-  try { id = localStorage.getItem("dobDeviceId") || ""; } catch (e) {}
-  if (!id) { const m = document.cookie.match(/(?:^|; )dobDeviceId=([A-Za-z0-9_-]+)/); if (m) id = m[1]; }
-  if (!id) id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
-  try { localStorage.setItem("dobDeviceId", id); } catch (e) {}
-  try { document.cookie = "dobDeviceId=" + id + "; max-age=315360000; path=/; SameSite=Lax"; } catch (e) {}
-  return id;
+function _devIdbOpen() { return new Promise((res, rej) => { try { const rq = indexedDB.open("dobDev", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("k"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); } catch (e) { rej(e); } }); }
+async function _devIdbGet() { try { const d = await _devIdbOpen(); return await new Promise(res => { const g = d.transaction("k").objectStore("k").get("id"); g.onsuccess = () => { res(g.result || ""); d.close(); }; g.onerror = () => { res(""); d.close(); }; }); } catch (e) { return ""; } }
+async function _devIdbSet(id) { try { const d = await _devIdbOpen(); await new Promise(res => { const t = d.transaction("k", "readwrite"); t.objectStore("k").put(id, "id"); t.oncomplete = t.onerror = t.onabort = () => { d.close(); res(); }; }); } catch (e) {} }
+// Geraete-IDs aus localStorage, Cookie UND IndexedDB: loescht jemand nur einen Speicher, wird die ID aus den anderen wiederhergestellt.
+// Alle gefundenen IDs werden gepruft/registriert; ein Treffer in bannedDevices reicht fuer die Sperre.
+async function dobDeviceIds() {
+  const ids = [];
+  const add = v => { v = _devClean(v); if (v.length >= 6 && ids.indexOf(v) === -1) ids.push(v); };
+  let ls = "", ck = "", idb = "";
+  try { ls = localStorage.getItem("dobDeviceId") || ""; } catch (e) {}
+  try { const m = document.cookie.match(/(?:^|; )dobDeviceId=([A-Za-z0-9_-]+)/); if (m) ck = m[1]; } catch (e) {}
+  idb = await _devIdbGet();
+  add(ls); add(ck); add(idb);
+  if (!ids.length) add("d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+  const main = ids[0];
+  if (!_devClean(ls))  { try { localStorage.setItem("dobDeviceId", main); } catch (e) {} }
+  if (!_devClean(ck))  { try { document.cookie = "dobDeviceId=" + main + "; max-age=315360000; path=/; SameSite=Lax"; } catch (e) {} }
+  if (!_devClean(idb)) { await _devIdbSet(main); }
+  return ids;
 }
-async function deviceIsBanned() { try { return !!(RPC && fbReady && await RPC.isDeviceBanned(dobDeviceId())); } catch (e) { return false; } }
+// FAIL-CLOSED: bei Fehler (Netz, Rules, nicht bereit) wird geworfen, nicht "false" geliefert.
+async function deviceIsBanned() {
+  if (!RPC || !fbReady) throw new Error("not ready");
+  return !!(await RPC.isDeviceBanned(await dobDeviceIds()));
+}
+async function ensureDeviceRegistered() {
+  if (window._devReg && window._devReg === myUid) return;
+  if (window._devRegBusy) return window._devRegBusy;
+  window._devRegBusy = (async () => {
+    try { await RPC.registerDevice(await dobDeviceIds()); window._devReg = myUid; }
+    finally { window._devRegBusy = null; }
+  })();
+  return window._devRegBusy;
+}
 setInterval(() => {
   try {
-    if (window._devReg && window._devReg !== myUid) window._devReg = null;
-    if (!window._devReg && fbReady && RPC && myUid && onlineAccount && !window.__dobBanned) {
-      window._devReg = myUid;
-      Promise.resolve(RPC.registerDevice(dobDeviceId())).catch(() => { window._devReg = null; });
+    if (window._devReg && window._devReg !== myUid) { window._devReg = null; window._devRegFail = 0; }
+    // nach einem Fehlschlag 5 Minuten Pause (z.B. wenn die ID gesperrt ist), statt alle 4 s neu zu versuchen
+    if (!window._devReg && fbReady && RPC && myUid && onlineAccount && !window.__dobBanned && (!window._devRegFail || Date.now() - window._devRegFail > 300000)) {
+      ensureDeviceRegistered().catch(() => { window._devRegFail = Date.now(); });
     }
   } catch (e) {}
 }, 4000);
@@ -8589,7 +8641,7 @@ async function _modBan(uid, s, p) {
     await _modRPC().modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null } });
   } catch (e) { console.warn("backup failed", e); }
   await _modRPC().modSetSanction(uid, { banned: true, banReason: reason.trim(), bannedAt: Date.now() });
-  try { await _modRPC().modBanDevice(uid); } catch (e) { console.warn("device ban failed", e); }
+  try { const nDev = await _modRPC().modBanDevice(uid); if (!nDev) alert("Warning: no device ID is known for this player (deviceIds/" + uid + " is empty), so NO device was banned. He can create a new account."); } catch (e) { console.warn("device ban failed", e); }
   await _modPurge(uid, nm);
   await new Promise(r => setTimeout(r, 4000));        // sein Client bekommt den Ban und stoppt Schreibzugriffe; Restschreibungen werden noch einmal weggeraeumt
   await _modPurge(uid, nm);
@@ -8648,7 +8700,7 @@ async function _cheatBanOne(uid, name, why) {
   const [pl, sv, sk] = await Promise.all([R.get("players/" + uid), R.get("survival/" + uid), R.get("streakBoard/" + uid)]);
   await R.modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null }, autoBan: { why: why, ts: Date.now() } });
   await R.modSetSanction(uid, { banned: true, banReason: "Cheating detected (automatic).", bannedAt: Date.now() });
-  try { await R.modBanDevice(uid); } catch (e) { console.warn("device ban failed", e); }
+  try { const nDev = await R.modBanDevice(uid); if (!nDev) console.warn("auto-ban: no device ID known for " + uid + " - device NOT banned"); } catch (e) { console.warn("device ban failed", e); }
   await _modPurge(uid, name);
   await new Promise(r => setTimeout(r, 4000));
   await _modPurge(uid, name);
