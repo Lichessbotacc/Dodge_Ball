@@ -1198,7 +1198,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
    ═══════════════════════════════════════════════════════════════════ */
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { query, limitToLast, orderByKey, endBefore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { query, limitToLast, orderByKey, endBefore, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
@@ -1525,6 +1525,70 @@ async function rpcModPurgeUser(uid, name) {
   res.forEach((r, i) => { if (r.status === "rejected") failed.push(list[i]); });
   return { total: list.length, failed };
 }
+
+// ── ELO-Spielprotokoll: jeder Client protokolliert NUR sein eigenes Ergebnis (a = ich, b = Gegner, d = meine ELO-Aenderung).
+//    Beim Ban werden damit alle Spiele gegen den Gebannten rueckgaengig gemacht. ──
+async function rpcLogEloGame(key, data) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!data || data.a !== uid || !data.b) throw new Error("Not your game.");
+  key = String(key).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 150);
+  return set(ref(db, "eloGames/" + key), { a: uid, b: String(data.b), d: Math.round(Number(data.d) || 0), bot: data.bot ? 1 : 0, ts: Date.now() });
+}
+// Ban: ELO aller Gegner des Gebannten korrigieren (Sieg gegen ihn -> ELO zurueck weg, Niederlage -> ELO zurueck) + Online-Bot
+// + Hinweis an jeden betroffenen Spieler (sanctions/{uid}/banRefunds). Idempotent: verarbeitete Eintraege werden geloescht.
+async function rpcModBanEloRefund(bannedUid) {
+  requireAdmin();
+  bannedUid = String(bannedUid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(bannedUid) || bannedUid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
+  const BOT = "bot__online_bot";
+  const [vsHim, hisGames] = await Promise.all([
+    get(query(ref(db, "eloGames"), orderByChild("b"), equalTo(bannedUid))),
+    get(query(ref(db, "eloGames"), orderByChild("a"), equalTo(bannedUid)))
+  ]);
+  const refund = {}, count = {}, del = {};
+  let botRefund = 0, botGames = 0;
+  // Gegner haben ihr Ergebnis selbst protokolliert: d = deren Aenderung -> Korrektur = -d
+  vsHim.forEach(ch => {
+    const g = ch.val() || {};
+    del["eloGames/" + ch.key] = null;
+    if (!g.a || g.a === bannedUid || g.a === BOT) return;
+    refund[g.a] = (refund[g.a] || 0) - (Number(g.d) || 0);
+    count[g.a] = (count[g.a] || 0) + 1;
+  });
+  // Bot-Spiele des Gebannten (der Bot hat keinen eigenen Client): Bot hat -d bekommen -> Korrektur = +d
+  hisGames.forEach(ch => {
+    const g = ch.val() || {};
+    del["eloGames/" + ch.key] = null;
+    if (g.b === BOT) { botRefund += (Number(g.d) || 0); botGames++; }
+  });
+  const uids = Object.keys(refund).filter(u => refund[u] !== 0 || count[u]);
+  const up = {}, now = Date.now(), banId = "b" + now;
+  const sn = await Promise.all(uids.map(async u => { try { return (await get(ref(db, "players/" + u))).val(); } catch (e) { return null; } }));
+  uids.forEach((u, i) => {
+    const pl = sn[i];
+    if (!pl || typeof pl.elo !== "number") return;          // Account existiert nicht mehr
+    const ne = Math.max(100, Math.round(pl.elo + refund[u]));
+    up["players/" + u + "/elo"] = ne;
+    if (typeof pl.highestElo === "number" && ne > pl.highestElo) up["players/" + u + "/highestElo"] = ne;
+    if (typeof pl.lowestElo === "number" && ne < pl.lowestElo) up["players/" + u + "/lowestElo"] = ne;
+    up["sanctions/" + u + "/banRefunds/" + banId] = { ts: now, delta: ne - Math.round(pl.elo), games: count[u] };
+  });
+  if (botGames && botRefund !== 0) {
+    try {
+      const bp = (await get(ref(db, "players/" + BOT))).val();
+      if (bp && typeof bp.elo === "number") {
+        const ne = Math.max(100, Math.round(bp.elo + botRefund));
+        up["players/" + BOT + "/elo"] = ne;
+        if (typeof bp.highestElo === "number" && ne > bp.highestElo) up["players/" + BOT + "/highestElo"] = ne;
+        if (typeof bp.lowestElo === "number" && ne < bp.lowestElo) up["players/" + BOT + "/lowestElo"] = ne;
+      }
+    } catch (e) {}
+  }
+  // Erst Korrekturen schreiben, dann (im selben Schritt) die verarbeiteten Log-Eintraege loeschen -> kein doppeltes Erstatten
+  await update(ref(db), Object.assign(up, del));
+  return { players: uids.length, games: Object.keys(del).length, bot: botRefund };
+}
 // Mod: Rekorde eines Spielers komplett loeschen (Rangliste, Profil, Replays). what = { survival, streak, daily, winstreak }
 async function rpcModDeleteRecords(uid, what) {
   requireAdmin();
@@ -1570,7 +1634,7 @@ async function rpcModRestoreUser(uid, backup) {
 }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1648,7 +1712,7 @@ async function onFirebaseAndAuthReady() {
     if (readActiveMatchMarker()) {      // last session ended in the middle of an online match
       const mk0 = readActiveMatchMarker();
       clearActiveMatchMarker();
-      const loss = applyForfeitLoss(mk0 && mk0.loss);
+      const loss = applyForfeitLoss(mk0 && mk0.loss, mk0 && mk0.opp);
       try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + loss + " ELO)", "#ff4444"); } catch (e) {}
     }
     await pushAccountToFirebase();
@@ -2958,7 +3022,7 @@ const OPP_TIMEOUT_PLAYING_MS  = 3000;      // kein Lebenszeichen fuer 3 s -> sof
 const OPP_TIMEOUT_WAITING_MS  = 3000;      // auch vor dem Start: nicht im Match erschienen -> nach 3 s verloren
 let onlineDisarm = null;
 function readActiveMatchMarker() { try { return JSON.parse(localStorage.getItem("dobActiveMatch") || "null"); } catch (e) { return null; } }
-function setActiveMatchMarker(id, loss) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, ts: Date.now() })); } catch (e) {} }
+function setActiveMatchMarker(id, loss, opp) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, opp: opp || null, ts: Date.now() })); } catch (e) {} }
 function clearActiveMatchMarker() { try { localStorage.removeItem("dobActiveMatch"); } catch (e) {} }
 function disarmOnlineDisconnect() {
   if (onlineDisarm) { try { onlineDisarm.cancel().catch(() => {}); } catch (e) {} onlineDisarm = null; }
@@ -2970,7 +3034,7 @@ function armOnlineDisconnect(forfeit) {
   try { onlineDisarm = RPC.armMatchDisconnect(onlineMatchId, forfeit ? { status: "abandoned", forfeitBy: myUid, eloChange: forfeitChange(false) } : { status: "abandoned" }); } catch (e) {}
 }
 // Applies the forfeit loss to the OWN account (synchronous part; caller pushes to Firebase)
-function applyForfeitLoss(change) {
+function applyForfeitLoss(change, oppUid) {
   if (!onlineAccount) return 0;
   const loss = Math.abs(clampEloChange(Number(change) || 10));
   onlineAccount = sanitizeAccount(onlineAccount);
@@ -2979,6 +3043,7 @@ function applyForfeitLoss(change) {
   onlineAccount.currentStreak = 0;
   onlineAccount.totalEloLost += loss;
   if (onlineAccount.elo < onlineAccount.lowestElo) onlineAccount.lowestElo = onlineAccount.elo;
+  if (oppUid) logEloGame(oppUid, -loss, false);
   saveAccountLocal();
   try { updateAccountBtn(); } catch (e) {}
   return loss;
@@ -4489,7 +4554,7 @@ function cleanupOnline() {
       clearActiveMatchMarker();
       onlineResultHandled = true;
       const loss = forfeitChange(false);
-      applyForfeitLoss(loss);
+      applyForfeitLoss(loss, onlineOpponent && onlineOpponent.uid);
       pushAccountToFirebase().catch(() => {});
       RPC.updateMatch(onlineMatchId, { status: "abandoned", forfeitBy: myUid, eloChange: loss, postChat: null }).catch(() => {});
     } else {
@@ -4973,7 +5038,7 @@ function startOnlineGame(matchData) {
   }
 
   // ── Disconnect protection (real players only) ──
-  setActiveMatchMarker(onlineMatchId, forfeitChange(false));
+  setActiveMatchMarker(onlineMatchId, forfeitChange(false), onlineOpponent && onlineOpponent.uid);
   armOnlineDisconnect(true);
   const wdOppRole = onlineRole === "p1" ? "p2" : "p1";
   const wdMatchId = onlineMatchId;
@@ -5200,6 +5265,14 @@ function pushBallState() {
 // written (soft mitigation — see header comment). Head-to-head and
 // bot-stat writes are now uid-keyed. The player's own profile write
 // still goes only to players/{myUid} via pushAccountToFirebase().
+// ELO-Protokoll: eigenes Ergebnis (gegen oppUid, meine ELO-Aenderung d) fuer die Ban-Rueckrechnung speichern
+function logEloGame(oppUid, d, isBot) {
+  try {
+    if (!fbReady || !RPC || !myUid || !oppUid || !Number.isFinite(Number(d)) || Number(d) === 0) return;
+    RPC.logEloGame(Date.now() + "_" + myUid + "_" + Math.floor(Math.random() * 1e6), { a: myUid, b: oppUid, d: Number(d), bot: !!isBot })
+      .catch(e => console.warn("elo log failed", e));
+  } catch (e) {}
+}
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
   onlineResultHandled = true;
@@ -5293,6 +5366,7 @@ async function handleOnlineResult(winnerName, change) {
   if (!onlineVsBot && onlineOpponent && Number.isFinite(Number(onlineOpponent.elo))) {
     onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - eloChange) : onlineOpponent.elo + eloChange;
   }
+  logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -7732,6 +7806,7 @@ Object.assign(DICT.de, {"Viewing only": "Nur ansehen", "Group": "Gruppe", "My le
 Object.assign(DICT.de, {"You did not play last week": "Du hast letzte Woche nicht gespielt – spiel und gewinne, um wieder aufzusteigen!", "Group too small": "Gruppe zu klein", "Groups under": "Gruppen mit weniger als", "players can't promote anyone this week.": "Spielern lassen diese Woche niemanden aufsteigen.", "Promotion eligibility": "Aufstiegsberechtigung", "Promoted!": "Aufgestiegen!", "Relegated": "Abgestiegen", "Welcome to the next league – new week, new goals!": "Willkommen in der nächsten Liga – neue Woche, neue Ziele!", "New week, new chance – win your way back up!": "Neue Woche, neue Chance – kämpf dich wieder hoch!","Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 (German time). A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 Uhr (deutsche Zeit). Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
 
 Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen – Strafe angewendet"});
+Object.assign(DICT.de, {"A player you've played against got banned": "Ein Spieler, gegen den du gespielt hast, wurde gebannt", "All games against banned players are removed from the ranking. ELO you lost against them was given back, ELO you gained against them was taken back.": "Alle Spiele gegen gebannte Spieler werden aus der Wertung genommen. ELO, die du gegen ihn verloren hast, bekommst du zurück; ELO, die du gegen ihn gewonnen hast, wird dir wieder abgezogen.", "game": "Spiel", "games": "Spiele"});
 Object.assign(DICT.de, {"CONNECTION LOST": "VERBINDUNG VERLOREN"});
 
 Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
@@ -8024,6 +8099,43 @@ function _modApplyRecordWipe() {
   } catch (e) { console.warn("record wipe sync failed", e); }
 }
 
+
+// ── Ein Gegner wurde gebannt: ELO-Korrektur anzeigen (Admin hat die ELO schon in der Datenbank angepasst) ──
+let _modRefundBusy = false;
+async function _modApplyBanRefunds() {
+  const br = _modState && _modState.banRefunds;
+  if (!br || !_modUid || _modRefundBusy || typeof onlineAccount === "undefined" || !onlineAccount) return;
+  const fresh = Object.keys(br).filter(id => {
+    const r = br[id]; if (!r || !r.ts || Date.now() - r.ts > 30 * 864e5) return false;
+    try { return !localStorage.getItem("dob_mod_br_" + _modUid + "_" + id); } catch (e) { return false; }
+  });
+  if (!fresh.length) return;
+  _modRefundBusy = true;
+  fresh.forEach(id => { try { localStorage.setItem("dob_mod_br_" + _modUid + "_" + id, "1"); } catch (e) {} });
+  let delta = 0, games = 0;
+  fresh.forEach(id => { delta += Number(br[id].delta) || 0; games += Number(br[id].games) || 0; });
+  try { await pullAccountFromServer(); } catch (e) {}      // neue ELO uebernehmen, damit sie nicht mit altem lokalen Stand ueberschrieben wird
+  try { updateAccountBtn(); } catch (e) {}
+  _modShowRefundPopup(delta, games);
+  _modRefundBusy = false;
+}
+function _modShowRefundPopup(delta, games) {
+  const old = document.getElementById("banRefundPopup"); if (old) old.remove();
+  const col = delta > 0 ? "#00ff88" : delta < 0 ? "#ff4444" : "#cfd3e0";
+  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+  const ov = document.createElement("div"); ov.id = "banRefundPopup";
+  ov.style.cssText = "position:fixed;inset:0;z-index:31500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);padding:16px;box-sizing:border-box;";
+  const box = document.createElement("div");
+  box.style.cssText = "width:min(420px,94vw);background:#0d0f16;border:1px solid " + col + ";border-radius:16px;padding:22px;color:#eaf2fb;font:15px sans-serif;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6);";
+  const h = document.createElement("div"); h.style.cssText = "font-weight:800;font-size:18px;margin-bottom:10px;color:#ffd700;"; h.textContent = tr("A player you've played against got banned"); box.appendChild(h);
+  const big = document.createElement("div"); big.style.cssText = "font-size:44px;font-weight:800;margin:6px 0 10px;color:" + col + ";"; big.textContent = sign + Math.abs(delta) + " ELO"; box.appendChild(big);
+  const ex = document.createElement("div"); ex.style.cssText = "font-size:13px;line-height:1.5;color:#b8bfd0;margin-bottom:16px;";
+  ex.textContent = tr("All games against banned players are removed from the ranking. ELO you lost against them was given back, ELO you gained against them was taken back.") + " (" + games + " " + tr(games === 1 ? "game" : "games") + ")";
+  box.appendChild(ex);
+  const b = document.createElement("button"); b.textContent = "OK"; b.style.cssText = "margin:0;padding:8px 28px;font-size:15px;"; b.onclick = () => ov.remove();
+  box.appendChild(b); ov.appendChild(box); document.body.appendChild(ov);
+}
+
 // ── Status-Auswertung ──
 function _modWarnActive(w) {
   const n = _modCurName().toLowerCase();
@@ -8148,6 +8260,7 @@ async function _modDoRename() {
 function _modRender() {
   _modApplyRename();
   _modApplyRecordWipe();
+  _modApplyBanRefunds();
   _modChatLock();
   const ov = _modEnsureOv();
   const ban = _modBanInfo(), warn = ban ? null : _modWarnInfo();
@@ -8377,6 +8490,7 @@ async function _modDeleteRecordsAct(uid, p) {
   else alert("Records of " + p.name + " deleted.");
 }
 async function _modPurge(uid, name) {
+  try { await _modRPC().modBanEloRefund(uid); } catch (e) { console.warn("ELO refund failed", e); alert("ELO of the opponents could not be corrected (Database Rules for eloGames / players / sanctions?):\n" + (e && e.message)); }
   const r = await _modRPC().modPurgeUser(uid, name);
   if (r && r.failed && r.failed.length) alert("Could not delete " + r.failed.length + " of " + r.total + " entries (Database Rules must allow the admin to delete them):\n" + r.failed.slice(0, 12).join("\n"));
   return r;
