@@ -5815,10 +5815,7 @@ function startStreak() {
   streakStartRound();
 }
 function streakHit(p) {
-  for (const b of balls) {
-    const dx = p.x - b.x, dy = p.y - b.y;
-    if (Math.sqrt(dx * dx + dy * dy) < p.radius + b.radius) return true;
-  }
+  for (const b of balls) if (hitSwept(p, b)) return true;
   return false;
 }
 function updateStreak() {
@@ -6160,6 +6157,7 @@ function update() {
   campGuardTick();           // Anti-Corner-Camping fuer jeden Modus
   if (!running) return;      // Disqualifikation kann das Spiel beendet haben
   if (mode === "tournament") { updateTournament(); return; }
+  for (const p of players) { syncPrev(p); followMoveTarget(p); }   // prev = Position vor der Bewegung dieses Ticks
 
   const el = document.getElementById("time");
   if (el) el.textContent = mode === "online_tv" ? tvClockSec() : Math.max(0, Math.floor((Date.now() - startTime) / 1000));
@@ -6357,9 +6355,7 @@ function update() {
 
 function checkOnlineCollision(me) {
   for (const b of balls) {
-    const dx = me.x - b.x;
-    const dy = me.y - b.y;
-    if (Math.sqrt(dx*dx + dy*dy) < me.radius + b.radius) {
+    if (hitSwept(me, b)) {
       me.alive = false;
       if (survivalActive) { endSurvival(false); return; }
       const opp = players.find(p => p.name !== me.name);
@@ -6380,9 +6376,7 @@ function checkOnlineCollision(me) {
 
 function checkBotCollision(bot) {
   for (const b of balls) {
-    const dx = bot.x - b.x;
-    const dy = bot.y - b.y;
-    if (Math.sqrt(dx*dx + dy*dy) < bot.radius + b.radius) {
+    if (hitSwept(bot, b)) {
       bot.alive = false;
       const me = players.find(p => p.name === myPlayName());
 
@@ -6411,6 +6405,7 @@ function updateTournament() {
 
 function updateMatch(match) {
   if (!match.running) return;
+  for (const p of match.players) { syncPrev(p); followMoveTarget(p); }
   for (const p of match.players) {
     if (p.alive && p.name !== "YOU") updateAI(p, match.balls);
   }
@@ -6428,8 +6423,7 @@ function updateMatch(match) {
   for (const p of match.players) {
     if (!p.alive) continue;
     for (const b of match.balls) {
-      const dx = p.x - b.x, dy = p.y - b.y;
-      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+      if (hitSwept(p, b)) {
         p.alive = false;
         const alive = match.players.filter(x => x.alive);
         if (alive.length <= 1) {
@@ -6449,8 +6443,7 @@ function checkCollision(p) {
 
   if (mode === "coin") {
     for (const b of balls) {
-      const dx = p.x - b.x, dy = p.y - b.y;
-      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+      if (hitSwept(p, b)) {
         p.stunnedUntil = Date.now() + 5000;
         p.invulnerableUntil = Date.now() + 6000;
         return;
@@ -6458,8 +6451,7 @@ function checkCollision(p) {
     }
   } else {
     for (const b of balls) {
-      const dx = p.x - b.x, dy = p.y - b.y;
-      if (Math.sqrt(dx*dx + dy*dy) < p.radius + b.radius) {
+      if (hitSwept(p, b)) {
         arenaEliminate(p);
         return;
       }
@@ -6972,6 +6964,30 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 // ═══════════════════════════════════════════════
 //  CONTROLS
 // ═══════════════════════════════════════════════
+// ── Bewegung & Treffer: kein Teleportieren, kein Durchgehen ──
+// Maus/Touch setzen nur ein ZIEL. Der Ball laeuft pro Tick hoechstens MOVE_CAP Pixel dorthin
+// (Antippen woanders oder blitzschnelles Wischen teleportiert nicht mehr). Treffer werden ueber die ganze
+// zurueckgelegte Strecke geprueft (hitSwept), nicht nur an der Endposition.
+const MOVE_CAP = 16;
+function setMoveTarget(p, x, y) {
+  p.mx = Math.max(p.radius, Math.min(W() - p.radius, x));
+  p.my = Math.max(p.radius, Math.min(H() - p.radius, y));
+}
+function followMoveTarget(p) {
+  if (!p || !p.alive || p.mx === undefined) return;
+  const dx = p.mx - p.x, dy = p.my - p.y, d = Math.hypot(dx, dy);
+  if (d <= MOVE_CAP) { p.x = p.mx; p.y = p.my; } else { p.x += dx / d * MOVE_CAP; p.y += dy / d * MOVE_CAP; }
+}
+function syncPrev(p) { p._cx = p.x; p._cy = p.y; }
+function hitSwept(p, b) {
+  const r = p.radius + b.radius;
+  const ax = (p._cx === undefined ? p.x : p._cx) - (b.x - (b.vx || 0)), ay = (p._cy === undefined ? p.y : p._cy) - (b.y - (b.vy || 0));   // relative Position im letzten Tick
+  const bx = p.x - b.x, by = p.y - b.y;                                                                                                   // relative Position jetzt
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  let t = l2 ? -(ax * dx + ay * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+  const cx = ax + dx * t, cy = ay + dy * t;
+  return cx * cx + cy * cy < r * r;
+}
 function moveSingle(x, y) {
   if (spectateModeActive || humanRemovedFromQueue) return;
 
@@ -6983,8 +6999,7 @@ function moveSingle(x, y) {
     if (!match || !match.running) return;
     const meMatch = match.players.find(p => p.name === "YOU");
     if (meMatch && meMatch.alive) {
-      meMatch.x = Math.max(meMatch.radius, Math.min(W()-meMatch.radius, x));
-      meMatch.y = Math.max(meMatch.radius, Math.min(H()-meMatch.radius, y));
+      setMoveTarget(meMatch, x, y);
     }
     return;
   }
@@ -6992,15 +7007,13 @@ function moveSingle(x, y) {
   if (mode === "online") {
     const meOnline = survivalActive ? players[0] : players.find(p => p.name === onlineAccount?.name);   // Survival/Daily: immer der eigene Ball
     if (meOnline && meOnline.alive) {
-      meOnline.x = Math.max(meOnline.radius, Math.min(W()-meOnline.radius, x));
-      meOnline.y = Math.max(meOnline.radius, Math.min(H()-meOnline.radius, y));
+      setMoveTarget(meOnline, x, y);
     }
     return;
   }
 
   if (players[0] && players[0].alive) {
-    players[0].x = Math.max(players[0].radius, Math.min(W()-players[0].radius, x));
-    players[0].y = Math.max(players[0].radius, Math.min(H()-players[0].radius, y));
+    setMoveTarget(players[0], x, y);
   }
 }
 
