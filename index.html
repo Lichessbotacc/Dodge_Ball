@@ -1503,15 +1503,17 @@ async function rpcModPurgeUser(uid, name) {
   uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
   const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
-    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid]);
+    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyReplays/" + uid]);
   const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
-  const [un, wl, ch, h2h, chat] = await Promise.all([
+  const [un, wl, ch, h2h, chat, dly] = await Promise.all([
     safe(async () => (await get(ref(db, "usernames"))).val()),
     safe(async () => (await get(ref(db, "weeklyLeague"))).val()),
     safe(async () => (await get(ref(db, "challenges"))).val()),
     safe(async () => (await get(ref(db, "headToHead"))).val()),
-    safe(async () => (await get(query(ref(db, "chat"), limitToLast(1000)))).val())
+    safe(async () => (await get(query(ref(db, "chat"), limitToLast(1000)))).val()),
+    safe(async () => (await get(ref(db, "daily"))).val())
   ]);
+  Object.entries(dly || {}).forEach(([day, users]) => { if (users && users[uid]) paths.add("daily/" + day + "/" + uid); });
   if (name) paths.add("usernames/" + String(name).toLowerCase());
   Object.entries(un || {}).forEach(([k, v]) => { if (v === uid) paths.add("usernames/" + k); });
   Object.entries(wl || {}).forEach(([w, tiers]) => Object.entries(tiers || {}).forEach(([t, groups]) => Object.entries(groups || {}).forEach(([g, members]) => { if (members && members[uid]) paths.add("weeklyLeague/" + w + "/" + t + "/" + g + "/" + uid); })));
@@ -2337,8 +2339,9 @@ function dailyIdxFor(key, depth) {
 let _dailyTest = null;   // nur Admin: Testlauf eines beliebigen Modus (wird nie gespeichert)
 function dailyChallengeFor(key) { return DAILY_CHALLENGES[dailyIdxFor(key)]; }
 function dailyActiveCh() { return _dailyTest || dailyChallengeFor(_dailyKey); }
+let _dailyPicksLoaded = false;
 async function dailyPicksRefresh() {
-  try { const v = (typeof RPC !== "undefined" && RPC) ? await RPC.get("dailyPick") : null; _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); } catch (e) { console.warn("dailyPick load failed", e); }
+  try { if (typeof RPC !== "undefined" && RPC) { const v = await RPC.get("dailyPick"); _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); _dailyPicksLoaded = true; } } catch (e) { console.warn("dailyPick load failed", e); }
   try { updDailyBtn(); } catch (e) {}
 }
 async function startDaily() { await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]); startSurvival(true); }
@@ -2480,7 +2483,7 @@ function dailySteer() {
     b.vx = Math.cos(na) * b.dch.spd; b.vy = Math.sin(na) * b.dch.spd;
   }
 }
-function updDailyBtn() { const b = document.getElementById("dailyBtn"); if (!b) return; const c = dailyChallengeFor(dailyKeyNow()); b.textContent = "📅 Daily: " + c.icon + " " + c.name; }
+function updDailyBtn() { const b = document.getElementById("dailyBtn"); if (!b) return; if (!_dailyPicksLoaded) { b.textContent = "📅 Daily Challenge"; return; } const c = dailyChallengeFor(dailyKeyNow()); b.textContent = "📅 Daily: " + c.icon + " " + c.name; }
 setInterval(updDailyBtn, 30000); setTimeout(updDailyBtn, 300); setTimeout(updDailyBtn, 2000);
 function dailyKeyNow() {   // Kalendertag in deutscher Zeit (Europe/Berlin), Wechsel um 0:00 Uhr
   try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
@@ -2604,7 +2607,8 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
       const me = await dbGet("daily/" + day + "/" + myUid);
       if (!me) continue;
       const all = await dbGet("daily/" + day);
-      const arr = Object.entries(all || {}).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+      const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
+      const arr = Object.entries(all || {}).filter(([u]) => pls[u]).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
       if (arr.length && arr[0].u === myUid) await RPC.claimDailyWin(day);
     }
   } catch (e) { console.warn("daily wins check failed", e); }
