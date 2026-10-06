@@ -4480,9 +4480,14 @@ async function createAccount() {
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
   if (!fbReady || !window._dobAuth)      { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
 
-  let _devBanned;
-  try { _devBanned = await deviceIsBanned(); }
-  catch (e) { info.textContent = "Could not verify your device. Please try again in a moment."; info.style.color = "#f44"; return; }   // fail-closed
+  // Vorab-Pruefung nur fuer die freundliche Fehlermeldung: bei voruebergehenden Fehlern (Auth/Netz noch nicht bereit) bis zu 3x wiederholen.
+  // Bleibt sie fehlerhaft, wird NICHT blockiert: die eigentliche Sperre erzwingen die Database Rules beim Registrieren des Geraets (unten, fail-closed).
+  let _devBanned = false, _devErr = null;
+  for (let _i = 0; _i < 3; _i++) {
+    try { _devBanned = await deviceIsBanned(); _devErr = null; break; }
+    catch (e) { _devErr = e; await new Promise(r => setTimeout(r, 700)); }
+  }
+  if (_devErr) console.warn("device ban pre-check failed (the rules still enforce it at registration):", _devErr);
   if (_devBanned) { info.textContent = "This device has been banned. You cannot create a new account."; info.style.color = "#f44"; return; }
 
   info.style.color = "#aaa";
@@ -4582,8 +4587,10 @@ function deviceHasAccount() {
 function markDeviceAccount(name) { try { localStorage.setItem("dobDeviceAccount", String(name || "1")); } catch (e) {} }
 // Geraete-ID (localStorage + Cookie): damit werden gebannte Geraete erkannt. Wer seine Browserdaten loescht, bekommt eine neue ID.
 function _devIdbOpen() { return new Promise((res, rej) => { try { const rq = indexedDB.open("dobDev", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("k"); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); } catch (e) { rej(e); } }); }
-async function _devIdbGet() { try { const d = await _devIdbOpen(); return await new Promise(res => { const g = d.transaction("k").objectStore("k").get("id"); g.onsuccess = () => { res(g.result || ""); d.close(); }; g.onerror = () => { res(""); d.close(); }; }); } catch (e) { return ""; } }
-async function _devIdbSet(id) { try { const d = await _devIdbOpen(); await new Promise(res => { const t = d.transaction("k", "readwrite"); t.objectStore("k").put(id, "id"); t.oncomplete = t.onerror = t.onabort = () => { d.close(); res(); }; }); } catch (e) {} }
+async function _devIdbGet() { try { return await Promise.race([_devIdbGet2(), new Promise(res => setTimeout(() => res(""), 1500))]); } catch (e) { return ""; } }
+async function _devIdbGet2() { try { const d = await _devIdbOpen(); return await new Promise(res => { const g = d.transaction("k").objectStore("k").get("id"); g.onsuccess = () => { res(g.result || ""); d.close(); }; g.onerror = () => { res(""); d.close(); }; }); } catch (e) { return ""; } }
+async function _devIdbSet(id) { try { await Promise.race([_devIdbSet2(id), new Promise(res => setTimeout(res, 1500))]); } catch (e) {} }
+async function _devIdbSet2(id) { try { const d = await _devIdbOpen(); await new Promise(res => { const t = d.transaction("k", "readwrite"); t.objectStore("k").put(id, "id"); t.oncomplete = t.onerror = t.onabort = () => { d.close(); res(); }; }); } catch (e) {} }
 // Geraete-IDs aus localStorage, Cookie UND IndexedDB: loescht jemand nur einen Speicher, wird die ID aus den anderen wiederhergestellt.
 // Alle gefundenen IDs werden gepruft/registriert; ein Treffer in bannedDevices reicht fuer die Sperre.
 async function dobDeviceIds() {
