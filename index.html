@@ -486,6 +486,10 @@ h2::after{
 #winnerOverlay{background:rgba(5,5,8,0.93);z-index:55;backdrop-filter:blur(6px);}
 #winnerOverlay h2{font-size:54px;font-weight:900;text-shadow:0 0 40px gold;font-family:var(--font-display);}
 #winnerOverlay h2::after{display:none;}
+#winnerOverlay{overflow-y:auto;justify-content:flex-start;padding:18px 0 24px;box-sizing:border-box;}
+#winnerOverlay>:first-child{margin-top:auto;}
+#winnerOverlay>:last-child{margin-bottom:auto;}
+@media (max-height:820px){#winnerOverlay h2{font-size:40px;}#winnerOverlay #postChatMsgs{height:80px !important;}#winnerOverlay #winnerButtons{margin-top:18px !important;}}
 #winnerOverlay p{font-size:26px;color:#aaa;margin-top:10px;font-family:var(--font-hud);}
 
 #eloTable{
@@ -5658,7 +5662,11 @@ async function handleOnlineResult(winnerName, change) {
   if (won && fbReady) leagueRecordWin().catch(e => console.warn("league win failed", e));
 
   showEloAnimation(won ? eloChange : -eloChange);
-  setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange), 2600);
+  const _eloRows = [
+    { uid: myUid, name: dn(onlineAccount.name), delta: won ? eloChange : -eloChange, from: myOriginalElo, to: Math.round(onlineAccount.elo) },
+    { uid: oppUid, name: dn(oppName), delta: won ? -oppEloChange : oppEloChange, from: oppOriginalElo, to: onlineOpponent && Number.isFinite(Number(onlineOpponent.elo)) ? Math.round(onlineOpponent.elo) : oppOriginalElo }
+  ];
+  setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange, _eloRows), 2600);
 
   // Bot stats: written to players/{ONLINE_BOT_UID}. This is the ONE
   // place a client writes to a uid that isn't its own — acceptable
@@ -5767,11 +5775,21 @@ async function dbSetBotPlayer(data) {
 }
 
 
-function showWinnerOverlay(winnerName, eloChange) {
+function showWinnerOverlay(winnerName, eloChange, eloRows) {
   document.getElementById("winnerText").innerHTML =
     `🏆 Winner: <span style="color:gold">${escapeHtml(dn(winnerName))}</span>`;
   document.getElementById("winnerEloChange").textContent =
     `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
+  { // animiertes Elo-Panel (beide Spieler + Leaderboard-Platzwechsel), ersetzt die einfache Textzeile
+    const ex = document.getElementById("winnerEloPanel"); if (ex) ex.remove();
+    if (eloRows && eloRows.length) {
+      document.getElementById("winnerEloChange").textContent = "";
+      const pn = document.createElement("div"); pn.id = "winnerEloPanel";
+      pn.style.cssText = "width:min(420px,92vw);text-align:center;";
+      document.getElementById("winnerEloChange").after(pn);
+      try { tvEloPanel(document.getElementById("winnerOverlay"), eloRows, pn); } catch (e) { console.warn(e); }
+    }
+  }
   updateWinnerLeagueLine();
 
   const btns = document.getElementById("winnerButtons");
@@ -7475,6 +7493,142 @@ function moveSingle(x, y) {
 //  CHANGED: scans onlineMatches (uid-keyed participants now) via the
 //  guarded RPC; read-only, no write capability needed here at all.
 // ═══════════════════════════════════════════════
+// ═══ TV-Gewinner-Fenster: Animationen (Elo-Zaehler, Konfetti, Leaderboard-Platzwechsel) ═══
+function tvAnimCss() {
+  if (document.getElementById("tvAnimCss")) return;
+  const st = document.createElement("style"); st.id = "tvAnimCss";
+  st.textContent = "@keyframes tvPop{0%{transform:scale(.2);opacity:0}55%{transform:scale(1.35);opacity:1}100%{transform:scale(1)}}" +
+    "@keyframes tvRise{0%{transform:translateY(14px);opacity:0}100%{transform:translateY(0);opacity:1}}" +
+    "@keyframes tvConf{0%{transform:translate(0,0) rotate(0);opacity:1}100%{transform:translate(var(--dx),var(--dy)) rotate(var(--rot));opacity:0}}" +
+    "@keyframes tvGlowG{0%,100%{box-shadow:0 0 0 rgba(0,255,136,0)}50%{box-shadow:0 0 22px rgba(0,255,136,.75)}}" +
+    "@keyframes tvGlowR{0%,100%{box-shadow:0 0 0 rgba(255,85,102,0)}50%{box-shadow:0 0 22px rgba(255,85,102,.75)}}" +
+    "@keyframes tvShine{0%{transform:translateX(-120%)}100%{transform:translateX(220%)}}";
+  document.head.appendChild(st);
+}
+function tvCount(el, from, to, ms) {
+  const t0 = performance.now();
+  (function step(t) {
+    const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = Math.round(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step);
+  })(t0);
+}
+function tvConfetti(host) {
+  host.querySelectorAll("i.tvcf").forEach(x => x.remove());
+  const cols = ["#ffd700", "#00ff88", "#ff8844", "#66ccff", "#ff66cc"];
+  for (let i = 0; i < 36; i++) {
+    const c = document.createElement("i"); c.className = "tvcf";
+    const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * 170;
+    c.style.cssText = "position:absolute;left:50%;top:38%;width:" + (5 + Math.random() * 5) + "px;height:" + (8 + Math.random() * 6) + "px;background:" + cols[i % cols.length] +
+      ";border-radius:2px;pointer-events:none;--dx:" + Math.round(Math.cos(a) * d) + "px;--dy:" + Math.round(Math.sin(a) * d - 40) + "px;--rot:" + Math.round(Math.random() * 720 - 360) +
+      "deg;animation:tvConf " + (1.1 + Math.random() * 0.9).toFixed(2) + "s cubic-bezier(.15,.7,.3,1) " + (Math.random() * 0.25).toFixed(2) + "s forwards;";
+    host.appendChild(c);
+  }
+}
+// Elo-Panel (TV und Online-1v1): Zahlen, Konfetti und Mini-Leaderboard mit Platzwechsel
+function tvEloPanel(host, rows, mount) {   // host: Overlay (Konfetti), mount: Ziel fuer Zahlen/Board (Standard = host)
+  tvAnimCss();
+  const box = document.createElement("div");
+  box.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12);display:flex;gap:28px;justify-content:center;flex-wrap:wrap;font-size:16px;color:#f0f0f5;";
+  rows.forEach((r, idx) => {
+    const c = document.createElement("div");
+    c.setAttribute("translate", "no");
+    c.style.cssText = "animation:tvRise .45s ease " + (0.15 + idx * 0.15) + "s both;";
+    const nm = document.createElement("div"); nm.style.cssText = "font-size:13px;opacity:.75;margin-bottom:2px;"; nm.textContent = r.name;
+    const dl = document.createElement("div"); dl.style.cssText = "font-size:26px;font-weight:800;display:inline-block;color:" + (r.delta >= 0 ? "#00ff88" : "#ff5566") + ";text-shadow:0 0 14px " + (r.delta >= 0 ? "rgba(0,255,136,.55)" : "rgba(255,85,102,.55)") + ";animation:tvPop .6s cubic-bezier(.2,1.4,.4,1) " + (0.45 + idx * 0.15) + "s both;";
+    dl.textContent = (r.delta >= 0 ? "+" : "−") + Math.abs(r.delta) + " ELO";
+    const nw = document.createElement("div"); nw.style.cssText = "font-size:13px;opacity:.8;margin-top:2px;";
+    const cnt = document.createElement("b"); cnt.textContent = r.from;
+    nw.append(document.createTextNode(r.from + " → "), cnt);
+    c.append(nm, dl, nw); box.append(c);
+    setTimeout(() => { if (host.isConnected) tvCount(cnt, r.from, r.to, 1000); }, 600 + idx * 150);
+  });
+  (mount || host).append(box);
+  const board = tvBuildBoard(rows);
+  if (board) (mount || host).append(board);
+  if (!mount) host.style.overflow = "visible";   // TV-Karte: Konfetti darf ueber den Rand fliegen
+  tvConfetti(host);
+  return box;
+}
+// Mini-Leaderboard: die Zeilen der beiden Spieler rutschen mit Animation auf ihren neuen Platz.
+// Stehen die Spieler weit auseinander (z.B. Platz 2 und 100), gibt es pro Spieler einen eigenen Ausschnitt,
+// getrennt durch eine Zeile "⋮ N players".
+function tvBuildBoard(rows) {
+  try {
+    const pd = window._lastPlayersData; if (!pd || !rows || rows.length < 1) return null;
+    const ov = {}; rows.forEach(r => { if (r.uid) ov[r.uid] = r; });
+    const byName = new Map();
+    Object.entries(pd).forEach(([uid, pl]) => {
+      if (!pl || !pl.name || uid === "bot__online_bot") return;
+      const o = ov[uid];
+      const e = { uid, name: dn(pl.name), before: o ? o.from : (Number(pl.elo) || 0), after: o ? o.to : (Number(pl.elo) || 0), ch: o ? o.delta : 0 };
+      const k = e.name.toLowerCase(), prev = byName.get(k);
+      if (!prev || o || (!ov[prev.uid] && e.before > prev.before)) byName.set(k, e);
+    });
+    const list = [...byName.values()];
+    const uids = rows.map(r => r.uid).filter(u => u && list.find(x => x.uid === u));   // Bot-Gegner steht nicht in der Liste
+    if (!uids.length) return null;
+    const cmp = (f) => (a, b) => (b[f] - a[f]) || a.name.localeCompare(b.name);
+    const B = [...list].sort(cmp("before")), A = [...list].sort(cmp("after"));
+    // pro Spieler ein Bereich (alter bis neuer Platz, je +-1 Nachbar), ueberlappende/angrenzende Bereiche werden verbunden
+    let cl = uids.map(u => {
+      const rb = B.findIndex(x => x.uid === u), ra = A.findIndex(x => x.uid === u);
+      return [Math.max(0, Math.min(rb, ra) - 1), Math.min(list.length - 1, Math.max(rb, ra) + 1)];
+    }).sort((x, y) => x[0] - y[0]);
+    const merged = [cl[0]];
+    for (let i = 1; i < cl.length; i++) {
+      const last = merged[merged.length - 1];
+      if (cl[i][0] <= last[1] + 1) last[1] = Math.max(last[1], cl[i][1]); else merged.push(cl[i]);
+    }
+    if (merged.some(c => c[1] - c[0] > 7)) return null;
+    const RH = 30, SEP = 24;
+    const box = document.createElement("div");
+    box.style.cssText = "position:relative;margin:16px auto 0;width:min(340px,80vw);text-align:left;font-size:14px;animation:tvRise .5s ease .5s both;";
+    const nodes = [];   // { r, rk, el, e, afterTop, afterRank }
+    let y = 0;
+    merged.forEach((c, ci) => {
+      if (ci > 0) {
+        const gap = c[0] - merged[ci - 1][1] - 1;
+        const sp = document.createElement("div");
+        sp.style.cssText = "position:absolute;left:0;right:0;top:" + y + "px;height:" + SEP + "px;line-height:" + SEP + "px;text-align:center;font-size:12px;opacity:.55;letter-spacing:1px;";
+        sp.textContent = "⋮  " + gap + (gap === 1 ? " player" : " players");
+        box.append(sp); y += SEP;
+      }
+      const winB = B.slice(c[0], c[1] + 1), winA = A.slice(c[0], c[1] + 1);
+      winB.forEach((e, i) => {
+        const r = document.createElement("div"), ch = e.ch;
+        r.setAttribute("translate", "no");
+        r.style.cssText = "position:absolute;left:0;right:0;height:" + (RH - 4) + "px;top:" + (y + i * RH) + "px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:8px;overflow:hidden;" +
+          "transition:top .95s cubic-bezier(.34,1.45,.5,1);background:" + (ch > 0 ? "rgba(0,255,136,.14)" : ch < 0 ? "rgba(255,85,102,.14)" : "rgba(255,255,255,.05)") + ";" +
+          (ch ? "animation:" + (ch > 0 ? "tvGlowG" : "tvGlowR") + " 1.4s ease 1.2s 2;" : "");
+        const rk = document.createElement("span"); rk.style.cssText = "width:36px;opacity:.65;font-size:12px;"; rk.textContent = "#" + (c[0] + i + 1);
+        const nm = document.createElement("span"); nm.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" + (ch ? "font-weight:700;" : "opacity:.85;"); nm.textContent = e.name;
+        const el = document.createElement("span"); el.style.cssText = "min-width:44px;text-align:right;font-weight:700;color:" + (ch > 0 ? "#00ff88" : ch < 0 ? "#ff5566" : "#cfd6e4") + ";"; el.textContent = e.before;
+        const bd = document.createElement("span"); bd.style.cssText = "width:40px;text-align:right;font-size:12px;font-weight:700;opacity:0;transition:opacity .4s ease;";
+        r.append(rk, nm, el, bd);
+        if (ch) { const sh = document.createElement("i"); sh.style.cssText = "position:absolute;top:0;bottom:0;width:40%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);animation:tvShine 1.1s ease 1.2s 1;pointer-events:none;"; r.append(sh); }
+        box.append(r);
+        const ai = winA.findIndex(x => x.uid === e.uid);
+        nodes.push({ r, rk, el, bd, e, beforeRank: c[0] + i + 1, afterTop: y + ai * RH, afterRank: c[0] + ai + 1 });
+      });
+      y += winB.length * RH;
+    });
+    box.style.height = y + "px";
+    setTimeout(() => {
+      nodes.forEach(n => {
+        n.r.style.top = n.afterTop + "px"; n.rk.textContent = "#" + n.afterRank;
+        if (n.e.ch) {
+          tvCount(n.el, n.e.before, n.e.after, 900);
+          const dr = n.beforeRank - n.afterRank;   // >0 = aufgestiegen
+          n.bd.textContent = dr > 0 ? "▲" + dr : dr < 0 ? "▼" + (-dr) : "＝";
+          n.bd.style.color = dr > 0 ? "#00ff88" : dr < 0 ? "#ff5566" : "#9aa0aa";
+          n.bd.style.opacity = "1";
+        }
+      });
+    }, 1300);
+    return box;
+  } catch (err) { return null; }
+}
 function watchPlayerTV(uid) {
   if (!uid || !fbReady) return;
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
@@ -7593,19 +7747,7 @@ async function startOnlineTV(targetUid) {
     }
     o.append(title, big);
     if (scoreTxt) { const s = document.createElement("div"); s.style.cssText = "margin-top:8px;font-size:15px;opacity:.8;"; s.setAttribute("translate", "no"); s.textContent = scoreTxt; o.append(s); }
-    if (eloRows && eloRows.length) {   // Elo-Aenderung beider Spieler (Sieger +, Verlierer -)
-      const box = document.createElement("div");
-      box.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12);display:flex;gap:28px;justify-content:center;flex-wrap:wrap;font-size:16px;";
-      eloRows.forEach(r => {
-        const c = document.createElement("div");
-        c.setAttribute("translate", "no");
-        const nm = document.createElement("div"); nm.style.cssText = "font-size:13px;opacity:.75;margin-bottom:2px;"; nm.textContent = r.name;
-        const dl = document.createElement("div"); dl.style.cssText = "font-size:24px;font-weight:800;color:" + (r.delta >= 0 ? "#00ff88" : "#ff5566") + ";"; dl.textContent = (r.delta >= 0 ? "+" : "−") + Math.abs(r.delta) + " ELO";
-        const nw = document.createElement("div"); nw.style.cssText = "font-size:12px;opacity:.65;"; nw.textContent = r.from + " → " + r.to;
-        c.append(nm, dl, nw); box.append(c);
-      });
-      o.append(box);
-    }
+    if (eloRows && eloRows.length) tvEloPanel(o, eloRows);   // Elo-Aenderung beider Spieler, animiert
     document.body.appendChild(o);
   };
   const setStall = (on) => {
@@ -7811,8 +7953,8 @@ async function startOnlineTV(targetUid) {
             const d1 = glickoResult({ elo: e1 }, { elo: e2 }, w === 1).delta;
             const d2 = glickoResult({ elo: e2 }, { elo: e1 }, w === 2).delta;
             eloRows = [
-              { name: dn(mm.p1), delta: d1, from: e1, to: Math.max(100, e1 + d1) },
-              { name: dn(mm.p2), delta: d2, from: e2, to: Math.max(100, e2 + d2) }
+              { uid: mm.p1uid, name: dn(mm.p1), delta: d1, from: e1, to: Math.max(100, e1 + d1) },
+              { uid: mm.p2uid, name: dn(mm.p2), delta: d2, from: e2, to: Math.max(100, e2 + d2) }
             ];
           }
         } catch (e) {}
@@ -7822,9 +7964,10 @@ async function startOnlineTV(targetUid) {
           getHeadToHeadScore(m0.p1uid, m0.p2uid).then(r => { if (hh) hh.textContent = (r[m0.p1uid] || 0) + " - " + (r[m0.p2uid] || 0); }).catch(() => {});
         }
         specText.innerHTML = "Match finished. Searching for next game...";
-        holdUntil = Date.now() + 6000;
+        const holdMs = eloRows ? 9000 : 6000;   // mit Elo-Animation etwas laenger zeigen
+        holdUntil = Date.now() + holdMs;
         clearTimeout(holdTimer);
-        holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
+        holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, holdMs);
         return;
       }
       // Dieser Listener feuert bei JEDER Aenderung des Match-Knotens, auch bei den Ping-Eintraegen (alle 2,5s).
