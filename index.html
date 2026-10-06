@@ -1637,6 +1637,32 @@ function _devClean(id) { return String(id || "").replace(/[^A-Za-z0-9_-]/g, "").
 function _devList(ids) { return (Array.isArray(ids) ? ids : [ids]).map(_devClean).filter(i => i.length >= 6); }
 // Registriert ALLE Geraete-IDs dieses Geraets unter der eigenen uid. Die Database Rules lehnen das ab, wenn eine ID in bannedDevices steht
 // -> ein neuer Account kann auf einem gebannten Geraet nie "freigeschaltet" werden (players/{uid} wird erst mit deviceIds/{uid} erlaubt).
+async function rpcReportSynthetic(n, replay, meta) {
+  requireNotBanned(); const uid = requireUid();
+  const d = { n: Math.max(1, Math.min(1000000, Math.floor(Number(n) || 1))), ts: serverTimestamp() };
+  if (meta) { d.name = String(meta.name || "").slice(0, 20); d.mode = String(meta.mode || "").slice(0, 20); }
+  const jobs = [update(ref(db, "botFlags/" + uid), d)];
+  if (typeof replay === "string" && replay.length > 2 && replay.length <= 390000) jobs.push(set(ref(db, "botReplays/" + uid), replay));
+  await Promise.all(jobs);
+}
+async function rpcModFlagCheater(uid, name, why, banned, replay) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
+  const cur = (await get(ref(db, "botFlags/" + uid + "/n"))).val();
+  const d = {
+    n: Math.max(1, Math.min(1000000, Math.floor(Number(cur) || 1))), ts: serverTimestamp(),
+    name: String(name || "").slice(0, 20), mode: "scan", why: String(why || "").slice(0, 300)
+  };
+  if (banned) d.banned = true;
+  const jobs = [update(ref(db, "botFlags/" + uid), d)];
+  if (typeof replay === "string" && replay.length > 2 && replay.length <= 390000) jobs.push(set(ref(db, "botReplays/" + uid), replay));
+  await Promise.all(jobs);
+}
+async function rpcModDeleteBotFlag(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  return update(ref(db), { ["botFlags/" + uid]: null, ["botReplays/" + uid]: null });
+}
 async function rpcRegisterDevice(ids) {
   requireNotBanned(); const uid = requireUid(); ids = _devList(ids);
   if (!ids.length) throw new Error("No device id.");
@@ -1676,7 +1702,7 @@ window._dobRPC = {
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
-  registerDevice: rpcRegisterDevice, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modUnbanDevice: rpcModUnbanDevice,
+  registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modUnbanDevice: rpcModUnbanDevice,
   get: rpcGet, on: rpcOn,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
@@ -7678,10 +7704,53 @@ window.addEventListener("keydown", e => {
 }, { capture: true });
 ["gesturestart", "gesturechange", "gestureend"].forEach(t => document.addEventListener(t, e => e.preventDefault()));
 
-document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
-document.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
+// Anti-Bot: Tasten/Maus/Touch, die ein Skript per dispatchEvent() erzeugt (isTrusted === false), werden gezaehlt und gemeldet (botFlags/{eigene uid}).
+// Zusaetzlich laeuft ein Mitschnitt der letzten ~20 s (eigene Position, Gegner, Baelle); 20 s nach der ersten Meldung wird er als botReplays/{uid} hochgeladen.
+// Der Admin sieht beides oben links im Menue unter "Cheaters" und entscheidet dort per Replay: Bannen oder nicht.
+// BOT_BLOCK_SYNTHETIC = true -> kuenstliche Eingaben werden zusaetzlich ignoriert (Bot steuert nichts mehr, Replay zeigt dann aber kaum Bewegung).
+const BOT_BLOCK_SYNTHETIC = false;
+const _flagBuf = [];
+setInterval(() => {
+  try {
+    if (!running || !players || !players.length) return;
+    const me = players.find(p => p.name === myPlayName()) || players[0]; if (!me) return;
+    const o = []; players.slice(0, 13).forEach(p => { if (p !== me) o.push(Math.round(p.x), Math.round(p.y)); });
+    const bl = []; balls.slice(0, 60).forEach(x => bl.push(Math.round(x.x), Math.round(x.y), Math.round(x.radius || 10)));
+    _flagBuf.push([Math.round(me.x), Math.round(me.y), o, bl]);
+    if (_flagBuf.length > 200) _flagBuf.shift();
+  } catch (e) {}
+}, 100);
+function _flagReplayStr() {
+  let fr = _flagBuf.slice(), str = "";
+  for (let i = 0; i < 6; i++) {
+    str = JSON.stringify({ w: W(), h: H(), iv: 100, f: fr });
+    if (str.length <= 380000) return str;
+    fr = fr.slice(Math.floor(fr.length * 0.3));
+  }
+  return "";
+}
+let _synthCount = 0, _synthLast = 0, _synthReplaySent = false;
+function _humanEvent(e) {
+  if (e.isTrusted) return true;
+  if (!running) return !BOT_BLOCK_SYNTHETIC;
+  _synthCount++;
+  const now = Date.now();
+  if (now - _synthLast > 15000 && fbReady && myUid && RPC && RPC.reportSynthetic) {
+    _synthLast = now;
+    const meta = { name: myPlayName(), mode: String(mode || "") };
+    if (!_synthReplaySent) {
+      _synthReplaySent = true;
+      setTimeout(() => { try { RPC.reportSynthetic(_synthCount, _flagReplayStr(), meta).catch(() => {}); } catch (e2) {} }, 20000);
+    }
+    RPC.reportSynthetic(_synthCount, null, meta).catch(() => {});
+  }
+  return !BOT_BLOCK_SYNTHETIC;
+}
+document.addEventListener("keydown", e => { if (!_humanEvent(e)) return; keys[e.key.toLowerCase()] = true; });
+document.addEventListener("keyup",   e => { if (!_humanEvent(e)) return; keys[e.key.toLowerCase()] = false; });
 
 canvas.addEventListener("mousemove", e => {
+  if (!_humanEvent(e)) return;
   if (running && ["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) {
     const pos = screenToVirtual(e.clientX, e.clientY);
     moveSingle(pos.x, pos.y);
@@ -7690,6 +7759,7 @@ canvas.addEventListener("mousemove", e => {
 
 canvas.addEventListener("touchmove", e => {
   e.preventDefault();
+  if (!_humanEvent(e)) return;
   if (!running) return;
   if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
@@ -7699,6 +7769,7 @@ canvas.addEventListener("touchmove", e => {
 
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
+  if (!_humanEvent(e)) return;
   if (!running) return;
   if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
@@ -8398,7 +8469,8 @@ function _modRender() {
   }
 }
 setInterval(_modRender, 1000);
-setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); }, 3000);
+setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); _cheatersBtn(); }, 3000);
+setInterval(() => { try { if (_modIsAdmin()) _cheatersLoad(); } catch (e) {} }, 60000);
 if (_modRPC()) _modWatch();
 
 // ═══ ADMIN: Button im Menü + Mod-Panel ═══
@@ -8708,7 +8780,7 @@ async function _cheatBanOne(uid, name, why) {
 async function _cheatScan(manual) {
   if (!_modIsAdmin() || !_modRPC() || _cheatScanning) return null;
   _cheatScanning = true;
-  const report = { banned: [], pending: [], clean: true };
+  const report = { banned: [], flagged: [], pending: [], clean: true };
   try {
     const found = await _cheatCollect(), now = Date.now();
     for (const uid of Object.keys(_cheatPending)) if (!found[uid]) delete _cheatPending[uid];   // Befund verschwunden -> kein Verdacht mehr
@@ -8716,8 +8788,16 @@ async function _cheatScan(manual) {
       report.clean = false;
       const sig = f.why.slice().sort().join(" | "), pend = _cheatPending[uid];
       if (pend && pend.sig === sig && now - pend.t >= CHEAT_CONFIRM_MS) {
-        try { await _cheatBanOne(uid, f.name, f.why); report.banned.push({ uid, name: f.name, why: f.why }); delete _cheatPending[uid]; }
-        catch (e) { console.warn("auto-ban failed", uid, e); }
+        // Beweislage eindeutig (unmoegliche Werte, in zwei Scans bestaetigt): Eintrag + Beweis-Replay in die Cheaters-Liste, DANN bannen.
+        const whyStr = f.why.slice().sort().join(" | ").slice(0, 300);
+        if (_cheatIgnoreGet()[uid] === whyStr) { delete _cheatPending[uid]; continue; }   // von dir freigegeben/entbannt, gleicher Befund -> nicht erneut bannen
+        try {
+          let ev = null;
+          try { const raw = await _modRPC().get("survivalReplays/" + uid); if (typeof raw === "string" && raw.length <= 390000) ev = raw; } catch (e) {}
+          await _modRPC().modFlagCheater(uid, f.name, whyStr, true, ev);   // VOR dem Ban sichern: der Ban loescht die Daten des Spielers
+          await _cheatBanOne(uid, f.name, f.why);
+          report.banned.push({ uid, name: f.name, why: f.why }); delete _cheatPending[uid];
+        } catch (e) { console.warn("auto-ban failed", uid, e); }
       } else {
         if (!pend || pend.sig !== sig) _cheatPending[uid] = { sig, t: now };
         report.pending.push({ uid, name: f.name, why: f.why });
@@ -8746,9 +8826,151 @@ async function _modScanBtn() {
   if (!r) { alert("Scan not possible (admin only / already running)."); return; }
   if (r.error) { alert("Scan failed: " + r.error); return; }
   let msg = r.clean ? "No cheaters found." : "";
-  if (r.banned.length) msg += "Banned + wiped:\n" + r.banned.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n") + "\n\n";
+  if (r.banned.length) msg += "Banned + wiped (listed under Cheaters):\n" + r.banned.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n") + "\n\n";
   if (r.pending.length) msg += "Suspicious but not confirmed (not banned):\n" + r.pending.map(b => "• " + b.name + ": " + b.why.join("; ")).join("\n");
   alert(msg.trim()); await _modPanelLoad();
+}
+// ═══ ADMIN: "Cheaters" (oben links im Menue): gemeldete Spieler + Replay + Ban / Freigeben ═══
+let _cheatFlags = {};
+function _cheatIgnoreGet() { try { return JSON.parse(localStorage.getItem("dobCheatIgnore") || "{}") || {}; } catch (e) { return {}; } }
+function _cheatIgnoreSet(uid, why) { try { const o = _cheatIgnoreGet(); o[uid] = String(why || ""); localStorage.setItem("dobCheatIgnore", JSON.stringify(o)); } catch (e) {} }
+async function _cheatersLoad() {
+  if (!_modIsAdmin() || !_modRPC()) return;
+  try { _cheatFlags = (await _modRPC().get("botFlags")) || {}; } catch (e) { _cheatFlags = {}; }
+  const n = Object.keys(_cheatFlags).length;
+  const b = document.getElementById("cheatersBtn");
+  if (b) { b.textContent = "🕵 Cheaters" + (n ? " (" + n + ")" : ""); b.style.borderColor = n ? "#ff4444" : ""; b.style.color = n ? "#ff6b6b" : ""; }
+  const ov = document.getElementById("cheatersOv");
+  if (ov && ov.style.display !== "none") _cheatersRender();
+}
+function _cheatersBtn() {
+  const ex = document.getElementById("cheatersBtn");
+  if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
+  if (ex) return;
+  const bar = _adminBar(); if (!bar) return;
+  const b = document.createElement("button"); b.id = "cheatersBtn"; b.textContent = "🕵 Cheaters";
+  b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
+  b.onclick = () => openCheaters();
+  bar.appendChild(b);
+  _cheatersLoad();
+}
+async function openCheaters() {
+  if (!_modIsAdmin()) return;
+  let ov = document.getElementById("cheatersOv");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "cheatersOv";
+    ov.style.cssText = "position:fixed;inset:0;z-index:15000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);";
+    ov.addEventListener("click", e => { if (e.target === ov) ov.style.display = "none"; });
+    ov.innerHTML = '<div style="width:min(720px,95vw);max-height:88vh;display:flex;flex-direction:column;background:#0d0f16;border:1px solid rgba(255,255,255,0.12);border-top:3px solid #ff4444;border-radius:14px;padding:16px;color:#e6e9f2;text-align:left;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🕵 Cheaters</b><button id="cheatersX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+      + '<div style="font-size:12px;color:#8b93a6;margin:8px 0;">Players whose game sent scripted (non-human) input. Watch the replay, then ban or clear them. A replay arrives ~20 s after the first report.</div>'
+      + '<div id="cheatersList" style="overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div></div>';
+    document.body.appendChild(ov);
+    ov.querySelector("#cheatersX").onclick = () => { ov.style.display = "none"; };
+  }
+  ov.style.display = "flex";
+  await _cheatersLoad();
+  _cheatersRender();
+}
+function _cheatersRender() {
+  const list = document.getElementById("cheatersList"); if (!list) return;
+  const entries = Object.entries(_cheatFlags || {}).sort((a, b) => ((b[1] && b[1].ts) || 0) - ((a[1] && a[1].ts) || 0));
+  list.innerHTML = "";
+  if (!entries.length) { list.textContent = "No flagged players."; return; }
+  entries.forEach(([uid, f]) => {
+    f = f || {};
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;";
+    const info = document.createElement("div");
+    info.innerHTML = "<b>" + escapeHtml(f.name || uid) + "</b>" + (f.banned ? " <span style='color:#ff6b6b;font-size:12px;'>🔨 BANNED automatically</span>" : "") + " <span style='color:#8b93a6;font-size:12px;'>" + escapeHtml(f.mode || "") + " · " + (f.n || 0) + " scripted inputs · " + (f.ts ? new Date(f.ts).toLocaleString() : "") + "</span>" + (f.why ? "<div style='color:#ffb4b4;font-size:12px;margin-top:2px;'>" + escapeHtml(f.why) + "</div>" : "");
+    const btns = document.createElement("div"); btns.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+    const mk = (t, fn) => { const b = document.createElement("button"); b.textContent = t; b.style.cssText = "margin:0;padding:6px 10px;font-size:13px;"; b.onclick = fn; btns.appendChild(b); };
+    mk("▶ Replay", () => _cheatersReplay(uid, f));
+    if (f.banned) {
+      mk("♻ Unban", () => _cheatersUnban(uid, f));
+      mk("🗑 Remove", () => _cheatersDismiss(uid, null));
+    } else {
+      mk("🔨 Ban", () => _cheatersBan(uid, f));
+      mk("✔ Not a cheater", () => _cheatersDismiss(uid, f));
+    }
+    row.appendChild(info); row.appendChild(btns); list.appendChild(row);
+  });
+}
+async function _cheatersDismiss(uid, f) {
+  if (f && f.why) _cheatIgnoreSet(uid, f.why);   // gleicher Scan-Befund wird nicht erneut gemeldet
+  try { await _modRPC().modDeleteBotFlag(uid); } catch (e) { alert("Failed: " + (e && e.message) + " (Database Rules updated?)"); }
+  await _cheatersLoad();
+}
+async function _cheatersUnban(uid, f) {
+  try {
+    const [p, sn] = await Promise.all([_modRPC().get("players/" + uid), _modRPC().get("sanctions/" + uid)]);
+    if (sn && sn.banned) await _modBan(uid, sn, p || { name: f.name || uid });   // schaltet um: Unban (+ Daten aus dem Backup wiederherstellen, wenn du bestaetigst)
+    _cheatIgnoreSet(uid, f.why);                                                  // gleicher Befund fuehrt nicht wieder zum Auto-Ban
+    await _modRPC().modDeleteBotFlag(uid);
+  } catch (e) { if (e && e.message === "__cancel") return; alert("Failed: " + (e && e.message)); }
+  await _cheatersLoad();
+}
+async function _cheatersBan(uid, f) {
+  try {
+    const [p, sn] = await Promise.all([_modRPC().get("players/" + uid), _modRPC().get("sanctions/" + uid)]);
+    if (sn && sn.banned) { alert("Already banned."); }
+    else { await _modBan(uid, sn || {}, p || { name: f.name || uid }); }
+    await _modRPC().modDeleteBotFlag(uid);
+  } catch (e) { if (e && e.message === "__cancel") return; alert("Failed: " + (e && e.message)); }
+  await _cheatersLoad();
+}
+async function _cheatersReplay(uid, f) {
+  const label = (f.name || uid) + (f.mode ? " (" + f.mode + ")" : "");
+  let rec = null;
+  try { const raw = await _modRPC().get("botReplays/" + uid); rec = raw && JSON.parse(raw); } catch (e) {}
+  if (rec && Array.isArray(rec.f) && rec.f.length) { _flagReplayPlay(rec, label); return; }                         // Live-Mitschnitt
+  if (rec && Array.isArray(rec.p) && rec.n) { playSurvivalReplay(rec, (f.name || uid) + " (survival record)"); return; }   // gesicherter Survival-Rekord
+  try { const raw = await _modRPC().get("survivalReplays/" + uid); const sv = raw && JSON.parse(raw); if (sv && Array.isArray(sv.p) && sv.n) { playSurvivalReplay(sv, (f.name || uid) + " (survival record)"); return; } } catch (e) {}
+  alert("No replay available. A live recording arrives about 20 s after the first scripted input; ELO findings have no replay.");
+}
+function _flagReplayPlay(rec, label) {
+  const old = document.getElementById("flagReplay"); if (old) old.remove();
+  const ov = document.createElement("div"); ov.id = "flagReplay";
+  ov.style.cssText = "position:fixed;inset:0;z-index:16000;background:#05050a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:8px;box-sizing:border-box;";
+  ov.innerHTML = '<div style="color:#f0f0f5;font:700 16px system-ui,sans-serif;"></div>'
+    + '<canvas style="width:auto;max-width:100%;max-height:calc(100vh - 120px);border:1px solid rgba(255,255,255,.15);border-radius:10px;background:#0a0a12;"></canvas>'
+    + '<div style="color:#8b93a6;font:12px system-ui,sans-serif;">green = flagged player, blue = others, red = balls (loops)</div>'
+    + '<div><button class="frR" style="margin:4px 6px;">↺ Restart</button><button class="frC" style="margin:4px 6px;">✕ Close</button></div>';
+  document.body.appendChild(ov);
+  const cv = ov.querySelector("canvas"), c = cv.getContext("2d");
+  const Wd = cv.width = rec.w || 1280, Hd = cv.height = rec.h || 720;
+  ov.firstChild.textContent = "▶ " + label;
+  const F = rec.f, iv = rec.iv || 100, total = (F.length - 1) * iv;
+  const lerp = (a, b, k) => a + (b - a) * k;
+  let t0 = performance.now(), raf = 0, closed = false;
+  const draw = () => {
+    if (closed) return;
+    let el = performance.now() - t0;
+    if (el > total + 1500) { t0 = performance.now(); el = 0; }
+    const tt = Math.min(el, total);
+    const i = Math.max(0, Math.min(F.length - 2, Math.floor(tt / iv)));
+    const A = F[i], B = F[Math.min(F.length - 1, i + 1)];
+    const k = F.length < 2 ? 0 : Math.max(0, Math.min(1, (tt - i * iv) / iv));
+    c.clearRect(0, 0, Wd, Hd);
+    const ab = A[3], bb = B[3], sameB = ab.length === bb.length;
+    for (let j = 0; j + 2 < ab.length; j += 3) {
+      c.beginPath(); c.arc(sameB ? lerp(ab[j], bb[j], k) : ab[j], sameB ? lerp(ab[j + 1], bb[j + 1], k) : ab[j + 1], ab[j + 2], 0, Math.PI * 2);
+      c.fillStyle = "#ff4444"; c.fill();
+    }
+    const ao = A[2], bo = B[2], sameO = ao.length === bo.length;
+    for (let j = 0; j + 1 < ao.length; j += 2) {
+      c.beginPath(); c.arc(sameO ? lerp(ao[j], bo[j], k) : ao[j], sameO ? lerp(ao[j + 1], bo[j + 1], k) : ao[j + 1], 18, 0, Math.PI * 2);
+      c.fillStyle = "#00c8ff"; c.fill();
+    }
+    c.beginPath(); c.arc(lerp(A[0], B[0], k), lerp(A[1], B[1], k), 18, 0, Math.PI * 2);
+    c.fillStyle = "#00ff88"; c.fill(); c.lineWidth = 3; c.strokeStyle = "#fff"; c.stroke();
+    c.fillStyle = "#fff"; c.font = "700 26px system-ui,sans-serif"; c.textAlign = "left";
+    c.fillText((tt / 1000).toFixed(1) + " s / " + (total / 1000).toFixed(1) + " s", 16, 38);
+    raf = requestAnimationFrame(draw);
+  };
+  raf = requestAnimationFrame(draw);
+  ov.querySelector(".frR").onclick = () => { t0 = performance.now(); };
+  ov.querySelector(".frC").onclick = () => { closed = true; cancelAnimationFrame(raf); ov.remove(); };
 }
 // ═══ LIGA: Auswertung fuer ALLE Spieler (auch offline) – laeuft auf deinem Admin-Client ═══
 // Die Spieler-Eintraege darf nur der Besitzer oder der Admin schreiben. Deshalb setzt dein Client nach Wochenende bei jedem noch nicht
