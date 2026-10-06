@@ -1763,7 +1763,7 @@ function renderPresence(playersData) {
       return;
     }
 
-    let html = "<b>🟢 Active Players:</b><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
+    let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
       const _busy = statusInMatch(p.status);
@@ -7627,7 +7627,7 @@ canvas.addEventListener("touchstart", e => {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Survived:":"Überlebt:",
+  "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Total:":"Gesamt:","Survived:":"Überlebt:",
   "ELO LIVE":"ELO LIVE","BEST TV":"BESTES TV","RANDOM TV":"ZUFALLS-TV","TARGET TV":"ZIEL-TV","▶ RESUME":"▶ WEITER",
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
   "🔒 Create an account to be able to write in the chat.":"🔒 Erstelle einen Account, um im Chat schreiben zu können.",
