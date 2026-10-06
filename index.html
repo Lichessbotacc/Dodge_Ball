@@ -1525,6 +1525,32 @@ async function rpcModPurgeUser(uid, name) {
   res.forEach((r, i) => { if (r.status === "rejected") failed.push(list[i]); });
   return { total: list.length, failed };
 }
+// Mod: Rekorde eines Spielers komplett loeschen (Rangliste, Profil, Replays). what = { survival, streak, daily, winstreak }
+async function rpcModDeleteRecords(uid, what) {
+  requireAdmin();
+  uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || !what) throw new Error("Bad request.");
+  const paths = new Set(), failed = [];
+  if (what.survival) { paths.add("survival/" + uid); paths.add("survivalReplays/" + uid); }
+  if (what.streak)   { paths.add("streakBoard/" + uid); }
+  if (what.survival || what.streak || what.daily) paths.add("survivalLive/" + uid);
+  if (what.daily) {
+    paths.add("dailyWins/" + uid); paths.add("dailyReplays/" + uid);
+    try { const dly = (await get(ref(db, "daily"))).val() || {}; Object.entries(dly).forEach(([day, users]) => { if (users && users[uid]) paths.add("daily/" + day + "/" + uid); }); } catch (e) {}
+  }
+  const list = [...paths];
+  const res = await Promise.allSettled(list.map(pth => remove(ref(db, pth))));
+  res.forEach((r, i) => { if (r.status === "rejected") failed.push(list[i]); });
+  if (what.winstreak) {   // laengste Siegesserie zuruecksetzen (auf die aktuell laufende Serie, damit die Werte stimmig bleiben)
+    try {
+      const cur = Number((await get(ref(db, "players/" + uid + "/currentStreak"))).val()) || 0;
+      await update(ref(db, "players/" + uid), { bestStreak: cur });
+    } catch (e) { failed.push("players/" + uid + "/bestStreak"); }
+  }
+  // Hinweis an den Client des Spielers, damit auch lokal gespeicherte Rekordwerte verschwinden (sonst wuerde er sie wieder hochschreiben)
+  try { await update(ref(db, "sanctions/" + uid), { recordsWiped: { ts: Date.now(), survival: !!what.survival, streak: !!what.streak, daily: !!what.daily, winstreak: !!what.winstreak } }); } catch (e) { failed.push("sanctions/" + uid + "/recordsWiped"); }
+  return { total: list.length, failed };
+}
 async function rpcModApplyLeague(updates) {
   requireAdmin();
   const keys = Object.keys(updates || {});
@@ -1544,7 +1570,7 @@ async function rpcModRestoreUser(uid, backup) {
 }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
   get: rpcGet, on: rpcOn,
@@ -1579,9 +1605,9 @@ window.dispatchEvent(new Event("dobRPCReady"));
   function set(up) {
     if (up) { clearTimeout(downTimer); downTimer = null; bar.style.display = "none"; wasUp = true; return; }
     if (!wasUp) return;                                   // erster Status vor dem Verbinden ignorieren
-    downTimer = setTimeout(() => { bar.style.display = "block"; }, 1500);   // kurze Aussetzer nicht anzeigen
+    downTimer = setTimeout(() => { bar.style.display = "block"; try { dobConnectionLost(); } catch (e) {} }, 1500);   // kurze Aussetzer nicht anzeigen; danach gilt die Verbindung als verloren
   }
-  window.addEventListener("offline", () => set(false));
+  window.addEventListener("offline", () => { set(false); try { dobConnectionLost(); } catch (e) {} });   // Browser meldet "offline": sofort
   window.addEventListener("online", () => { /* Firebase meldet den Rest */ });
   const iv = setInterval(() => {                        // warten bis die Firebase-Brücke bereit ist
     if (!window._dobRPC || !window.dobIsReady || !window.dobIsReady()) return;
@@ -2553,6 +2579,11 @@ function startSurvival(daily, testIdx) {
   survHudIv = setInterval(() => { const h = document.getElementById("survivalHUD"); if (h) h.textContent = survFmt(survTick / 60); }, 100);
   syncPresence(true);
 }
+// Verbindung weg = sofort verloren (wie im 1v1): laufender Survival-/Daily-/Streaks-Run endet, der Run wird NICHT gewertet/gespeichert.
+function dobConnectionLost() {
+  if (survivalActive) { endSurvival("disconnect"); return; }
+  if (mode === "streak" && streak && streak.phase !== "over" && document.body.classList.contains("ingame")) streakEnd("disconnect");
+}
 let _survLiveAt = 0;
 function survPushLive(done, finalTime) {
   if (!fbReady || !myUid || !onlineAccount) return;
@@ -2591,6 +2622,7 @@ function countModeRun(field) {
 }
 async function endSurvival(camped) {
   if (!survivalActive) return;
+  const lostConn = camped === "disconnect";
   survivalActive = false; running = false;
   clearAllTimers(); campWarn(false);
   if (survHudIv) { clearInterval(survHudIv); survHudIv = null; }
@@ -2598,6 +2630,13 @@ async function endSurvival(camped) {
   const me = players[0], rec = survRec; survRec = null;
   rec.n = survTick; rec.e = me ? [Math.round(me.x), Math.round(me.y)] : [0, 0];
   const t = Math.round(survTick / 60 * 100) / 100;
+  if (lostConn) {   // Verbindung verloren: Run verloren, nichts speichern, Live-Eintrag entfernen
+    stopViewerCount();
+    try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {}
+    _survInfo = { lost: true, daily: !!_dailyKey, key: _dailyKey, best: 0, isRecord: false, saved: true, top: [], rank: 0 };
+    renderSurvivalResult(t, camped);
+    return;
+  }
   survPushLive(true, t);   // TV-Zuschauer sehen das Ende
   stopViewerCount();
   _survInfo = null;
@@ -2687,12 +2726,12 @@ function renderSurvivalResult(t, camped) {
   }
   const i = _survInfo;
   const dly = i && i.daily;
-  const line = dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
+  const line = (i && i.lost) ? "📡 Connection lost – this run was not counted." : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
     : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
-    + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
+    + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped === "disconnect" ? "📡 Connection lost – you lost" : camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
     + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + ' ▶</div>').join('') + '</div>' : '')
@@ -5923,7 +5962,7 @@ function streakRoundWon() {
   streakSetOverlay(`<div class="sk-title" style="color:#00e676">✓ ${tr("ROUND WON")}</div><div class="sk-sub">${tr("Streaks")}: ${streak.wins}</div>`);
   streak.timers.push(setTimeout(() => { if (mode === "streak" && streak && streak.phase === "won") streakStartRound(); }, STREAK_CFG.betweenMs));
 }
-function streakEnd() {
+function streakEnd(why) {
   if (!streak || streak.phase === "over") return;   // darf nur einmal pro Run laufen (Kollision + Camping konnten beide ausloesen)
   streak.phase = "over"; running = false;
   campWarn(false);
@@ -5931,7 +5970,7 @@ function streakEnd() {
   streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
   streakHud();
-  const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${tr("STREAKS ENDED")}</div>
+  const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${why === "disconnect" ? "📡 " + tr("CONNECTION LOST") : tr("STREAKS ENDED")}</div>
     <div class="sk-sub">${streak.wins} ${tr("wins in a row")} · ${tr("Best")}: ${streak.best}</div>
     ${isNew ? `<div class="sk-new">★ ${tr("NEW BEST")} ★</div>` : ""}
     <div class="sk-btns"><button id="skAgain">${tr("Try again")}</button><button id="skHome">🏠 ${tr("Home")}</button></div>`);
@@ -7693,6 +7732,7 @@ Object.assign(DICT.de, {"Viewing only": "Nur ansehen", "Group": "Gruppe", "My le
 Object.assign(DICT.de, {"You did not play last week": "Du hast letzte Woche nicht gespielt – spiel und gewinne, um wieder aufzusteigen!", "Group too small": "Gruppe zu klein", "Groups under": "Gruppen mit weniger als", "players can't promote anyone this week.": "Spielern lassen diese Woche niemanden aufsteigen.", "Promotion eligibility": "Aufstiegsberechtigung", "Promoted!": "Aufgestiegen!", "Relegated": "Abgestiegen", "Welcome to the next league – new week, new goals!": "Willkommen in der nächsten Liga – neue Woche, neue Ziele!", "New week, new chance – win your way back up!": "Neue Woche, neue Chance – kämpf dich wieder hoch!","Your league this week": "Deine Liga diese Woche", "players": "Spieler", "Mon": "Mo", "Sun": "So", "You're in the promotion zone!": "Du bist in der Aufstiegszone!", "Keep your spot until Sunday and you move up.": "Halte deinen Platz bis Sonntag, dann steigst du auf.", "Almost there!": "Fast geschafft!", "more wins needed – promotion needs at least": "Siege fehlen noch – für den Aufstieg brauchst du mindestens", "You're in the relegation zone!": "Du bist in der Abstiegszone!", "Win a few matches to climb out before the week ends.": "Gewinne ein paar Matches, um vor Wochenende rauszukommen.", "You're safe": "Du bist sicher", "more wins to reach the promotion zone": "Siege bis zur Aufstiegszone", "Top league": "Höchste Liga", "You can't be promoted further – defend your place!": "Höher geht's nicht – verteidige deinen Platz!", "Rank": "Rang", "Safe zone": "Sichere Zone", "You": "Du", "Not in a group yet": "Noch in keiner Gruppe", "How does the league work?": "Wie funktioniert die Liga?", "Win matches": "Matches gewinnen", "Every online win this week = 1 point. Wins against the Online Bot count too.": "Jeder Online-Sieg diese Woche = 1 Punkt. Siege gegen den Online-Bot zählen auch.", "Your group": "Deine Gruppe", "You compete against up to": "Du trittst gegen bis zu", "players of your league. Ties are won by whoever got there first.": "Spieler deiner Liga an. Bei Gleichstand gewinnt, wer zuerst dort war.", "Sunday = decision": "Sonntag = Entscheidung", "The week ends Sunday 24:00 (German time). A new week starts Monday with fresh groups and 0 wins.": "Die Woche endet Sonntag 24:00 Uhr (deutsche Zeit). Montag startet eine neue Woche mit neuen Gruppen und 0 Siegen.", "Up or down": "Auf oder ab", "Top players move up (at least": "Die Besten steigen auf (mindestens", "wins needed), the bottom ones drop a league, everyone else stays.": "Siege nötig), die Letzten steigen ab, alle anderen bleiben.", "Reach Platinum – your ELO is not affected by the league.": "Schaffe es bis Platin – dein ELO wird von der Liga nicht beeinflusst."});
 
 Object.assign(DICT.de, {"Match abandoned – penalty applied": "Match verlassen – Strafe angewendet"});
+Object.assign(DICT.de, {"CONNECTION LOST": "VERBINDUNG VERLOREN"});
 
 Object.assign(DICT.de, {"One account per player. To use a different account you have to delete this one first.": "Ein Account pro Spieler. Für einen anderen Account musst du diesen zuerst löschen.", "Delete Account": "Account löschen", "Delete account permanently?": "Account endgültig löschen?", "Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.": "Dein Name, ELO, Statistiken und Ligafortschritt werden gelöscht und können nicht wiederhergestellt werden. Danach kannst du einen neuen Account erstellen.", "Delete permanently": "Endgültig löschen", "Cancel": "Abbrechen", "Deleting…": "Lösche…", "Incorrect password.": "Falsches Passwort.", "Too many attempts. Try again later.": "Zu viele Versuche. Versuche es später erneut.", "This device already has an account": "Dieses Gerät hat schon einen Account", "Only one account per player is allowed. Log in with your existing account, or delete it first to create a new one.": "Pro Spieler ist nur ein Account erlaubt. Melde dich mit deinem Account an oder lösche ihn zuerst, um einen neuen zu erstellen."});
 
@@ -7966,6 +8006,24 @@ function _modApplyRename() {
   try { pushAccountToFirebase().catch(() => {}); } catch (e) {}
 }
 
+// ── Hat der Admin Rekorde geloescht? Lokale Kopien leeren, damit sie nicht wieder hochgeschrieben/angezeigt werden ──
+function _modApplyRecordWipe() {
+  const r = _modState && _modState.recordsWiped;
+  if (!r || !r.ts || !_modUid) return;
+  let last = 0; try { last = Number(localStorage.getItem("dob_mod_rw_" + _modUid)) || 0; } catch (e) {}
+  if (r.ts <= last) return;
+  try { localStorage.setItem("dob_mod_rw_" + _modUid, String(r.ts)); } catch (e) {}
+  try {
+    if (r.streak) { localStorage.removeItem("dobStreakBest"); if (typeof streakSrv !== "undefined") { streakSrv.level = null; streakSrv.target = 0; } if (typeof streak !== "undefined" && streak) streak.best = 0; }
+    if (r.daily) localStorage.removeItem("dobDaily");
+    if (r.winstreak && typeof onlineAccount !== "undefined" && onlineAccount) {
+      onlineAccount.bestStreak = onlineAccount.currentStreak || 0;
+      saveAccountLocal();
+      pushAccountToFirebase().catch(() => {});
+    }
+  } catch (e) { console.warn("record wipe sync failed", e); }
+}
+
 // ── Status-Auswertung ──
 function _modWarnActive(w) {
   const n = _modCurName().toLowerCase();
@@ -8089,6 +8147,7 @@ async function _modDoRename() {
 }
 function _modRender() {
   _modApplyRename();
+  _modApplyRecordWipe();
   _modChatLock();
   const ov = _modEnsureOv();
   const ban = _modBanInfo(), warn = ban ? null : _modWarnInfo();
@@ -8248,6 +8307,7 @@ function _modPanelRender() {
     mk(s.chatBanned ? "💬 Allow chat" : "🚫 Chat ban", () => _modRPC().modSetSanction(uid, { chatBanned: s.chatBanned ? null : true }));
     mk(s.banned ? "♻ Unban" : "🔨 Ban + wipe data", () => _modBan(uid, s, p));
     if (s.banned) mk("🧹 Wipe data again", () => _modPurge(uid, p.name));
+    mk("🗑 Delete records", () => _modDeleteRecordsAct(uid, p));
     mk("🧹 Clear all", () => _modRPC().modClearSanction(uid));
     row.appendChild(bar); list.appendChild(row);
   });
@@ -8276,6 +8336,45 @@ async function _modRenameAct(uid, p) {
 async function _modMute(uid) {
   const m = Number(prompt("Mute for how many minutes? (0 = unmute)", "60")); if (isNaN(m) || m < 0) _modCancel();
   await _modRPC().modSetSanction(uid, { muteUntil: m > 0 ? Date.now() + m * 60000 : null });
+}
+// Dialog: welche Rekorde sollen geloescht werden? (zeigt die aktuellen Werte an)
+function _modPickRecords(name, cur) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;z-index:31000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);padding:16px;box-sizing:border-box;";
+    const box = document.createElement("div");
+    box.style.cssText = "width:min(420px,94vw);background:#0d0f16;border:1px solid rgba(255,255,255,0.2);border-radius:14px;padding:18px;color:#eaf2fb;font:14px sans-serif;";
+    const h = document.createElement("div"); h.style.cssText = "font-weight:800;font-size:17px;margin-bottom:4px;"; h.textContent = "Delete records of " + name; box.appendChild(h);
+    const sub = document.createElement("div"); sub.style.cssText = "font-size:12px;color:#8b93a6;margin-bottom:10px;"; sub.textContent = "Removed completely: leaderboard, profile, replays. Cannot be undone."; box.appendChild(sub);
+    const items = [["survival", "🏝 Survival record" + (cur.survival ? " (" + cur.survival + ")" : " (none)")], ["streak", "🔥 Streaks record" + (cur.streak ? " (" + cur.streak + ")" : " (none)")], ["daily", "📅 Daily challenge (times, replays, wins)" + (cur.daily ? " (" + cur.daily + ")" : " (none)")], ["winstreak", "🏆 Longest win streak (1v1)" + (cur.winstreak ? " (" + cur.winstreak + ")" : "")]];
+    const boxes = {};
+    items.forEach(([k, label]) => {
+      const l = document.createElement("label"); l.style.cssText = "display:flex;gap:8px;align-items:center;padding:5px 0;cursor:pointer;";
+      const c = document.createElement("input"); c.type = "checkbox"; boxes[k] = c;
+      const t = document.createElement("span"); t.textContent = label; l.append(c, t); box.appendChild(l);
+    });
+    const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:12px;";
+    const all = document.createElement("button"); all.textContent = "Select all"; all.style.cssText = "margin:0;padding:6px 12px;font-size:13px;"; all.onclick = () => Object.values(boxes).forEach(c => c.checked = true);
+    const no = document.createElement("button"); no.textContent = "Cancel"; no.style.cssText = "margin:0;padding:6px 12px;font-size:13px;"; no.onclick = () => { ov.remove(); resolve(null); };
+    const ok = document.createElement("button"); ok.textContent = "Delete"; ok.style.cssText = "margin:0;padding:6px 12px;font-size:13px;background:#c0392b;color:#fff;";
+    ok.onclick = () => { const w = {}; Object.keys(boxes).forEach(k => w[k] = boxes[k].checked); ov.remove(); resolve(Object.values(w).some(Boolean) ? w : null); };
+    bar.append(all, no, ok); box.appendChild(bar); ov.appendChild(box); document.body.appendChild(ov);
+  });
+}
+async function _modDeleteRecordsAct(uid, p) {
+  const R = _modRPC(), cur = {};
+  try {
+    const [sv, sk, dly, pl] = await Promise.all([R.get("survival/" + uid), R.get("streakBoard/" + uid), R.get("daily"), R.get("players/" + uid)]);
+    if (sv && Number(sv.time) > 0) cur.survival = (typeof survFmt === "function" ? survFmt(Number(sv.time)) : sv.time + "s");
+    if (sk && Number(sk.level) > 0) cur.streak = "level " + Number(sk.level);
+    const days = Object.values(dly || {}).filter(u => u && u[uid]).length; if (days) cur.daily = days + " day" + (days > 1 ? "s" : "");
+    if (pl && Number(pl.bestStreak) > 0) cur.winstreak = pl.bestStreak;
+  } catch (e) {}
+  const what = await _modPickRecords(p.name, cur);
+  if (!what) _modCancel();
+  const r = await R.modDeleteRecords(uid, what);
+  if (r && r.failed && r.failed.length) alert("Could not delete " + r.failed.length + " entries (Database Rules must allow the admin to delete them):\n" + r.failed.slice(0, 12).join("\n"));
+  else alert("Records of " + p.name + " deleted.");
 }
 async function _modPurge(uid, name) {
   const r = await _modRPC().modPurgeUser(uid, name);
