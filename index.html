@@ -1872,9 +1872,11 @@ async function recordHeadToHeadWin(winnerUid, loserUid, roundKey) {
 // to an arbitrary name-keyed path.
 async function updatePlayerStatus(statusText) {
   if (!fbReady || !onlineAccount) return;
+  let _dev = ""; try { _dev = detectDeviceType(); } catch (e) {}
   await RPC.updateOwnPlayer({
     status: statusText,
-    lastActive: Date.now()
+    lastActive: Date.now(),
+    device: _dev        // Geraete-Icon auch fuer Spieler, die noch keine Stats gepusht haben
   });
 }
 
@@ -3087,6 +3089,9 @@ function sanitizeAccount(acc) {
   acc.leagueWeek = acc.leagueWeek ?? null;
   acc.leagueGroup = acc.leagueGroup ?? null;
   acc.leagueLastResult = acc.leagueLastResult ?? null;
+  if (!(Number(acc.vol) > 0)) acc.vol = G2.DEF_VOL;
+  acc.rd = G2.DEF_RD;   // feste RD 45 fuer alle (auch alte gespeicherte Werte werden ueberschrieben)
+  acc.rdTs = Number(acc.rdTs) > 0 ? Number(acc.rdTs) : 0;
   return acc;
 }
 
@@ -3099,7 +3104,7 @@ function sanitizeAccount(acc) {
 // owns their own uid can still repeatedly call this with the max
 // clamp value — only a trusted backend (Cloud Function) that
 // computes match results itself can fully close this gap.
-const MAX_ELO_DELTA_PER_GAME = 50;
+const MAX_ELO_DELTA_PER_GAME = 10;   // harte Obergrenze: maximal +10 / -10 pro Spiel
 function clampEloChange(delta) {
   const d = Number(delta) || 0;
   return Math.max(-MAX_ELO_DELTA_PER_GAME, Math.min(MAX_ELO_DELTA_PER_GAME, d));
@@ -3113,14 +3118,35 @@ function clampEloChange(delta) {
 //    the penalty is applied at the latest on the next start (marker in localStorage).
 // ═══════════════════════════════════════════════
 // A forfeit counts exactly like a normal result: same ELO formula as reportOnlineResult()
-function normalEloChange(winnerElo, loserElo) {
-  const diff = (Number(loserElo) || 1500) - (Number(winnerElo) || 1500);
-  return clampEloChange(Math.max(1, Math.min(15, Math.round(5 + diff / 100))));
+// ───────── GLICKO-2 (identisch zu Lichess: tau 0.75, Start 1500 / RD 500 / Vol 0.09, RD 45..500) ─────────
+// Alle Spieler (auch neue Accounts) rechnen mit der Lichess-Mindest-RD 45 ("etabliert") -> keine Provisional-Spruenge, Ergebnis liegt natuerlich bei +1..+10 / -1..-10
+const G2 = { TAU: 0.75, DEF_RD: 45, DEF_VOL: 0.09, MIN_RD: 45, MAX_RD: 45, PERIODS_PER_DAY: 0.21436, SCALE: 173.7178 };
+// Nullsummen-Verteilung: pro Spiel werden insgesamt IMMER 10 Punkte verteilt (Gewinner +W, Verlierer -(10-W)).
+// W kommt aus der Glicko-2-Siegerwartung wie bei Lichess (g(RD) mit RD 45, E = 1/(1+e^(-g*(muA-muB)))):
+// je unwahrscheinlicher der Sieg, desto groesser W. Beide Clients rechnen mit denselben zwei Ratings -> gleiches Ergebnis.
+const ELO_POOL = 10, ELO_MIN_SHARE = 1;
+function glickoWinnerShare(winnerElo, loserElo) {
+  const phi = G2.DEF_RD / G2.SCALE;
+  const g = 1 / Math.sqrt(1 + 3 * phi * phi / (Math.PI * Math.PI));
+  const dMu = ((Number(winnerElo) || 1500) - (Number(loserElo) || 1500)) / G2.SCALE;
+  const E = 1 / (1 + Math.exp(-g * dMu));                       // erwartete Siegchance des Gewinners
+  const W = Math.round(ELO_POOL * (1 - E));
+  return Math.max(ELO_MIN_SHARE, Math.min(ELO_POOL - ELO_MIN_SHARE, W));   // 1..9, Rest geht an den Verlierer
+}
+// Aenderung fuer 'me' (Sieg: +W, Niederlage: -(10-W))
+function glickoResult(me, opp, won) {
+  const W = won ? glickoWinnerShare(me.elo, opp.elo) : glickoWinnerShare(opp.elo, me.elo);
+  const d = won ? W : -(ELO_POOL - W);
+  return { delta: clampEloChange(d), rd: G2.DEF_RD, vol: G2.DEF_VOL };
+}
+function normalEloChange(winnerElo, loserElo) {   // Fallback ohne Account-Objekte
+  const w = { elo: Number(winnerElo) || 1500 }, l = { elo: Number(loserElo) || 1500 };
+  return Math.abs(glickoResult(w, l, true).delta);
 }
 // iAmWinner = true -> what I would gain if the opponent forfeits; false -> what I lose if I forfeit
 function forfeitChange(iAmWinner) {
-  const me = onlineAccount ? onlineAccount.elo : 1500, opp = onlineOpponent ? onlineOpponent.elo : 1500;
-  return iAmWinner ? normalEloChange(me, opp) : normalEloChange(opp, me);
+  const me = onlineAccount || { elo: 1500 }, opp = onlineOpponent || { elo: 1500 };
+  return Math.abs(glickoResult(me, opp, !!iAmWinner).delta);   // meine eigene Aenderung (Lichess-Glicko-2)
 }
 const OPP_TIMEOUT_PLAYING_MS  = 3000;      // kein Lebenszeichen fuer 3 s -> sofort verloren
 const OPP_TIMEOUT_WAITING_MS  = 3000;      // auch vor dem Start: nicht im Match erschienen -> nach 3 s verloren
@@ -3815,6 +3841,7 @@ async function pushAccountToFirebase() {
     uid: myUid,
     name: onlineAccount.name,
     elo: onlineAccount.elo,
+    rd: onlineAccount.rd, vol: onlineAccount.vol, rdTs: onlineAccount.rdTs || 0,
     wins: onlineAccount.wins,
     losses: onlineAccount.losses,
     highestElo: onlineAccount.highestElo,
@@ -5493,7 +5520,12 @@ async function handleOnlineResult(winnerName, change) {
   document.getElementById("onlineHUD").style.display = "none";
 
   const won = winnerName === onlineAccount.name;
-  const eloChange = clampEloChange(Math.round(change));
+  onlineAccount = sanitizeAccount(onlineAccount);
+  const _oppForCalc = onlineOpponent ? sanitizeAccount(onlineOpponent) : { elo: 1500, rd: G2.DEF_RD, vol: G2.DEF_VOL };
+  const _gMe  = glickoResult(onlineAccount, _oppForCalc, won);          // meine Aenderung (Lichess Glicko-2, max +-10)
+  const _gOpp = glickoResult(_oppForCalc, onlineAccount, !won);         // Aenderung des Gegners (fuer Bot/Anzeige)
+  const eloChange = Math.abs(_gMe.delta);
+  const oppEloChange = Math.abs(_gOpp.delta);
   const oppName = onlineOpponent ? onlineOpponent.name : "Online Bot";
   const oppUid  = onlineOpponent ? onlineOpponent.uid  : ONLINE_BOT_UID;
 
@@ -5538,6 +5570,7 @@ async function handleOnlineResult(winnerName, change) {
 
   onlineAccount = sanitizeAccount(onlineAccount);
 
+  onlineAccount.rd = _gMe.rd; onlineAccount.vol = _gMe.vol; onlineAccount.rdTs = Date.now();
   if (won) {
     onlineAccount.elo += eloChange;
     onlineAccount.wins++;
@@ -5572,7 +5605,7 @@ async function handleOnlineResult(winnerName, change) {
   }
 
   if (!onlineVsBot && onlineOpponent && Number.isFinite(Number(onlineOpponent.elo))) {
-    onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - eloChange) : onlineOpponent.elo + eloChange;
+    onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
   }
   logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
   saveAccountLocal();
@@ -5595,10 +5628,11 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent = sanitizeAccount(onlineOpponent);
 
     if (won) {
-      onlineOpponent.elo = Math.max(100, onlineOpponent.elo - eloChange);
+      onlineOpponent.elo = Math.max(100, onlineOpponent.elo - oppEloChange);
+      onlineOpponent.rd = _gOpp.rd; onlineOpponent.vol = _gOpp.vol; onlineOpponent.rdTs = Date.now();
       onlineOpponent.losses = (onlineOpponent.losses ?? 0) + 1;
       onlineOpponent.currentStreak = 0;
-      onlineOpponent.totalEloLost = (onlineOpponent.totalEloLost ?? 0) + eloChange;
+      onlineOpponent.totalEloLost = (onlineOpponent.totalEloLost ?? 0) + oppEloChange;
 
       if (onlineOpponent.elo < (onlineOpponent.lowestElo ?? onlineOpponent.elo)) {
         onlineOpponent.lowestElo = onlineOpponent.elo;
@@ -5609,8 +5643,9 @@ async function handleOnlineResult(winnerName, change) {
         onlineOpponent.worstLossOpp = onlineAccount.name;
       }
     } else {
-      onlineOpponent.elo += eloChange;
-      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained ?? 0) + eloChange;   // fehlte -> Bot hatte nie "Elo gewonnen"
+      onlineOpponent.elo += oppEloChange;
+      onlineOpponent.rd = _gOpp.rd; onlineOpponent.vol = _gOpp.vol; onlineOpponent.rdTs = Date.now();
+      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained ?? 0) + oppEloChange;   // fehlte -> Bot hatte nie "Elo gewonnen"
       onlineOpponent.wins = (onlineOpponent.wins ?? 0) + 1;
       onlineOpponent.currentStreak = (onlineOpponent.currentStreak ?? 0) + 1;
       if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak ?? 0)) {
@@ -6844,8 +6879,7 @@ async function reportOnlineResult(winnerName, loserName) {
   const winnerElo = (winnerName === me.name) ? me.elo : opp.elo;
   const loserElo = (loserName === me.name) ? me.elo : opp.elo;
 
-  const diff = loserElo - winnerElo;
-  const change = clampEloChange(Math.max(1, Math.min(15, Math.round(5 + diff / 100))));
+  const change = Math.abs(glickoResult(me, opp, winnerName === me.name).delta);   // nur Info/Fallback; jeder Client rechnet sein eigenes Glicko-2
 
   // Bot-Match: es gibt keinen Match-Listener, der "done" verarbeitet -> Ergebnis direkt behandeln
   // (sonst laeuft das Spiel nach der Camping-Disqualifikation einfach weiter)
