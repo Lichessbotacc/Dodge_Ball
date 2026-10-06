@@ -3773,36 +3773,15 @@ function detectDeviceType() {
   } catch (e) {}
   return "desktop";
 }
-function deviceIcon(t) {   // detaillierte SVG-Icons in Pill-Badge, klar verschiedene Silhouetten
-  const W = (c, svg, label) => '<span title="' + label + '" style="display:inline-flex;align-items:center;vertical-align:middle;padding:2px 6px;margin-left:2px;border-radius:999px;background:' + c + '22;border:1px solid ' + c + '88;box-shadow:0 0 8px ' + c + '55;">' + svg + '</span>';
-  const S = (w, h, body) => '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg">' + body + '</svg>';
-  const apps = (x, y, cols, rows, gap, sz, c) => { let r = ""; for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) r += '<rect x="' + (x + i * gap) + '" y="' + (y + j * gap) + '" width="' + sz + '" height="' + sz + '" rx="1" fill="' + c + '"/>'; return r; };
-  if (t === "mobile") {   // Handy: hoch & schmal, Dynamic-Island, App-Raster
-    const c = "#2bff88";
-    return W(c, S(14, 26,
-      '<rect x="1" y="1" width="12" height="24" rx="3.4" fill="#06130c" stroke="' + c + '" stroke-width="1.6"/>' +
-      '<rect x="2.6" y="3" width="8.8" height="18.4" rx="1.6" fill="#0f3a24"/>' +
-      '<rect x="5" y="3.8" width="4" height="1.3" rx=".65" fill="#000"/>' +
-      apps(3.6, 7.4, 3, 4, 2.6, 1.8, c) +
-      '<rect x="4.8" y="22.3" width="4.4" height=".9" rx=".45" fill="' + c + '"/>'), "Handy");
-  }
-  if (t === "tablet") {   // iPad um 180° gedreht: Querformat, Home-Button rechts, Kamera links
-    const c = "#4aa8ff";
-    return W(c, S(32, 24,
-      '<rect x="1" y="1" width="30" height="22" rx="3.6" fill="#06101f" stroke="' + c + '" stroke-width="1.6"/>' +
-      '<rect x="4.4" y="3.4" width="21.2" height="17.2" rx="1.2" fill="#0f2a4d"/>' +
-      apps(6.6, 6, 5, 3, 3.9, 2.6, c) +
-      '<circle cx="2.7" cy="12" r=".75" fill="' + c + '"/>' +
-      '<circle cx="28.4" cy="12" r="1.5" fill="none" stroke="' + c + '" stroke-width="1"/>'), "Tablet");
-  }
-  if (t === "desktop") {  // PC: Monitor mit Fuß
-    const c = "#ffa63a";
-    return W(c, S(30, 26,
-      '<rect x="1" y="1" width="28" height="17" rx="2.2" fill="#1a0f04" stroke="' + c + '" stroke-width="1.6"/>' +
-      '<rect x="3.4" y="3.4" width="23.2" height="12.2" rx="1" fill="#4a2a08"/>' +
-      '<rect x="5.5" y="5.5" width="9" height="1.6" rx=".8" fill="' + c + '"/><rect x="5.5" y="9" width="14" height="1.2" rx=".6" fill="' + c + '" opacity=".6"/><rect x="5.5" y="12" width="11" height="1.2" rx=".6" fill="' + c + '" opacity=".6"/>' +
-      '<path d="M12 18h6l1 4h-8z" fill="' + c + '"/><rect x="8" y="22" width="14" height="2.2" rx="1.1" fill="' + c + '"/>'), "PC");
-  }
+function deviceIcon(t) {   // farbige SVG-Icons mit Glanz/Glow, klar verschiedene Silhouetten
+  const a = 'width="28" height="22" viewBox="0 0 28 22" style="vertical-align:-6px;filter:drop-shadow(0 0 3px currentColor);" xmlns="http://www.w3.org/2000/svg"';
+  const g = (id, c1, c2) => '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs>';
+  if (t === "mobile")  // Handy: schmal & hoch, Notch, Seitentaste, grün
+    return '<svg ' + a + ' color="#2bff88">' + g("dgM", "#7dffbd", "#00b85c") + '<rect x="8.6" y="0.8" width="10.8" height="20.4" rx="3" fill="#07140d" stroke="#2bff88" stroke-width="1.6"/><rect x="10.3" y="3.6" width="7.4" height="13.6" rx="1" fill="url(#dgM)"/><rect x="12" y="1.9" width="4" height="1.1" rx=".55" fill="#2bff88"/><rect x="12.2" y="18.4" width="3.6" height="1" rx=".5" fill="#2bff88"/><rect x="19.9" y="5" width=".9" height="3" rx=".4" fill="#2bff88"/></svg>';
+  if (t === "tablet")  // iPad um 180° gedreht: Querformat, Home-Button RECHTS, Kamera links, blau
+    return '<svg ' + a + ' color="#4aa8ff">' + g("dgT", "#9fd2ff", "#2a6fd6") + '<rect x="0.8" y="2" width="26.4" height="18" rx="3" fill="#07101f" stroke="#4aa8ff" stroke-width="1.6"/><rect x="3.8" y="4.4" width="18.6" height="13.2" rx="1" fill="url(#dgT)"/><circle cx="2.5" cy="11" r=".7" fill="#4aa8ff"/><circle cx="25" cy="11" r="1.3" fill="none" stroke="#4aa8ff" stroke-width="1"/></svg>';
+  if (t === "desktop") // PC: Monitor mit Fuß, orange
+    return '<svg ' + a + ' color="#ffa63a">' + g("dgD", "#ffd08a", "#e06a00") + '<rect x="1.5" y="0.8" width="25" height="15.4" rx="2" fill="#190f05" stroke="#ffa63a" stroke-width="1.6"/><rect x="3.8" y="3.1" width="20.4" height="10.8" rx=".8" fill="url(#dgD)"/><path d="M11.5 16.2h5l.8 3.2h-6.6z" fill="#ffa63a"/><rect x="7.5" y="19.3" width="13" height="2" rx="1" fill="#ffa63a"/></svg>';
   return "";
 }
 function saveAccountLocal() {
