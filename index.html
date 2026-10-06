@@ -1212,6 +1212,10 @@ try {
 }
 
 function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
+// SECURITY: ids coming from other players' records must never be concatenated into DB paths unchecked.
+function safeId(v) { v = String(v == null ? "" : v); if (!/^[A-Za-z0-9_-]{1,160}$/.test(v)) throw new Error("Bad id."); return v; }
+function safeSubPath(v) { v = String(v == null ? "" : v); if (!/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/.test(v) || v.length > 200) throw new Error("Bad sub-path."); return v; }
+const MAX_REPLAY_CHARS = 3000000;
 function requireUid() {
   const uid = myUid();
   if (!uid) throw new Error("Not authenticated yet — cannot perform this operation.");
@@ -1277,6 +1281,7 @@ async function rpcRemoveOwnQueueEntry() {
 }
 async function rpcSendInvite(targetUid, invitePayload) {
   requireUid(); requireNotBanned();
+  targetUid = safeId(targetUid);
   return set(ref(db, "queue/" + targetUid + "_invite"), invitePayload);
 }
 async function rpcRemoveOwnInvite() {
@@ -1291,22 +1296,22 @@ async function rpcRemoveOwnInvite() {
 //    enforcement that you must be p1uid/p2uid of THIS match happens
 //    in Security Rules server-side. ──
 async function rpcCreateMatch(matchId, matchData) {
-  const uid = requireUid();
+  const uid = requireUid(); matchId = safeId(matchId);
   if (matchData.p1uid !== uid && matchData.p2uid !== uid) {
     throw new Error("Cannot create a match you are not part of.");
   }
   return set(ref(db, "onlineMatches/" + matchId), matchData);
 }
 async function rpcUpdateMatch(matchId, data) {
-  requireUid();
+  requireUid(); matchId = safeId(matchId);
   return update(ref(db, "onlineMatches/" + matchId), data);
 }
 async function rpcSetMatchPath(matchId, subPath, data) {
-  requireUid();
+  requireUid(); matchId = safeId(matchId); subPath = safeSubPath(subPath);
   return set(ref(db, "onlineMatches/" + matchId + "/" + subPath), data);
 }
 async function rpcRemoveMatch(matchId) {
-  requireUid();
+  requireUid(); matchId = safeId(matchId);
   return remove(ref(db, "onlineMatches/" + matchId));
 }
 function rpcOnMatch(matchId, cb) {
@@ -1319,15 +1324,15 @@ async function rpcGetMatch(matchId) { return rpcGet("onlineMatches/" + matchId);
 // ── challenges: challenges/{target}/{from}. Der Herausforderer schreibt "pending" in seinen Eintrag unter dem Ziel,
 //    das Ziel antwortet ("accepted"/"declined") im selben Eintrag, beide duerfen ihn loeschen. ──
 async function rpcSendChallenge(targetUid, payload) {
-  const uid = requireUid();
+  const uid = requireUid(); targetUid = safeId(targetUid);
   return set(ref(db, "challenges/" + targetUid + "/" + uid), payload);
 }
 async function rpcRespondChallenge(fromUid, payload) {
-  const uid = requireUid();
+  const uid = requireUid(); fromUid = safeId(fromUid);
   return set(ref(db, "challenges/" + uid + "/" + fromUid), payload);
 }
 async function rpcRemoveChallenge(targetUid, fromUid) {
-  requireUid();
+  requireUid(); targetUid = safeId(targetUid); fromUid = safeId(fromUid);
   return remove(ref(db, "challenges/" + targetUid + "/" + fromUid));
 }
 async function rpcSetStreakBoard(payload) {
@@ -1403,6 +1408,7 @@ async function rpcRenameChatMessages(uid, newName) {
 async function rpcSaveSurvival(time, replayStr, name) {
   requireNotBanned();
   const uid = requireUid();
+  if (String(replayStr).length > MAX_REPLAY_CHARS) throw new Error("Replay too large.");
   return update(ref(db), {
     ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
     ["survivalReplays/" + uid]: String(replayStr)
@@ -1419,6 +1425,7 @@ async function rpcSaveDaily(day, time, name) {
 async function rpcSaveDailyReplay(day, str) {
   requireNotBanned();
   const uid = requireUid();
+  if (String(str).length > MAX_REPLAY_CHARS) throw new Error("Replay too large.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   return set(ref(db, "dailyReplays/" + uid + "/" + day), String(str));
 }
@@ -1861,7 +1868,7 @@ function renderPresence(playersData) {
     // Dedupe: gleicher Name = ein Eintrag (eigene UID hat Vorrang, sonst der aktuellste)
     const _seen = new Map();
     Object.entries(playersData)
-      .map(([uid, p]) => ({ uid, ...p }))
+      .map(([uid, p]) => ({ ...p, uid }))
       .filter(p =>
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
       )
@@ -1887,17 +1894,17 @@ function renderPresence(playersData) {
       const _busy = statusInMatch(p.status);
       const _pend = challengeOut.has(p.uid), _other = challengeOut.size > 0 && !_pend;
       const _tvBtn = (!isMe && fbReady && _busy)
-        ? `<button class="ch-btn" onclick="event.stopPropagation(); watchPlayerTV('${escapeHtml(p.uid)}')" title="Watch live">📺</button>`
+        ? `<button class="ch-btn" onclick="event.stopPropagation(); watchPlayerTV(${jsArg(p.uid)})" title="Watch live">📺</button>`
         : "";
       const _chBtn = (!isMe && onlineAccount && fbReady)
         ? (_pend
-            ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge('${escapeHtml(p.uid)}')" title="Cancel challenge">⏳</button>`
-            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Challenge to a 1v1')}">⚔</button>`)
+            ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge(${jsArg(p.uid)})" title="Cancel challenge">⏳</button>`
+            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer(${jsArg(p.uid)})" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Challenge to a 1v1')}">⚔</button>`)
         : "";
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              class="pr-row"
-             onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
+             onclick="openOnlineProfile(${jsArg(p.uid)})" title="View profile">
           <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
           <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
@@ -1931,7 +1938,7 @@ function challengeRankOf(uid, name) {
   const data = window._lastPlayersData;
   if (!data) return null;
   const seen = new Map();
-  Object.entries(data).map(([u, p]) => ({ uid: u, ...p }))
+  Object.entries(data).map(([u, p]) => ({ ...p, uid: u }))
     .filter(p => ((Number(p.wins) || 0) + (Number(p.losses) || 0)) >= 1)
     .forEach(p => {
       const key = String(p.name || "").toLowerCase(), prev = seen.get(key);
@@ -2208,7 +2215,10 @@ function renderChat(keepScroll) {
     meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const nm = document.createElement("b");
     nm.setAttribute("translate", "no");
-    nm.textContent = m.name + ": ";
+    const _pl = m.uid && window._lastPlayersData && window._lastPlayersData[m.uid];
+    const _shownName = String((_pl && _pl.name) || m.name || "?");     // prefer the profile name of that uid
+    const _isDev = !!(m.uid && typeof MOD_ADMIN_UID !== "undefined" && m.uid === MOD_ADMIN_UID);   // [DEV] is bound to the uid, not to a name string
+    nm.textContent = _shownName + ": ";
     nm.dataset.uid = m.uid || "";
     chatStyleName(nm, m.uid);
     if (m.uid) {
@@ -2224,7 +2234,7 @@ function renderChat(keepScroll) {
     tx.setAttribute("translate", "no");
     tx.textContent = m.text;
     tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
-    if (m.name === CHAT_DEV_NAME) {
+    if (_isDev) {
       const tag = document.createElement("b");
       tag.textContent = "[DEV] ";
       tag.title = "Developer";
@@ -2317,6 +2327,14 @@ document.getElementById("chatInput").addEventListener("keydown", e => { if (e.ke
 function escapeHtml(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+// SECURITY: escapeHtml() alone is NOT safe inside an inline handler's JS string, because the browser decodes
+// HTML entities in the attribute BEFORE the JS runs. jsArg() emits a complete, correctly quoted JS string literal
+// (JSON) that is then HTML-escaped for the attribute. Use it as: onclick="fn(${jsArg(value)})"  (no extra quotes).
+function jsArg(v) { return escapeHtml(JSON.stringify(String(v ?? ""))); }
+// SECURITY: DB ids (uids, match ids) must look like Firebase-safe ids before being used in paths or handlers.
+function isSafeId(v) { return typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v); }
+// Coerce untrusted DB values to finite numbers before they are interpolated into HTML.
+function numSafe(v, d) { const n = Number(v); return Number.isFinite(n) ? n : (d || 0); }
 
 // Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
 // (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
@@ -2826,7 +2844,7 @@ function renderSurvivalResult(t, camped) {
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped === "disconnect" ? "📡 Connection lost – you lost" : camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
-    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + ' ▶</div>').join('') + '</div>' : '')
+    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(' + jsArg(i.key) + ',' + jsArg(x.u) + ',' + jsArg(dn(x.n)) + ')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + ' ▶</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
     + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
@@ -2841,7 +2859,12 @@ async function watchSurvivalReplay(uid, label) {
   if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay found."); return; }
   playSurvivalReplay(rec, label);
 }
+function replayLooksSane(rec) {   // SECURITY: replays are untrusted data written by other players
+  return !!rec && Array.isArray(rec.p) && rec.p.length >= 2 && rec.p.length <= 600000 && Array.isArray(rec.e) && rec.e.length >= 2
+    && Number.isFinite(Number(rec.n)) && rec.n > 0 && rec.n <= 10000000 && (rec.s == null || Array.isArray(rec.s)) && (rec.s || []).length <= 100000;
+}
 function playSurvivalReplay(rec, label) {
+  if (!replayLooksSane(rec)) { alert("Replay is invalid."); return; }
   const old = document.getElementById("survReplay"); if (old) old.remove();
   const ov = document.createElement("div"); ov.id = "survReplay";
   ov.style.cssText = "position:fixed;inset:0;z-index:9500;background:#05050a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:env(safe-area-inset-top,0px) 8px env(safe-area-inset-bottom,0px);box-sizing:border-box;";
@@ -2850,7 +2873,7 @@ function playSurvivalReplay(rec, label) {
     + '<div><button class="srR" style="margin:4px 6px;">↺ Restart</button><button class="srC" style="margin:4px 6px;">✕ Close</button></div>';
   document.body.appendChild(ov);
   const head = ov.firstChild, cv = ov.querySelector("canvas"), c = cv.getContext("2d");
-  const Wd = cv.width = rec.w || 1280, Hd = cv.height = rec.h || 720;
+  const Wd = cv.width = Math.min(4096, Math.max(100, Number(rec.w) || 1280)), Hd = cv.height = Math.min(4096, Math.max(100, Number(rec.h) || 720));
   head.textContent = "▶ " + label + " – " + survFmt(rec.n / 60);
   const P = rec.p, m = P.length / 2, last = 3 * (m - 1), S = rec.s || [];
   const posAt = (tk) => {
@@ -2926,7 +2949,7 @@ async function loadStreakBoard() {
       .sort((a, b) => b.level - a.level || a.ts - b.ts)         // gleiches Level: wer es zuerst erreicht hat steht oben
       .slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No Streaks records yet</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile(${jsArg(r.uid)})">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
@@ -2948,9 +2971,9 @@ async function loadDailyBoard() {
       .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
       .filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No runs yet today – be the first!</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile(${jsArg(r.uid)})">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${key}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay(${jsArg(key)},${jsArg(r.uid)},${jsArg(dn(r.name))})">▶</button></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadDailyWinsBoard() {
@@ -2964,7 +2987,7 @@ async function loadDailyWinsBoard() {
       .map(([uid, days]) => ({ uid, wins: Object.keys(days || {}).length, name: pl[uid].name || "?" }))
       .filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No daily wins yet</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile(${jsArg(r.uid)})">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.wins}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
@@ -2983,9 +3006,9 @@ async function loadSurvivalBoard() {
         return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === key) === i;
       }).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No survival records yet</span></div>'; return; }
-    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile(${jsArg(r.uid)})">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchSurvivalReplay(${jsArg(r.uid)},${jsArg(dn(r.name))})">▶</button></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 
@@ -3274,9 +3297,19 @@ function leagueCountdownText() {
   return tr("Week ends in") + " " + (d ? d + "d " : "") + h + "h " + m + "m";
 }
 // Ein Liga-Eintrag entsteht nur durch einen Sieg. Eintraege mit 0 Siegen (z.B. Abbruch zwischen Beitritt und Sieg-Eintrag) zaehlen nicht.
+// SECURITY: member records are written by the players themselves. Never trust m.uid / m.wins / m.name from the record:
+// the DB key is the uid, wins is coerced to a number, name to a string.
+function leagueMembersOf(g) {
+  const out = [];
+  for (const [k, m] of Object.entries(g || {})) {
+    if (!m || typeof m !== "object" || !isSafeId(k)) continue;
+    out.push({ ...m, uid: k, wins: numSafe(m.wins), name: String(m.name == null ? "" : m.name).slice(0, 20) });
+  }
+  return out;
+}
 function leagueCleanGroup(g) {
   const o = {};
-  for (const [k, m] of Object.entries(g || {})) if (m && ((Number(m.wins) || 0) > 0 || m.uid === myUid)) o[k] = m;
+  for (const m of leagueMembersOf(g)) if (m.wins > 0 || m.uid === myUid) o[m.uid] = m;
   return o;
 }
 function leagueCleanGroups(groups) {
@@ -3357,7 +3390,7 @@ async function leagueResolvePrevious() {
   catch (e) { console.warn("league resolve read failed", e); return; }      // try again later
   let outcome = "stay", rank = 0, size = 0, wins = 0;
   if (grp) {
-    const list = leagueSortMembers(Object.values(grp));
+    const list = leagueSortMembers(leagueMembersOf(grp));
     size = list.length;
     const idx = list.findIndex(m => m.uid === myUid);
     if (idx >= 0) { rank = idx + 1; wins = list[idx].wins || 0; outcome = leagueOutcome(idx, size, wins, tier); }
@@ -3515,7 +3548,7 @@ async function renderLeague() {
   ).join('<div class="lg-arrow">›</div>') + `</div>`;
   // Gruppen-Auswahl (nur anschauen), wenn es in dieser Liga mehrere Gruppen gibt
   if (gids.length > 1) {
-    html += `<div class="lg-groups">` + gids.map((id, i) => `<button class="lg-chip ${id === shownGid ? "on" : ""}" onclick="leagueView(${vt},'${escapeHtml(id)}')">${tr("Group")} ${i + 1}${vt === tier && id === grpId ? " ★" : ""}<small>${Object.keys(groups[id]).length}/${LEAGUE_GROUP_SIZE}</small></button>`).join("") + `</div>`;
+    html += `<div class="lg-groups">` + gids.map((id, i) => `<button class="lg-chip ${id === shownGid ? "on" : ""}" onclick="leagueView(${vt},${jsArg(id)})">${tr("Group")} ${i + 1}${vt === tier && id === grpId ? " ★" : ""}<small>${Object.keys(groups[id]).length}/${LEAGUE_GROUP_SIZE}</small></button>`).join("") + `</div>`;
   }
 
   // 3) Last week
@@ -3525,7 +3558,7 @@ async function renderLeague() {
     const verb = r.outcome === "up" ? "⬆ " + tr("Promoted to") + " " + leagueLabel(r.to)
                : r.outcome === "down" ? "⬇ " + tr("Relegated to") + " " + leagueLabel(r.to)
                : "= " + tr("Stayed in") + " " + leagueLabel(r.to);
-    html += `<div class="lg-card ${cls}"><h4>${tr("Last week")}</h4>#${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")} → ${verb}</div>`;
+    html += `<div class="lg-card ${cls}"><h4>${tr("Last week")}</h4>#${numSafe(r.rank) || "-"}/${numSafe(r.size) || "-"} · ${numSafe(r.wins)} ${tr("Wins")} → ${verb}</div>`;
   }
 
   if (isOwn && myIdx >= 0) {
@@ -3560,10 +3593,10 @@ async function renderLeague() {
       if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
       if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
       const me = m.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile(${jsArg(m.uid)})">
         <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
         <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
-        <span class="lg-wins">${m.wins || 0}</span></div>`;
+        <span class="lg-wins">${numSafe(m.wins)}</span></div>`;
     });
     html += `</div>`;
   } else if (shownGid) {
@@ -3576,10 +3609,10 @@ async function renderLeague() {
       if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
       if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
       const me = m.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile(${jsArg(m.uid)})">
         <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
         <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
-        <span class="lg-wins">${m.wins || 0}</span></div>`;
+        <span class="lg-wins">${numSafe(m.wins)}</span></div>`;
     });
     html += `</div>`;
     if (leagueViewTier != null || leagueViewGid) html += `<button onclick="leagueView(null)" style="margin:0;">← ${tr("My league")}</button>`;
@@ -3625,7 +3658,7 @@ function leagueCelebrate(r, force) {
     <div class="lg-cel-title">${title}</div>
     <div class="lg-cel-meta" style="margin-top:8px;">${line}</div>
     <div class="lg-cel-sub">${l.icon} ${escapeHtml(tr(l.name))}</div>
-    <div class="lg-cel-meta">${tr("Last week")}: #${r.rank || "-"}/${r.size || "-"} · ${r.wins || 0} ${tr("Wins")}</div>
+    <div class="lg-cel-meta">${tr("Last week")}: #${numSafe(r.rank) || "-"}/${numSafe(r.size) || "-"} · ${numSafe(r.wins)} ${tr("Wins")}</div>
     <div class="lg-cel-meta">${msg}</div>
     <div><button class="lgRk">📜 ${tr("Last week's ranking")}</button><button class="lgOk">OK</button></div></div>`;
   const close = () => { ov.classList.add("out"); setTimeout(() => ov.remove(), 300); };
@@ -3656,7 +3689,7 @@ async function leagueShowLastRanking(r) {
   {
     try {
       const grp = leagueCleanGroup(await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`));
-      list = grp ? leagueSortMembers(Object.values(grp)) : [];
+      list = grp ? leagueSortMembers(leagueMembersOf(grp)) : [];
     } catch (e) { body.textContent = tr("Error while loading"); return; }
   }
   if (!list.length) { body.textContent = tr("No ranking available"); return; }
@@ -3667,10 +3700,10 @@ async function leagueShowLastRanking(r) {
     if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
     if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
     const me = (myUid && m.uid === myUid), medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile(${jsArg(m.uid)})">
       <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
       <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
-      <span class="lg-wins">${m.wins || 0}</span></div>`;
+      <span class="lg-wins">${numSafe(m.wins)}</span></div>`;
   });
   body.innerHTML = html;
 }
@@ -4177,7 +4210,7 @@ async function loadLeaderboard() {
     // Dedupe: gleicher Name = ein Eintrag (eigene UID hat Vorrang, sonst der mit den meisten Partien)
     const _lbSeen = new Map();
     Object.entries(data)
-      .map(([uid, p]) => ({ uid, ...p }))
+      .map(([uid, p]) => ({ ...p, uid }))
       .filter(p => {
         const totalGames = (Number(p.wins) || 0) + (Number(p.losses) || 0);
         return totalGames >= 1;
@@ -4199,7 +4232,7 @@ async function loadLeaderboard() {
 
     activePlayers.forEach((p, i) => {
       const isMe = myUid && p.uid === myUid;
-      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${p.uid}')">
+      lbTable.innerHTML += `<div class="lb-row${isMe ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile(${jsArg(p.uid)})">
         <span>#${i+1}</span><span>${leagueByTier(p.leagueTier).icon} ${escapeHtml(dn(p.name))}</span>
         <span>${Math.round(p.elo || 1500)}</span>
         <span>${p.wins||0}/${p.losses||0}</span></div>`;
@@ -4223,7 +4256,7 @@ async function profileRanks(uid) {
     const nk = n => String(dn(n)).trim().toLowerCase();
     // Elo (gleiche Regeln wie Elo-Rangliste: min. 1 Partie, ein Eintrag pro Name)
     const seen = new Map(), games = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
-    Object.entries(pl).map(([u, q]) => ({ uid: u, ...q })).filter(q => games(q) >= 1).forEach(q => {
+    Object.entries(pl).map(([u, q]) => ({ ...q, uid: u })).filter(q => games(q) >= 1).forEach(q => {
       const k = String(q.name || "").toLowerCase(), prev = seen.get(k);
       if (!prev || q.uid === myUid || (prev.uid !== myUid && games(q) > games(prev))) seen.set(k, q);
     });
@@ -4244,6 +4277,8 @@ async function profileRanks(uid) {
 }
 async function openOnlineProfile(uid) {
   if (!fbReady) return;
+  uid = String(uid == null ? "" : uid);
+  if (!isSafeId(uid)) return;      // SECURITY: uid is used to build a DB path
   try {
     const p = await dbGet("players/" + uid);
     if (!p) {
@@ -4264,8 +4299,8 @@ async function openOnlineProfile(uid) {
     const rk = await profileRanks(uid);
     let dailyWinsN = 0;
     try { const dw = await dbGet("dailyWins/" + uid); dailyWinsN = dw ? Object.keys(dw).length : 0; } catch (e) {}
-    const wins = p.wins ?? 0;
-    const losses = p.losses ?? 0;
+    const wins = numSafe(p.wins);
+    const losses = numSafe(p.losses);
     const totalGames = wins + losses;
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
 
@@ -4286,8 +4321,8 @@ async function openOnlineProfile(uid) {
       <div class="prof-row"><span class="prof-label">Highest Elo</span><span class="prof-val" style="color:#00ff88">${Math.round(p.highestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Lowest Elo</span><span class="prof-val" style="color:#ff4444">${Math.round(p.lowestElo ?? p.elo)}</span></div>
       <div class="prof-row"><span class="prof-label">Highest League</span><span class="prof-val">${leagueBadgeHTML(p.leagueBest ?? p.leagueTier)}</span></div>
-      <div class="prof-row"><span class="prof-label">Longest Winstreaks</span><span class="prof-val">${p.bestStreak ?? 0}</span></div>
-      <div class="prof-row"><span class="prof-label">Current Winstreaks</span><span class="prof-val">${p.currentStreak ?? 0}</span></div>
+      <div class="prof-row"><span class="prof-label">Longest Winstreaks</span><span class="prof-val">${numSafe(p.bestStreak)}</span></div>
+      <div class="prof-row"><span class="prof-label">Current Winstreaks</span><span class="prof-val">${numSafe(p.currentStreak)}</span></div>
       <div class="prof-row"><span class="prof-label">Best Win</span><span class="prof-val" style="color:#00ff88">${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Worst Loss</span><span class="prof-val" style="color:#ff4444">${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}</span></div>
       <div class="prof-row"><span class="prof-label">Total Elo Won</span><span class="prof-val" style="color:#00ff88">+${p.totalEloGained ?? 0}</span></div>
@@ -4721,7 +4756,7 @@ async function tryMatchmake() {
   const queue = await dbGet("queue");
   if (!queue) return;
   const others = Object.entries(queue)
-    .map(([uid, p]) => ({ uid, ...p }))
+    .map(([uid, p]) => ({ ...p, uid }))
     .filter(p =>
       p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite")
     );
@@ -4915,7 +4950,7 @@ async function getPlayerRanks(p1Name, p2Name) {
     const _rkSeen = new Map();
     const _rkGames = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
     Object.entries(data)
-      .map(([uid, p]) => ({ uid, ...p }))
+      .map(([uid, p]) => ({ ...p, uid }))
       .filter(p => _rkGames(p) >= 1)
       .forEach(p => {
         const key = String(p.name || "").toLowerCase();
@@ -8635,7 +8670,7 @@ async function _cheatCollect() {
       const t = r.time;
       if (!(typeof t === "number" && isFinite(t) && t > 0)) { add(uid, r.name, "invalid survival time: " + t); return; }
       let rec = null;
-      try { const raw = await R.get("survivalReplays/" + uid); rec = raw && JSON.parse(raw); } catch (e) { return; }   // kein/kaputtes Replay = kein Beweis
+      try { const raw = await R.get("survivalReplays/" + uid); rec = raw && String(raw).length <= 3000000 && JSON.parse(raw); } catch (e) { return; }   // kein/kaputtes Replay = kein Beweis
       if (!rec || typeof rec.n !== "number" || !isFinite(rec.n)) return;
       const rt = rec.n / 60;
       if (Math.abs(rt - t) > CHEAT_REPLAY_TOL_S) add(uid, r.name, "survival time " + t.toFixed(1) + "s does not match replay (" + rt.toFixed(1) + "s)");
@@ -8716,7 +8751,7 @@ async function leagueAdminResolveAll() {
       for (const [t, groups] of Object.entries(tiers || {})) {
         const tier = Number(t);
         for (const [gid, members] of Object.entries(groups || {})) {
-          const list = leagueSortMembers(Object.values(members || {})), size = list.length;
+          const list = leagueSortMembers(leagueMembersOf(members)), size = list.length;
           list.forEach((m, idx) => {
             const p = players && players[m.uid];
             if (!p || m.uid === me) return;                                   // eigener Account wird von deinem normalen Client ausgewertet
@@ -8741,7 +8776,7 @@ async function leagueAdminResolveAll() {
     const inGroup = new Set();
     for (const tiers of Object.values((wl && wl[prevId]) || {}))
       for (const members of Object.values(tiers || {}))
-        for (const m of Object.values(members || {})) if (m && m.uid) inGroup.add(m.uid);
+        for (const m of leagueMembersOf(members)) inGroup.add(m.uid);
     for (const [uid, p] of Object.entries(players || {})) {
       if (!p || uid === me || inGroup.has(uid) || up["players/" + uid + "/leagueTier"] !== undefined) continue;
       const tier = Number(p.leagueTier) || 0;
