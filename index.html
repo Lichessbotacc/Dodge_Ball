@@ -6965,10 +6965,9 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 //  CONTROLS
 // ═══════════════════════════════════════════════
 // ── Bewegung & Treffer: kein Teleportieren, kein Durchgehen ──
-// Maus/Touch setzen nur ein ZIEL. Der Ball laeuft pro Tick hoechstens MOVE_CAP Pixel dorthin
-// (Antippen woanders oder blitzschnelles Wischen teleportiert nicht mehr). Treffer werden ueber die ganze
-// zurueckgelegte Strecke geprueft (hitSwept), nicht nur an der Endposition.
-const MOVE_CAP = 16;
+// Maus/Touch setzen ein ZIEL; MOVE_CAP begrenzt optional das Tempo pro Tick (aktuell unbegrenzt).
+// Treffer werden ueber die ganze zurueckgelegte Strecke geprueft (hitSwept), nicht nur an der Endposition.
+const MOVE_CAP = Infinity;   // kein Tempolimit: du kannst dich so schnell bewegen wie du willst (Treffer auf der Strecke zaehlen trotzdem)
 function setMoveTarget(p, x, y) {
   p.mx = Math.max(p.radius, Math.min(W() - p.radius, x));
   p.my = Math.max(p.radius, Math.min(H() - p.radius, y));
