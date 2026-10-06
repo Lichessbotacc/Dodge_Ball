@@ -4616,6 +4616,7 @@ async function _devIdbSet(id) { try { await Promise.race([_devIdbSet2(id), new P
 async function _devIdbSet2(id) { try { const d = await _devIdbOpen(); await new Promise(res => { const t = d.transaction("k", "readwrite"); t.objectStore("k").put(id, "id"); t.oncomplete = t.onerror = t.onabort = () => { d.close(); res(); }; }); } catch (e) {} }
 // Geraete-IDs aus localStorage, Cookie UND IndexedDB: loescht jemand nur einen Speicher, wird die ID aus den anderen wiederhergestellt.
 // Alle gefundenen IDs werden gepruft/registriert; ein Treffer in bannedDevices reicht fuer die Sperre.
+function _devClean(id) { return String(id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64); }   // eigene Kopie: die Modul-Version (RPC-Block) ist hier nicht sichtbar
 async function dobDeviceIds() {
   const ids = [];
   const add = v => { v = _devClean(v); if (v.length >= 6 && ids.indexOf(v) === -1) ids.push(v); };
