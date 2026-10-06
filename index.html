@@ -8112,25 +8112,34 @@ setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); }, 3000);
 if (_modRPC()) _modWatch();
 
 // ═══ ADMIN: Button im Menü + Mod-Panel ═══
+function _adminBar() {
+  let bar = document.getElementById("adminBar");
+  if (bar) return bar;
+  const menu = document.getElementById("menu"); if (!menu) return null;
+  bar = document.createElement("div"); bar.id = "adminBar";
+  bar.style.cssText = "position:absolute;top:14px;left:16px;display:flex;flex-direction:row;gap:8px;z-index:5;";
+  menu.appendChild(bar);
+  return bar;
+}
 function _modAdminBtn() {
   const ex = document.getElementById("modBtn");
   if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
   if (ex) return;
-  const nb = document.getElementById("newsBtn"); if (!nb) return;
+  const bar = _adminBar(); if (!bar) return;
   const b = document.createElement("button"); b.id = "modBtn"; b.textContent = "🛡 Mod";
-  b.style.cssText = "position:absolute;top:104px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;";
+  b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
   b.onclick = () => openModPanel();
-  nb.insertAdjacentElement("afterend", b);
+  bar.insertBefore(b, bar.firstChild);
 }
 function _dailyAdminBtn() {
   const ex = document.getElementById("dailyAdminBtn");
   if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
   if (ex) return;
-  const mb = document.getElementById("modBtn"); if (!mb) return;
+  const bar = _adminBar(); if (!bar) return;
   const b = document.createElement("button"); b.id = "dailyAdminBtn"; b.textContent = "📅 Daily Admin";
-  b.style.cssText = "position:absolute;top:146px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;";
+  b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
   b.onclick = () => openDailyAdmin();
-  mb.insertAdjacentElement("afterend", b);
+  bar.appendChild(b);
 }
 
 let _modPlayers = {}, _modSanc = {};
