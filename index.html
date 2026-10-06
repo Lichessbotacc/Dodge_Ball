@@ -1765,21 +1765,41 @@ window._dobRPC = {
 // nur zu, wenn dieser Eintrag >= 2 ist -> alte Seiten (ohne diesen Eintrag) koennen nichts mehr schreiben, bis sie neu laden.
 // Bei einer neuen Version: CLIENT_VER hier UND die Zahl in den Rules ("clientVer ... >= 2") erhoehen.
 const CLIENT_VER = 2;
-let _verDone = false;
+let _verUid = null, _verGiveUp = false, _verBusy = false, _verTries = 0;
+// Traegt die Version fuer die AKTUELLE uid ein (auch nach Login / Registrierung / Logout, wo sich die uid aendert ohne Reload)
+async function ensureClientVer(uid) {
+  uid = uid || myUid();
+  if (!uid || _verUid === uid) return;
+  await set(ref(db, "clientVer/" + uid), CLIENT_VER);
+  _verUid = uid;
+}
+window._dobEnsureVer = ensureClientVer;
 (function () {
   const base = window.dobIsReady;
-  window.dobIsReady = () => base() && _verDone;      // der Rest des Spiels startet erst, wenn die Version eingetragen ist
-  let tries = 0, busy = false;
-  const iv = setInterval(async () => {
-    if (_verDone || busy || !base()) return;
-    busy = true;
-    try { await set(ref(db, "clientVer/" + myUid()), CLIENT_VER); _verDone = true; clearInterval(iv); }
+  // Das Spiel gilt erst als bereit, wenn die Version fuer die aktuelle uid eingetragen ist
+  window.dobIsReady = () => base() && (_verGiveUp || _verUid === myUid());
+  setInterval(async () => {
+    if (_verBusy || !base() || _verUid === myUid()) return;
+    _verBusy = true;
+    try { await ensureClientVer(); _verTries = 0; }
     catch (e) {
       console.warn("clientVer write failed", e && e.message);
-      if (++tries >= 4) { _verDone = true; clearInterval(iv); }   // Rules noch nicht eingespielt: trotzdem starten
+      if (++_verTries >= 4) _verGiveUp = true;     // Rules noch nicht eingespielt: trotzdem starten
     }
-    busy = false;
+    _verBusy = false;
   }, 400);
+  // Login/Registrierung: direkt nach dem uid-Wechsel die Version eintragen, BEVOR der Spielcode Daten schreibt
+  try {
+    const A = window._dobAuth;
+    if (A) ["register", "login"].forEach(k => {
+      const f = A[k];
+      A[k] = async function () {
+        const u = await f.apply(this, arguments);
+        try { await ensureClientVer(u); } catch (e) { console.warn("clientVer write failed", e && e.message); }
+        return u;
+      };
+    });
+  } catch (e) {}
 })();
 
 window.dispatchEvent(new Event("dobRPCReady"));
@@ -1972,7 +1992,7 @@ function renderPresence(playersData) {
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
       )
       .forEach(p => {
-        if ((p.status === "Survival" || p.status === "Daily" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) p.status = "Idle in Menu"; p._ghost = true;   // Geist: Stream tot
+        if ((p.status === "Survival" || p.status === "Daily" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) { p.status = "Idle in Menu"; p._ghost = true; }   // Geist: Stream tot
         const key = String(p.name || "").toLowerCase();
         const prev = _seen.get(key);
         const better = !prev
@@ -3158,7 +3178,7 @@ function glickoWinnerShare(winnerElo, loserElo) {
   const g = 1 / Math.sqrt(1 + 3 * phi * phi / (Math.PI * Math.PI));
   const dMu = ((Number(winnerElo) || 1500) - (Number(loserElo) || 1500)) / G2.SCALE;
   const E = 1 / (1 + Math.exp(-g * dMu));                       // erwartete Siegchance des Gewinners
-  const W = Math.round(ELO_POOL * (1 - E));
+  const W = Math.round(Math.round(ELO_POOL * (1 - E) * 1e6) / 1e6);   // auf 6 Stellen gerundet -> alle Browser/Engines liefern dasselbe W
   return Math.max(ELO_MIN_SHARE, Math.min(ELO_POOL - ELO_MIN_SHARE, W));   // 1..9, Rest geht an den Verlierer
 }
 // Aenderung fuer 'me' (Sieg: +W, Niederlage: -(10-W))
@@ -8024,7 +8044,7 @@ canvas.addEventListener("touchstart", e => {
      alone):
      1. ELO INTEGRITY: the client still computes and writes its own
         new elo value to its own uid node. The clamp in this file
-        (clampEloChange, MAX_ELO_DELTA_PER_GAME = 50) limits how much
+        (clampEloChange, MAX_ELO_DELTA_PER_GAME = 10) limits how much
         damage one write can do, but a scripted client could still
         call set() on players/{ownUid} repeatedly with crafted-but-
         clamped deltas. Real integrity requires a Cloud Function (or
@@ -9238,7 +9258,14 @@ async function modDeleteChatMsg(key) {
     "A new update has been made. To continue playing, please reload the page.": "Es gibt ein neues Update. Um weiterzuspielen, lade bitte die Seite neu.",
     "Reload now": "Jetzt neu laden", "Later": "Später"
   }); } catch (e) {}
-  function inMatch() { try { return !!(running && mode === "online" && !survivalActive && !onlineResultHandled); } catch (e) { return false; } }
+  function inMatch() {   // laufendes 1v1, Survival/Daily oder Streak-Run: Pop-up zurueckhalten (Reload wuerde den Lauf verlieren)
+    try {
+      if (running && mode === "online" && !survivalActive && !onlineResultHandled) return true;
+      if (survivalActive) return true;
+      if (mode === "streak" && document.body.classList.contains("ingame")) return true;
+    } catch (e) {}
+    return false;
+  }
   function show() {
     if (document.getElementById("updatePopup")) return;
     const ov = document.createElement("div");
