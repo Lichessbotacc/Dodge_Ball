@@ -1632,11 +1632,39 @@ async function rpcModRestoreUser(uid, backup) {
   if (backup.streak) up["streakBoard/" + uid] = backup.streak;
   return update(ref(db), up);
 }
+// ── Geraete-Sperre: gebannte Spieler koennen auf ihrem Geraet keinen neuen Account erstellen ──
+function _devClean(id) { return String(id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64); }
+async function rpcRegisterDevice(id) { requireNotBanned(); const uid = requireUid(); id = _devClean(id); if (id.length < 6) return; return set(ref(db, "deviceIds/" + uid + "/" + id), true); }
+async function rpcIsDeviceBanned(id) { id = _devClean(id); if (id.length < 6) return false; try { return (await get(ref(db, "bannedDevices/" + id))).exists(); } catch (e) { return false; } }
+async function rpcModBanDevice(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) return 0;
+  const ids = Object.keys((await get(ref(db, "deviceIds/" + uid))).val() || {});
+  await Promise.all(ids.map(id => set(ref(db, "bannedDevices/" + id), Date.now())));
+  return ids.length;
+}
+async function rpcModUnbanDevice(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return 0;
+  const ids = Object.keys((await get(ref(db, "deviceIds/" + uid))).val() || {});
+  await Promise.all(ids.map(id => remove(ref(db, "bannedDevices/" + id))));
+  return ids.length;
+}
+// ── Ban-Einspruch: ein Appeal pro Woche (Rules erzwingen das) ──
+async function rpcSendAppeal(name, text) {
+  const uid = requireUid();
+  text = String(text || "").trim().slice(0, 500);
+  if (!text) throw new Error("Please write something.");
+  return set(ref(db, "appeals/" + uid), { name: String(name || "").slice(0, 20) || "unknown", text, ts: serverTimestamp() });
+}
+async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
+  sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
+  registerDevice: rpcRegisterDevice, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modUnbanDevice: rpcModUnbanDevice,
   get: rpcGet, on: rpcOn,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
@@ -1846,7 +1874,7 @@ function renderPresence(playersData) {
           || (prev.uid !== myUid && (p.lastActive || 0) > (prev.lastActive || 0));
         if (better) _seen.set(key, p);
       });
-    const activeList = [..._seen.values()];
+    const activeList = [..._seen.values()].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0));
 
     if (activeList.length === 0) {
       panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
@@ -4395,6 +4423,8 @@ async function createAccount() {
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
   if (!fbReady || !window._dobAuth)      { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
 
+  if (await deviceIsBanned()) { info.textContent = "This device has been banned. You cannot create a new account."; info.style.color = "#f44"; return; }
+
   info.style.color = "#aaa";
   info.textContent = "Creating account…";
 
@@ -4477,6 +4507,26 @@ function deviceHasAccount() {
   try { return !!localStorage.getItem("dobDeviceAccount"); } catch (e) { return false; }
 }
 function markDeviceAccount(name) { try { localStorage.setItem("dobDeviceAccount", String(name || "1")); } catch (e) {} }
+// Geraete-ID (localStorage + Cookie): damit werden gebannte Geraete erkannt. Wer seine Browserdaten loescht, bekommt eine neue ID.
+function dobDeviceId() {
+  let id = "";
+  try { id = localStorage.getItem("dobDeviceId") || ""; } catch (e) {}
+  if (!id) { const m = document.cookie.match(/(?:^|; )dobDeviceId=([A-Za-z0-9_-]+)/); if (m) id = m[1]; }
+  if (!id) id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  try { localStorage.setItem("dobDeviceId", id); } catch (e) {}
+  try { document.cookie = "dobDeviceId=" + id + "; max-age=315360000; path=/; SameSite=Lax"; } catch (e) {}
+  return id;
+}
+async function deviceIsBanned() { try { return !!(RPC && fbReady && await RPC.isDeviceBanned(dobDeviceId())); } catch (e) { return false; } }
+setInterval(() => {
+  try {
+    if (window._devReg && window._devReg !== myUid) window._devReg = null;
+    if (!window._devReg && fbReady && RPC && myUid && onlineAccount && !window.__dobBanned) {
+      window._devReg = myUid;
+      Promise.resolve(RPC.registerDevice(dobDeviceId())).catch(() => { window._devReg = null; });
+    }
+  } catch (e) {}
+}, 4000);
 
 // Deletes the account for good (password required). Log out no longer exists.
 async function deleteAccount() {
@@ -8197,6 +8247,18 @@ function _modEnsureOv() {
   }
   return ov;
 }
+function _modAppealInit(ov) {
+  const ta = ov.querySelector("#modAppealText"), btn = ov.querySelector("#modAppealBtn"), msg = ov.querySelector("#modAppealMsg"), WEEK = 604800000;
+  const lock = ts => { btn.disabled = true; ta.disabled = true; msg.style.color = "#8fd18f"; msg.textContent = "Appeal sent. You can send the next one on " + new Date(ts + WEEK).toLocaleString() + "."; };
+  (async () => { try { const a = await _modRPC().get("appeals/" + _modUid); if (a && a.ts && Date.now() - a.ts < WEEK) lock(a.ts); } catch (e) {} })();
+  btn.onclick = async () => {
+    const t = ta.value.trim();
+    if (!t) { msg.style.color = "#ff8a8a"; msg.textContent = "Please write your appeal first."; return; }
+    btn.disabled = true; msg.style.color = "#aaa"; msg.textContent = "Sending…";
+    try { await _modRPC().sendAppeal(_modCurName(), t); lock(Date.now()); }
+    catch (e) { btn.disabled = false; msg.style.color = "#ff8a8a"; msg.textContent = (e && /permission/i.test(String(e.message || e.code))) ? "You can only send one appeal per week." : "Error: " + (e && e.message); }
+  };
+}
 function _modBuild(ov, mode) {
   const box = 'width:min(560px,94vw);background:#0d0f16;border-radius:16px;padding:26px;text-align:center;color:#eaf2fb;box-shadow:0 0 60px rgba(255,68,68,0.35);';
   if (mode === "ban") {
@@ -8204,7 +8266,11 @@ function _modBuild(ov, mode) {
       + '<div style="font-size:54px;">🔨</div>'
       + '<div style="font-size:26px;font-weight:800;color:#ff4444;margin:6px 0 10px;">Your account has been banned</div>'
       + '<div id="modBanReason" style="font-size:15px;margin-bottom:18px;word-break:break-word;"></div>'
+      + '<textarea id="modAppealText" maxlength="500" placeholder="Write an appeal (1 per week)" style="width:100%;box-sizing:border-box;height:80px;margin:0 0 6px;padding:8px;font-size:14px;resize:vertical;"></textarea>'
+      + '<div id="modAppealMsg" style="min-height:18px;font-size:13px;margin-bottom:6px;"></div>'
+      + '<button id="modAppealBtn" style="margin:0 8px 0 0;padding:10px 22px;font-size:15px;">Send appeal</button>'
       + '<button id="modLogoutBtn" style="margin:0;padding:10px 22px;font-size:15px;">Log out</button></div>';
+    _modAppealInit(ov);
     ov.querySelector("#modLogoutBtn").onclick = async () => {
       try { await window._dobAuth.logout(); } catch (e) {}
       try { localStorage.removeItem("dobAccount"); } catch (e) {}
@@ -8373,11 +8439,13 @@ async function openModPanel(prefill) {
   if (typeof prefill === "string") ov.querySelector("#modSearch").value = prefill;
   await _modPanelLoad();
 }
+var _modAppeals = {};
 async function _modPanelLoad() {
   const list = document.getElementById("modList"); if (!list) return;
   try {
     const [p, s] = await Promise.all([_modRPC().get("players"), _modRPC().get("sanctions")]);
     _modPlayers = p || {}; _modSanc = s || {};
+    try { _modAppeals = (await _modRPC().get("appeals")) || {}; } catch (e) { _modAppeals = {}; }
     _modPanelRender();
   } catch (e) { list.textContent = "Failed to load: " + (e && e.message) + " (Database Rules updated?)"; }
 }
@@ -8401,7 +8469,18 @@ function _modPanelRender() {
       && (!q || String(p.name).toLowerCase().includes(q) || uid.toLowerCase().includes(q)))
     .sort((a, b) => (_modBadges(b[0], b[1]).length - _modBadges(a[0], a[1]).length) || String(a[1].name).localeCompare(String(b[1].name)));
   list.textContent = "";
-  if (!rows.length) { list.textContent = "No players found."; return; }
+  Object.entries(_modAppeals || {}).filter(([, a]) => a && a.text).sort((x, y) => (y[1].ts || 0) - (x[1].ts || 0)).forEach(([uid, a]) => {
+    const ar = document.createElement("div"); ar.style.cssText = "border:1px solid #ffd700;border-radius:10px;padding:8px 10px;";
+    const h = document.createElement("div"); h.style.cssText = "font-size:12px;color:#ffd700;margin-bottom:3px;";
+    h.textContent = "📨 Appeal from " + (a.name || "?") + " · " + (a.ts ? new Date(a.ts).toLocaleString() : "") + " · " + ((_modSanc[uid] && _modSanc[uid].banned) ? "banned" : "not banned");
+    const t = document.createElement("div"); t.style.cssText = "font-size:13px;white-space:pre-wrap;word-break:break-word;"; t.textContent = a.text;
+    const ab = document.createElement("div"); ab.style.cssText = "display:flex;gap:6px;margin-top:6px;";
+    const mk2 = (label, fn) => { const x = document.createElement("button"); x.textContent = label; x.style.cssText = "margin:0;padding:4px 9px;font-size:12px;"; x.onclick = () => _modAct(fn); ab.appendChild(x); };
+    if (_modSanc[uid] && _modSanc[uid].banned) mk2("♻ Unban", () => _modBan(uid, _modSanc[uid], { name: a.name }));
+    mk2("🗑 Dismiss", () => _modRPC().modRemoveAppeal(uid));
+    ar.append(h, t, ab); list.appendChild(ar);
+  });
+  if (!rows.length) { if (!list.children.length) list.textContent = "No players found."; return; }
   rows.slice(0, 80).forEach(([uid, p]) => {
     const s = _modSanc[uid] || {};
     const row = document.createElement("div");
@@ -8498,6 +8577,7 @@ async function _modPurge(uid, name) {
 async function _modBan(uid, s, p) {
   if (s.banned) {
     await _modRPC().modSetSanction(uid, { banned: null, banReason: null, autoBan: null });
+    try { await _modRPC().modUnbanDevice(uid); } catch (e) { console.warn("device unban failed", e); }
     if (s.backup && confirm("Restore this player's backed-up data (profile, survival record, Streaks)?")) { await _modRPC().modRestoreUser(uid, s.backup); await _modRPC().modSetSanction(uid, { backup: null }); }
     return;
   }
@@ -8509,6 +8589,7 @@ async function _modBan(uid, s, p) {
     await _modRPC().modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null } });
   } catch (e) { console.warn("backup failed", e); }
   await _modRPC().modSetSanction(uid, { banned: true, banReason: reason.trim(), bannedAt: Date.now() });
+  try { await _modRPC().modBanDevice(uid); } catch (e) { console.warn("device ban failed", e); }
   await _modPurge(uid, nm);
   await new Promise(r => setTimeout(r, 4000));        // sein Client bekommt den Ban und stoppt Schreibzugriffe; Restschreibungen werden noch einmal weggeraeumt
   await _modPurge(uid, nm);
@@ -8567,6 +8648,7 @@ async function _cheatBanOne(uid, name, why) {
   const [pl, sv, sk] = await Promise.all([R.get("players/" + uid), R.get("survival/" + uid), R.get("streakBoard/" + uid)]);
   await R.modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null }, autoBan: { why: why, ts: Date.now() } });
   await R.modSetSanction(uid, { banned: true, banReason: "Cheating detected (automatic).", bannedAt: Date.now() });
+  try { await R.modBanDevice(uid); } catch (e) { console.warn("device ban failed", e); }
   await _modPurge(uid, name);
   await new Promise(r => setTimeout(r, 4000));
   await _modPurge(uid, name);
