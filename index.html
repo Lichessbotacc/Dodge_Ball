@@ -7100,6 +7100,7 @@ async function startOnlineTV(targetUid) {
   const seenPlaying = new Map();   // id -> wann das TV das Match zuerst als "playing" OHNE Status gesehen hat
   const badMatches = new Map();      // id -> Zeitpunkt, bis zu dem das Match übersprungen wird (läuft ab, wird später erneut versucht)
   let gotPacket = false;
+  let tvLastSig = null;   // Signatur des letzten Spiel-Status: nur echte Aenderungen (nicht Pings) zaehlen als Lebenszeichen
   let lastMatchesData = null;
   let lastPacketSeen = 0;
   let curMeta = null;
@@ -7322,6 +7323,7 @@ async function startOnlineTV(targetUid) {
     watchViewerCount(bestId, true);
     lastPacketSeen = Date.now();
     gotPacket = false;
+    tvLastSig = null;
     curMeta = best;
     setOnlineAspect(best.arena);
 
@@ -7375,13 +7377,20 @@ async function startOnlineTV(targetUid) {
         holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
         return;
       }
-      if (data.p1State) { feed(p1, data.p1State); lastPacketSeen = Date.now(); gotPacket = true; }
-      if (data.p2State) { feed(p2, data.p2State); lastPacketSeen = Date.now(); gotPacket = true; }
+      // Dieser Listener feuert bei JEDER Aenderung des Match-Knotens, auch bei den Ping-Eintraegen (alle 2,5s).
+      // Als Lebenszeichen zaehlt deshalb nur, wenn sich Spieler- oder Ball-Status wirklich geaendert hat.
+      // Sonst wirkt ein Match mit eingefrorenem Host (z.B. Tab im Hintergrund) ewig lebendig: Zuschauer sehen
+      // dann stehende Spieler und die letzten Baelle (z.B. 140 auf einmal), ohne dass das Match uebersprungen wird.
+      const _sig = JSON.stringify(data.p1State || null) + "|" + JSON.stringify(data.p2State || null) + "|" + (data.ballState || "");
+      const _fresh = _sig !== tvLastSig;
+      tvLastSig = _sig;
+      if (data.p1State) { feed(p1, data.p1State); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
+      if (data.p2State) { feed(p2, data.p2State); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
       if (data.ballState) {
         try {
           const bsArr = JSON.parse(data.ballState);
           if (!tvClock) tvClock = { base: Math.max(0, bsArr.length - ONLINE_START_BALLS) * ONLINE_SPAWN_MS / 1000, at: Date.now() };
-          applyBallCorrection(bsArr, 0.35); lastPacketSeen = Date.now(); gotPacket = true;
+          applyBallCorrection(bsArr, 0.35); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
         } catch(e) {}
       }
     });
