@@ -487,9 +487,22 @@ h2::after{
 #winnerOverlay h2{font-size:54px;font-weight:900;text-shadow:0 0 40px gold;font-family:var(--font-display);}
 #winnerOverlay h2::after{display:none;}
 #winnerOverlay{overflow-y:auto;justify-content:flex-start;padding:18px 0 24px;box-sizing:border-box;}
-#winnerOverlay>:first-child{margin-top:auto;}
-#winnerOverlay>:last-child{margin-bottom:auto;}
-@media (max-height:820px){#winnerOverlay h2{font-size:40px;}#winnerOverlay #postChatMsgs{height:80px !important;}#winnerOverlay #winnerButtons{margin-top:18px !important;}}
+#winnerOverlay{padding:clamp(20px,5vh,56px) 0 clamp(20px,5vh,48px);}
+#winnerOverlay>:first-child{margin-top:0;}
+#winnerOverlay>:last-child{margin-bottom:0;}
+#winnerOverlay #winnerCols{margin-top:auto;margin-bottom:auto;}
+#winnerOverlay #winnerButtons{margin-top:0 !important;}
+#winnerEloChange:empty{display:none;}
+#winnerLeague{display:none !important;}
+/* Nach dem Match: Chat links, Elo-Animation + Leaderboard rechts (iPad quer: alles auf einem Bildschirm) */
+#winnerCols{display:grid;grid-template-columns:minmax(0,340px) minmax(0,420px);gap:24px;align-items:start;justify-content:center;width:min(820px,96vw);margin-top:6px;}
+#winnerCols #postChat{width:100% !important;max-width:none !important;margin-top:0 !important;box-sizing:border-box;}
+#winnerCols #postChatMsgs{height:230px !important;}
+#winnerRight{min-width:0;text-align:center;}
+#winnerOverlay.nochat #winnerCols{grid-template-columns:minmax(0,420px);}
+@media (max-width:760px){#winnerCols{grid-template-columns:minmax(0,1fr);width:min(420px,92vw);}#winnerRight{order:-1;}#winnerCols #postChatMsgs{height:90px !important;}}
+@media (max-height:820px){#winnerOverlay h2{font-size:40px;}#winnerOverlay #winnerButtons{margin-top:18px !important;}#winnerCols #postChatMsgs{height:190px !important;}}
+@media (max-height:820px) and (max-width:760px){#winnerCols #postChatMsgs{height:80px !important;}}
 #winnerOverlay p{font-size:26px;color:#aaa;margin-top:10px;font-family:var(--font-hud);}
 
 #eloTable{
@@ -1044,13 +1057,19 @@ body.mode-tv #homeBtn:hover{transform:none;}
     <div id="winnerOverlay">
       <h2 id="winnerText">🏆 Winner!</h2>
       <p  id="winnerEloChange"></p>
-      <div id="winnerLeague" style="margin-top:10px;font-size:22px;font-family:var(--font-display);font-weight:700;"></div>
+      <div id="winnerCols">
+        <div id="winnerLeft">
       <div id="postChat" style="display:none;flex-direction:column;width:340px;max-width:90vw;margin-top:18px;background:rgba(16,18,26,0.8);border:1px solid var(--line);border-left:3px solid var(--neon-cyan);border-radius:12px;padding:10px;font-size:13px;">
         <b>💬 Chat with opponent <span style="color:#8b93a6;font-weight:400;">(not saved)</span></b>
         <div id="postChatMsgs" style="height:110px;overflow-y:auto;margin:6px 0;display:flex;flex-direction:column;gap:4px;"></div>
         <div style="display:flex;gap:6px;">
           <input type="text" id="postChatInput" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:7px 9px;font-size:13px;">
           <button onclick="sendPostChat()" style="margin:0;padding:7px 12px;font-size:13px;">Send</button>
+        </div>
+      </div>
+        </div>
+        <div id="winnerRight">
+      <div id="winnerLeague" style="margin-top:10px;font-size:22px;font-family:var(--font-display);font-weight:700;"></div>
         </div>
       </div>
       <div style="display:flex;gap:16px;margin-top:30px;" id="winnerButtons"></div>
@@ -5786,7 +5805,7 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
       document.getElementById("winnerEloChange").textContent = "";
       const pn = document.createElement("div"); pn.id = "winnerEloPanel";
       pn.style.cssText = "width:min(420px,92vw);text-align:center;";
-      document.getElementById("winnerEloChange").after(pn);
+      document.getElementById("winnerRight").prepend(pn);
       try { tvEloPanel(document.getElementById("winnerOverlay"), eloRows, pn); } catch (e) { console.warn(e); }
     }
   }
@@ -5802,6 +5821,7 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
 
   document.getElementById("postChat").style.display = onlineVsBot ? "none" : "flex";
+  document.getElementById("winnerOverlay").classList.toggle("nochat", !!onlineVsBot);
   document.getElementById("postChatMsgs").innerHTML = "";
   document.getElementById("winnerOverlay").style.display = "flex";
 
