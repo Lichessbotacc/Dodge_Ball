@@ -4734,12 +4734,22 @@ async function getPlayerRanks(p1Name, p2Name) {
     const data = await dbGet("players");
     if (!data) return { r1: "?", r2: "?" };
 
-    const sorted = Object.values(data)
-      .filter(p => ((p.wins || 0) + (p.losses || 0)) > 0)
-      .sort((a, b) => b.elo - a.elo);
+    // Exakt dieselbe Logik wie loadLeaderboard(): gleicher Name = ein Eintrag, ELO-Default 1500
+    const _rkSeen = new Map();
+    const _rkGames = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
+    Object.entries(data)
+      .map(([uid, p]) => ({ uid, ...p }))
+      .filter(p => _rkGames(p) >= 1)
+      .forEach(p => {
+        const key = String(p.name || "").toLowerCase();
+        const prev = _rkSeen.get(key);
+        if (!prev || p.uid === myUid || (prev.uid !== myUid && _rkGames(p) > _rkGames(prev))) _rkSeen.set(key, p);
+      });
+    const sorted = [..._rkSeen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
 
-    const idx1 = sorted.findIndex(p => p.name === p1Name);
-    const idx2 = sorted.findIndex(p => p.name === p2Name);
+    const _lc = v => String(v || "").toLowerCase();
+    const idx1 = sorted.findIndex(p => _lc(p.name) === _lc(p1Name));
+    const idx2 = sorted.findIndex(p => _lc(p.name) === _lc(p2Name));
 
     const all = Object.values(data);
     const pl1 = all.find(p => p.name === p1Name), pl2 = all.find(p => p.name === p2Name);
