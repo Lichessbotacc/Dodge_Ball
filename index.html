@@ -1760,6 +1760,28 @@ window._dobRPC = {
   serverTimestamp: rpcServerTimestamp,
   sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
 };
+// ═══ CLIENT-VERSION: nur die aktuellste Version darf schreiben ═══
+// Jeder Client traegt nach dem Login clientVer/{uid} = CLIENT_VER ein. Die Database Rules lassen JEDEN Schreibzugriff
+// nur zu, wenn dieser Eintrag >= 2 ist -> alte Seiten (ohne diesen Eintrag) koennen nichts mehr schreiben, bis sie neu laden.
+// Bei einer neuen Version: CLIENT_VER hier UND die Zahl in den Rules ("clientVer ... >= 2") erhoehen.
+const CLIENT_VER = 2;
+let _verDone = false;
+(function () {
+  const base = window.dobIsReady;
+  window.dobIsReady = () => base() && _verDone;      // der Rest des Spiels startet erst, wenn die Version eingetragen ist
+  let tries = 0, busy = false;
+  const iv = setInterval(async () => {
+    if (_verDone || busy || !base()) return;
+    busy = true;
+    try { await set(ref(db, "clientVer/" + myUid()), CLIENT_VER); _verDone = true; clearInterval(iv); }
+    catch (e) {
+      console.warn("clientVer write failed", e && e.message);
+      if (++tries >= 4) { _verDone = true; clearInterval(iv); }   // Rules noch nicht eingespielt: trotzdem starten
+    }
+    busy = false;
+  }, 400);
+})();
+
 window.dispatchEvent(new Event("dobRPCReady"));
 </script>
 
