@@ -715,6 +715,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 #newsBtn{position:absolute;top:62px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
+#bugBtn{position:absolute;top:108px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 #newsBtn .newsDot{display:none;width:9px;height:9px;border-radius:50%;background:#ff4d4d;margin-left:8px;vertical-align:middle;box-shadow:0 0 8px #ff4d4d;}
 #newsOverlay{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);}
 #newsBox{width:min(560px,92vw);max-height:84vh;display:flex;flex-direction:column;background:linear-gradient(160deg,rgba(16,18,26,0.98),rgba(8,9,14,0.98));border:1px solid rgba(255,255,255,0.12);border-top:3px solid var(--neon-cyan);border-radius:14px;padding:16px;text-align:left;color:#e6e9f2;box-shadow:0 20px 50px rgba(0,0,0,0.6);}
@@ -837,6 +838,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
          <div id="menu">
       <button id="accountBtn" onclick="openAccountScreen()">👤 Log in / Sign up</button>
       <button id="newsBtn" onclick="openNews()">📰 News<span class="newsDot" id="newsDot"></span></button>
+      <button id="bugBtn" onclick="openBugReport()">🚩 Report</button>
       <!-- LINKS: Global Chat -->
       <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
         <b>💬 Global Chat</b>
@@ -1465,6 +1467,23 @@ async function rpcGetChatBefore(beforeKey, n) {
   const snap = await get(query(ref(db, "chat"), orderByKey(), endBefore(beforeKey), limitToLast(n || 50)));
   return snap.val();
 }
+// ── Bug Reports: schreiben darf jeder eingeloggte Spieler (nur neue Eintraege), lesen/loeschen nur der Admin (Rules!) ──
+//    bugReports/{id} = Text + Infos (leicht), bugMedia/{id} = Bilder/Videos als Data-URL (wird nur bei Bedarf geladen)
+async function rpcBugReportSend(data, media) {
+  const uid = requireUid(); requireNotBanned();
+  const r = push(ref(db, "bugReports"));
+  const rec = { uid, name: String(data.name || "").slice(0, 20), text: String(data.text || "").slice(0, 2000), device: String(data.device || "").slice(0, 12), ua: String(data.ua || "").slice(0, 200), media: media && media.length ? media.length : 0, ts: serverTimestamp() };
+  if (rec.media) {
+    const m = {}; media.slice(0, 4).forEach((x, i) => { m["m" + i] = { type: String(x.type || "").slice(0, 40), name: String(x.name || "").slice(0, 60), data: String(x.data || "") }; });
+    await set(ref(db, "bugMedia/" + r.key), m);   // erst Medien, dann der Report (sichtbar erst wenn alles da ist)
+  }
+  await set(r, rec);
+  return r.key;
+}
+async function rpcModBugRemove(id) {
+  requireAdmin(); if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(id))) throw new Error("Bad id.");
+  return update(ref(db), { ["bugReports/" + id]: null, ["bugMedia/" + id]: null });
+}
 // ── News: lesen darf jeder, schreiben nur der Admin (per Database Rules erzwungen!) ──
 async function rpcNewsPush(data) { requireUid(); return push(ref(db, "news"), data); }
 async function rpcNewsRemove(id) {
@@ -1718,6 +1737,7 @@ window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
+  bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modUnbanDevice: rpcModUnbanDevice,
@@ -3753,15 +3773,36 @@ function detectDeviceType() {
   } catch (e) {}
   return "desktop";
 }
-function deviceIcon(t) {   // farbige SVG-Icons mit Glanz/Glow, klar verschiedene Silhouetten
-  const a = 'width="28" height="22" viewBox="0 0 28 22" style="vertical-align:-6px;filter:drop-shadow(0 0 3px currentColor);" xmlns="http://www.w3.org/2000/svg"';
-  const g = (id, c1, c2) => '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs>';
-  if (t === "mobile")  // Handy: schmal & hoch, Notch, Seitentaste, grün
-    return '<svg ' + a + ' color="#2bff88">' + g("dgM", "#7dffbd", "#00b85c") + '<rect x="8.6" y="0.8" width="10.8" height="20.4" rx="3" fill="#07140d" stroke="#2bff88" stroke-width="1.6"/><rect x="10.3" y="3.6" width="7.4" height="13.6" rx="1" fill="url(#dgM)"/><rect x="12" y="1.9" width="4" height="1.1" rx=".55" fill="#2bff88"/><rect x="12.2" y="18.4" width="3.6" height="1" rx=".5" fill="#2bff88"/><rect x="19.9" y="5" width=".9" height="3" rx=".4" fill="#2bff88"/></svg>';
-  if (t === "tablet")  // iPad um 180° gedreht: Querformat, Home-Button RECHTS, Kamera links, blau
-    return '<svg ' + a + ' color="#4aa8ff">' + g("dgT", "#9fd2ff", "#2a6fd6") + '<rect x="0.8" y="2" width="26.4" height="18" rx="3" fill="#07101f" stroke="#4aa8ff" stroke-width="1.6"/><rect x="3.8" y="4.4" width="18.6" height="13.2" rx="1" fill="url(#dgT)"/><circle cx="2.5" cy="11" r=".7" fill="#4aa8ff"/><circle cx="25" cy="11" r="1.3" fill="none" stroke="#4aa8ff" stroke-width="1"/></svg>';
-  if (t === "desktop") // PC: Monitor mit Fuß, orange
-    return '<svg ' + a + ' color="#ffa63a">' + g("dgD", "#ffd08a", "#e06a00") + '<rect x="1.5" y="0.8" width="25" height="15.4" rx="2" fill="#190f05" stroke="#ffa63a" stroke-width="1.6"/><rect x="3.8" y="3.1" width="20.4" height="10.8" rx=".8" fill="url(#dgD)"/><path d="M11.5 16.2h5l.8 3.2h-6.6z" fill="#ffa63a"/><rect x="7.5" y="19.3" width="13" height="2" rx="1" fill="#ffa63a"/></svg>';
+function deviceIcon(t) {   // detaillierte SVG-Icons in Pill-Badge, klar verschiedene Silhouetten
+  const W = (c, svg, label) => '<span title="' + label + '" style="display:inline-flex;align-items:center;vertical-align:middle;padding:2px 6px;margin-left:2px;border-radius:999px;background:' + c + '22;border:1px solid ' + c + '88;box-shadow:0 0 8px ' + c + '55;">' + svg + '</span>';
+  const S = (w, h, body) => '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg">' + body + '</svg>';
+  const apps = (x, y, cols, rows, gap, sz, c) => { let r = ""; for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) r += '<rect x="' + (x + i * gap) + '" y="' + (y + j * gap) + '" width="' + sz + '" height="' + sz + '" rx="1" fill="' + c + '"/>'; return r; };
+  if (t === "mobile") {   // Handy: hoch & schmal, Dynamic-Island, App-Raster
+    const c = "#2bff88";
+    return W(c, S(14, 26,
+      '<rect x="1" y="1" width="12" height="24" rx="3.4" fill="#06130c" stroke="' + c + '" stroke-width="1.6"/>' +
+      '<rect x="2.6" y="3" width="8.8" height="18.4" rx="1.6" fill="#0f3a24"/>' +
+      '<rect x="5" y="3.8" width="4" height="1.3" rx=".65" fill="#000"/>' +
+      apps(3.6, 7.4, 3, 4, 2.6, 1.8, c) +
+      '<rect x="4.8" y="22.3" width="4.4" height=".9" rx=".45" fill="' + c + '"/>'), "Handy");
+  }
+  if (t === "tablet") {   // iPad um 180° gedreht: Querformat, Home-Button rechts, Kamera links
+    const c = "#4aa8ff";
+    return W(c, S(32, 24,
+      '<rect x="1" y="1" width="30" height="22" rx="3.6" fill="#06101f" stroke="' + c + '" stroke-width="1.6"/>' +
+      '<rect x="4.4" y="3.4" width="21.2" height="17.2" rx="1.2" fill="#0f2a4d"/>' +
+      apps(6.6, 6, 5, 3, 3.9, 2.6, c) +
+      '<circle cx="2.7" cy="12" r=".75" fill="' + c + '"/>' +
+      '<circle cx="28.4" cy="12" r="1.5" fill="none" stroke="' + c + '" stroke-width="1"/>'), "Tablet");
+  }
+  if (t === "desktop") {  // PC: Monitor mit Fuß
+    const c = "#ffa63a";
+    return W(c, S(30, 26,
+      '<rect x="1" y="1" width="28" height="17" rx="2.2" fill="#1a0f04" stroke="' + c + '" stroke-width="1.6"/>' +
+      '<rect x="3.4" y="3.4" width="23.2" height="12.2" rx="1" fill="#4a2a08"/>' +
+      '<rect x="5.5" y="5.5" width="9" height="1.6" rx=".8" fill="' + c + '"/><rect x="5.5" y="9" width="14" height="1.2" rx=".6" fill="' + c + '" opacity=".6"/><rect x="5.5" y="12" width="11" height="1.2" rx=".6" fill="' + c + '" opacity=".6"/>' +
+      '<path d="M12 18h6l1 4h-8z" fill="' + c + '"/><rect x="8" y="22" width="14" height="2.2" rx="1.1" fill="' + c + '"/>'), "PC");
+  }
   return "";
 }
 function saveAccountLocal() {
@@ -7973,6 +8014,7 @@ canvas.addEventListener("touchstart", e => {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
+  "🚩 Report":"🚩 Melden","✍️ New report":"✍️ Neuer Report","📋 All reports":"📋 Alle Reports","What happened? What did you do right before? (device / browser help too)":"Was ist passiert? Was hast du kurz davor gemacht? (Gerät / Browser hilft auch)","Describe the bug…":"Beschreibe den Bug…","📎 Add image / video":"📎 Bild / Video hinzufügen","up to 3 images + 1 video (max. 4 MB)":"bis zu 3 Bilder + 1 Video (max. 4 MB)","Send report":"Report senden","Please describe the bug.":"Bitte beschreibe den Bug.","Please wait a moment before sending another report.":"Bitte warte kurz, bevor du einen weiteren Report sendest.","Sending…":"Sende…","✅ Thank you! Your report was sent.":"✅ Danke! Dein Report wurde gesendet.","Only images or videos.":"Nur Bilder oder Videos.","Only 1 video allowed.":"Nur 1 Video erlaubt.","Video too large (max. 4 MB). Please send a shorter clip.":"Video zu groß (max. 4 MB). Bitte sende einen kürzeren Clip.","No reports yet.":"Noch keine Reports.",
   "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Total:":"Gesamt:","Survived:":"Überlebt:",
   "ELO LIVE":"ELO LIVE","BEST TV":"BESTES TV","RANDOM TV":"ZUFALLS-TV","TARGET TV":"ZIEL-TV","▶ RESUME":"▶ WEITER",
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
@@ -9172,6 +9214,152 @@ async function modDeleteChatMsg(key) {
   function schedule() { setTimeout(tryShow, UPDATE_POPUP_MS); }
   schedule();
   if (/[?&]updatepopup=1/.test(location.search)) setTimeout(show, 800);
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  REPORT BUG (Button unter News)
+//  Spieler: Text + bis zu 3 Bilder + 1 kurzes Video. Mod/Admin: sieht alle Reports (Tab "All reports").
+//  Bilder werden vor dem Senden verkleinert; Video max. 4 MB.
+// ═══════════════════════════════════════════════════════════════════
+(function () {
+  const MAX_IMG = 3, MAX_VID_BYTES = 4 * 1024 * 1024, COOLDOWN = 120000;
+  let files = [];          // { type, name, data }
+  let reports = null, unsub = null, tab = "new";
+  const $ = id => document.getElementById(id);
+  const isAdmin = () => { try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch (e) { return false; } };
+  const rpc = () => window._dobRPC;
+
+  function fileToDataURL(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); }); }
+  function shrinkImage(f) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(f), img = new Image();
+      img.onload = () => {
+        const M = 1280, k = Math.min(1, M / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        res(c.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("bad image")); };
+      img.src = url;
+    });
+  }
+  function msg(t, ok) { const m = $("bugMsg"); if (m) { m.style.color = ok ? "#8fd18f" : "#ff8a8a"; m.textContent = t; } }
+
+  function renderThumbs() {
+    const box = $("bugThumbs"); if (!box) return; box.textContent = "";
+    files.forEach((f, i) => {
+      const w = document.createElement("div"); w.style.cssText = "position:relative;width:70px;height:70px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.2);background:#000;";
+      const el = document.createElement(f.type.startsWith("video") ? "video" : "img"); el.src = f.data; el.style.cssText = "width:100%;height:100%;object-fit:cover;";
+      const x = document.createElement("button"); x.textContent = "✕"; x.style.cssText = "position:absolute;top:2px;right:2px;margin:0;padding:0 5px;font-size:12px;line-height:18px;";
+      x.onclick = () => { files.splice(i, 1); renderThumbs(); };
+      w.appendChild(el); w.appendChild(x); box.appendChild(w);
+    });
+  }
+  async function onPick(e) {
+    msg("");
+    for (const f of Array.from(e.target.files || [])) {
+      try {
+        if (f.type.startsWith("image/")) {
+          if (files.filter(x => x.type.startsWith("image")).length >= MAX_IMG) { msg("Max. " + MAX_IMG + " images.", false); continue; }
+          files.push({ type: "image/jpeg", name: f.name, data: await shrinkImage(f) });
+        } else if (f.type.startsWith("video/")) {
+          if (files.some(x => x.type.startsWith("video"))) { msg("Only 1 video allowed.", false); continue; }
+          if (f.size > MAX_VID_BYTES) { msg("Video too large (max. 4 MB). Please send a shorter clip.", false); continue; }
+          files.push({ type: f.type, name: f.name, data: await fileToDataURL(f) });
+        } else msg("Only images or videos.", false);
+      } catch (err) { msg("Could not read file.", false); }
+    }
+    e.target.value = ""; renderThumbs();
+  }
+  async function send() {
+    const ta = $("bugText"), btn = $("bugSend"), text = ta.value.trim();
+    if (!text) { msg("Please describe the bug.", false); return; }
+    let last = 0; try { last = Number(localStorage.getItem("dob_bug_last")) || 0; } catch (e) {}
+    if (Date.now() - last < COOLDOWN) { msg("Please wait a moment before sending another report.", false); return; }
+    btn.disabled = true; msg("Sending…", true);
+    try {
+      await rpc().bugReportSend({ name: (typeof onlineAccount !== "undefined" && onlineAccount && onlineAccount.name) || "", text,
+        device: (typeof detectDeviceType === "function" ? detectDeviceType() : ""), ua: navigator.userAgent }, files);
+      try { localStorage.setItem("dob_bug_last", String(Date.now())); } catch (e) {}
+      ta.value = ""; files = []; renderThumbs(); msg("✅ Thank you! Your report was sent.", true);
+    } catch (e) { msg("Could not send (" + ((e && (e.code || e.message)) || "error") + ").", false); }
+    btn.disabled = false;
+  }
+
+  function startAdminList() {
+    if (unsub || !rpc() || !isAdmin()) return;
+    unsub = rpc().on("bugReports", d => { reports = d || {}; updateTabLabel(); if (tab === "all") renderAll(); });
+  }
+  function updateTabLabel() { const t = $("bugTabAll"); if (t) t.textContent = "📋 All reports" + (reports ? " (" + Object.keys(reports).length + ")" : ""); }
+  function setTab(t) {
+    tab = t; $("bugNewPane").style.display = t === "new" ? "block" : "none"; $("bugAllPane").style.display = t === "all" ? "block" : "none";
+    $("bugTabNew").style.opacity = t === "new" ? 1 : .55; $("bugTabAll").style.opacity = t === "all" ? 1 : .55;
+    if (t === "all") { startAdminList(); renderAll(); }
+  }
+  function renderAll() {
+    const list = $("bugList"); if (!list) return; list.textContent = "";
+    const items = Object.entries(reports || {}).filter(([, r]) => r && r.text).sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0));
+    if (!items.length) { const e = document.createElement("div"); e.style.color = "#8b93a6"; e.textContent = reports ? "No reports yet." : "Loading…"; list.appendChild(e); return; }
+    items.forEach(([id, r]) => {
+      const d = document.createElement("div"); d.style.cssText = "border:1px solid rgba(255,255,255,.12);border-left:3px solid #ff9f43;border-radius:8px;padding:10px;background:rgba(255,255,255,.03);";
+      const h = document.createElement("div"); h.style.cssText = "font-size:12px;color:#8b93a6;margin-bottom:4px;word-break:break-all;";
+      h.textContent = "🚩 " + (r.name || "?") + " · " + (r.device || "?") + " · " + (r.ts ? new Date(r.ts).toLocaleString() : "") + " · " + r.uid;
+      const t = document.createElement("div"); t.style.cssText = "font-size:14px;white-space:pre-wrap;word-break:break-word;"; t.textContent = r.text;
+      d.appendChild(h); d.appendChild(t);
+      if (r.ua) { const u = document.createElement("div"); u.style.cssText = "font-size:10px;color:#6b7386;margin-top:4px;word-break:break-all;"; u.textContent = r.ua; d.appendChild(u); }
+      const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;";
+      const mm = document.createElement("div"); mm.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;";
+      if (r.media) {
+        const b = document.createElement("button"); b.textContent = "🖼 Show media (" + r.media + ")"; b.style.cssText = "margin:0;padding:4px 10px;font-size:12px;";
+        b.onclick = async () => {
+          b.disabled = true; b.textContent = "Loading…";
+          try {
+            const m = (await rpc().get("bugMedia/" + id)) || {}; mm.textContent = "";
+            Object.values(m).forEach(x => {
+              if (!x || typeof x.data !== "string") return;
+              const isV = /^data:video\//.test(x.data), isI = /^data:image\//.test(x.data); if (!isV && !isI) return;
+              const el = document.createElement(isV ? "video" : "img"); el.src = x.data; if (isV) el.controls = true;
+              el.style.cssText = "max-width:100%;max-height:260px;border-radius:8px;border:1px solid rgba(255,255,255,.2);cursor:" + (isV ? "default" : "zoom-in") + ";";
+              if (isI) el.onclick = () => { const w = window.open(); if (w) { w.document.write('<body style="margin:0;background:#000"><img src="' + x.data + '" style="max-width:100%">'); } };
+              mm.appendChild(el);
+            });
+            b.style.display = "none";
+          } catch (e) { b.disabled = false; b.textContent = "Failed – retry"; }
+        };
+        row.appendChild(b);
+      }
+      const del = document.createElement("button"); del.textContent = "🗑 Delete"; del.style.cssText = "margin:0;padding:4px 10px;font-size:12px;";
+      del.onclick = async () => { if (!confirm("Delete this report?")) return; try { await rpc().modBugRemove(id); } catch (e) { alert("Failed: " + e.message); } };
+      row.appendChild(del); d.appendChild(row); d.appendChild(mm); list.appendChild(d);
+    });
+  }
+
+  window.openBugReport = function () {
+    let ov = $("bugOverlay");
+    if (!ov) {
+      ov = document.createElement("div"); ov.id = "bugOverlay";
+      ov.style.cssText = "position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.7);";
+      ov.innerHTML = '<div style="width:min(600px,94vw);max-height:88vh;display:flex;flex-direction:column;background:linear-gradient(160deg,rgba(16,18,26,.98),rgba(8,9,14,.98));border:1px solid rgba(255,255,255,.12);border-top:3px solid #ff9f43;border-radius:14px;padding:16px;text-align:left;color:#e6e9f2;box-shadow:0 20px 50px rgba(0,0,0,.6);">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🚩 Report</b><button id="bugX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+        + '<div id="bugTabs" style="display:none;gap:8px;margin:10px 0 0;"><button id="bugTabNew" style="margin:0;padding:6px 12px;font-size:13px;">✍️ New report</button><button id="bugTabAll" style="margin:0;padding:6px 12px;font-size:13px;">📋 All reports</button></div>'
+        + '<div id="bugNewPane" style="overflow-y:auto;margin-top:10px;">'
+        + '<div style="font-size:13px;color:#aab2c5;margin-bottom:6px;">What happened? What did you do right before? (device / browser help too)</div>'
+        + '<textarea id="bugText" maxlength="2000" rows="6" placeholder="Describe the bug…" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:8px;font-size:14px;resize:vertical;background:rgba(255,255,255,.05);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></textarea>'
+        + '<div id="bugThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"></div>'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label for="bugFile" style="cursor:pointer;padding:7px 12px;font-size:13px;border:1px solid rgba(255,255,255,.25);border-radius:8px;">📎 Add image / video</label><input id="bugFile" type="file" accept="image/*,video/*" multiple style="display:none;"><span style="font-size:11px;color:#8b93a6;">up to 3 images + 1 video (max. 4 MB)</span></div>'
+        + '<div id="bugMsg" style="min-height:18px;font-size:13px;margin:8px 0;"></div>'
+        + '<button id="bugSend" style="margin:0;padding:9px 20px;font-size:14px;">Send report</button></div>'
+        + '<div id="bugAllPane" style="display:none;overflow-y:auto;margin-top:10px;"><div id="bugList" style="display:flex;flex-direction:column;gap:8px;"></div></div></div>';
+      ov.addEventListener("click", e => { if (e.target === ov) ov.style.display = "none"; });
+      document.body.appendChild(ov);
+      $("bugX").onclick = () => { ov.style.display = "none"; };
+      $("bugFile").onchange = onPick; $("bugSend").onclick = send;
+      $("bugTabNew").onclick = () => setTab("new"); $("bugTabAll").onclick = () => setTab("all");
+    }
+    ov.style.display = "flex";
+    if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
+  };
 })();
 </script>
 </body>
