@@ -1682,6 +1682,8 @@ async function rpcModDeleteBotFlag(uid) {
 async function rpcRegisterDevice(ids) {
   requireNotBanned(); const uid = requireUid(); ids = _devList(ids);
   if (!ids.length) throw new Error("No device id.");
+  // Frisch registrierte Accounts: das Auth-Token muss erst bei der Realtime Database ankommen, sonst scheitert der erste Schreibzugriff.
+  try { await auth.currentUser.getIdToken(true); } catch (e) {}
   await Promise.all(ids.map(id => set(ref(db, "deviceIds/" + uid + "/" + id), true)));
 }
 // FAIL-CLOSED: Fehler werden NICHT mehr verschluckt (frueher: catch -> false = "nicht gebannt"). Der Aufrufer muss den Fehler behandeln.
@@ -1952,7 +1954,7 @@ function renderPresence(playersData) {
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              class="pr-row"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
-          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}</span>
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}${p.device ? ' <span title="' + escapeHtml(p.device) + '" style="font-size:12px;opacity:.85;">' + deviceIcon(p.device) + '</span>' : ''}</span>
           <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
       `;
@@ -3742,6 +3744,16 @@ try {
   if (onlineAccount) onlineAccount = sanitizeAccount(onlineAccount);
 } catch(e) {}
 
+// Geraetetyp (fuer das Icon in der Spielerliste): mobile / tablet / desktop
+function detectDeviceType() {
+  try {
+    const ua = navigator.userAgent || "", touch = (navigator.maxTouchPoints || 0) > 1;
+    if (/iPad|Tablet|PlayBook|Silk/i.test(ua) || (/Macintosh/.test(ua) && touch) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) return "tablet";
+    if (/iPhone|iPod|Android.*Mobile|Mobile|Opera Mini|IEMobile/i.test(ua)) return "mobile";
+  } catch (e) {}
+  return "desktop";
+}
+function deviceIcon(t) { return t === "mobile" ? "📱" : t === "tablet" ? "📲" : t === "desktop" ? "💻" : ""; }
 function saveAccountLocal() {
   if (onlineAccount) localStorage.setItem("dobAccount", JSON.stringify(onlineAccount));
 }
@@ -3792,6 +3804,7 @@ async function pushAccountToFirebase() {
     leagueWeek: onlineAccount.leagueWeek ?? null,
     leagueGroup: onlineAccount.leagueGroup ?? null,
     leagueLastResult: onlineAccount.leagueLastResult ?? null,
+    device: detectDeviceType(),
     updatedAt: Date.now()
   });
   // Maintain the name → uid lookup index so leaderboard / profile /
@@ -4502,12 +4515,22 @@ async function createAccount() {
 
     // Geraet registrieren, BEVOR irgendwelche Spielerdaten geschrieben werden. Die Database Rules erlauben players/{uid} und usernames/{name}
     // fuer neue Accounts nur, wenn deviceIds/{uid} existiert - und das wird auf gebannten Geraeten serverseitig abgelehnt.
-    try { await ensureDeviceRegistered(); }
-    catch (devErr) {
+    let devErr = null;
+    for (let _i = 0; _i < 4; _i++) {
+      try { window._devReg = null; await ensureDeviceRegistered(); devErr = null; break; }
+      catch (e) {
+        devErr = e;
+        if (/permission_denied/i.test(String((e && (e.code || e.message)) || e)) && _i >= 1) break;   // nach 2 Versuchen als echter Ban werten (erster Versuch kann am frischen Token scheitern)
+        await new Promise(r => setTimeout(r, 900));
+      }
+    }
+    if (devErr) {
+      console.warn("device register failed", devErr);
       try { await window._dobAuth.deleteAuthUser(); } catch (e2) {}      // frisch erstellten Auth-User wieder entfernen
       myUid = (window.dobMyUid && window.dobMyUid()) || null;
-      const denied = devErr && (devErr.code === "PERMISSION_DENIED" || /permission_denied/i.test(String(devErr.message || devErr)));
-      info.textContent = denied ? "This device has been banned. You cannot create a new account." : "Could not register your device. Please try again.";
+      const denied = /permission_denied/i.test(String((devErr && (devErr.code || devErr.message)) || devErr));
+      info.textContent = denied ? "This device has been banned. You cannot create a new account."
+        : "Could not register your device (" + ((devErr && (devErr.code || devErr.message)) || "unknown") + "). Please try again.";
       info.style.color = "#f44";
       return;
     }
