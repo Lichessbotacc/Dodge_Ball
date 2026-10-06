@@ -5577,6 +5577,7 @@ function logEloGame(oppUid, d, isBot) {
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
   onlineResultHandled = true;
+  window._lastMatchSecs = Math.max(0, (Date.now() - startTime) / 1000);
   stopViewerCount();
   clearActiveMatchMarker();
   armOnlineDisconnect(false);
@@ -5794,6 +5795,96 @@ async function dbSetBotPlayer(data) {
 }
 
 
+// ── Bot-Chat nach dem Match (lokal, nicht gespeichert) ──
+let botChatToken = 0, botUserTyped = false, botUsed = new Set();
+const BOT_CHAT = {
+  won: {   // Bot hat gewonnen
+    short: ["that was quick 😅", "over already? gg", "speedrun, gg", "blink and it's over lol", "that was fast, gg"],
+    mid:   ["gg, solid match", "gg wp", "ez 😎", "gg, nice try"],
+    long:  ["that was a long one, gg", "phew, finally 😮‍💨 gg", "you almost had me, gg", "my fingers hurt 😮‍💨 gg"],
+    ask:   ["want a rematch?", "rematch? or are you scared 😏", "wanna try a revanche?", "up for a rematch?", "revanche?"]
+  },
+  lost: {  // Bot hat verloren
+    short: ["wow, that was fast, gg", "ouch, that went quick 😅", "ok I wasn't ready lol", "ugh, that was over fast"],
+    mid:   ["gg, well played", "nice one, gg", "ok that was clean", "ouch, gg 😅"],
+    long:  ["damn, that was close, gg", "long fight, you earned it", "I was so close 😤 gg", "my fingers hurt 😮‍💨 gg"],
+    ask:   ["rematch? I want revenge", "revanche? I'll get you this time", "rematch?", "one more? I need a revanche", "rematch? I'm warmed up now"]
+  },
+  nudge: ["so... rematch?", "still there? 👀", "come on, one more", "I'm waiting 😴", "revanche? 🙃", "don't leave me hanging"]
+};
+function botPick(a) {
+  const fresh = a.filter(x => !botUsed.has(x));
+  const arr = fresh.length ? fresh : a;
+  const v = arr[Math.floor(Math.random() * arr.length)];
+  botUsed.add(v); return v;
+}
+function postChatAddLocal(name, text, mine) {
+  const box = document.getElementById("postChatMsgs"); if (!box) return;
+  const row = document.createElement("div");
+  const nm = document.createElement("b"); nm.setAttribute("translate", "no");
+  nm.textContent = dn(name) + ": "; nm.style.color = mine ? "#00ff88" : "#ff8844";
+  const tx = document.createElement("span"); tx.setAttribute("translate", "no");
+  tx.textContent = text; tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+  row.append(nm, tx); box.appendChild(row); box.scrollTop = box.scrollHeight;
+}
+function botSay(text, delay, onlyIfQuiet) {
+  const tk = botChatToken;
+  setTimeout(() => {
+    const wo = document.getElementById("winnerOverlay");
+    if (tk !== botChatToken || !onlineVsBot || !wo || wo.style.display === "none") return;
+    if (onlyIfQuiet && botUserTyped) return;
+    postChatAddLocal("Online Bot", text, false);
+  }, delay);
+}
+function botPostChatStart(botWon, secs) {
+  botUserTyped = false; botUsed = new Set();
+  const set = botWon ? BOT_CHAT.won : BOT_CHAT.lost;
+  const s = Number(secs) || 0;
+  const len = s < 12 ? "short" : (s < 35 ? "mid" : "long");
+  botSay(botPick(set[len]), 900 + Math.random() * 600);
+  // Zwischenstand gegen den Bot / Siegesserie als optionaler Extra-Kommentar
+  let extra = null;
+  try {
+    const sc = JSON.parse(localStorage.getItem("h2h_bot_" + myUid) || "null");
+    if (sc && (sc.me + sc.bot) >= 2 && Math.random() < 0.6) {
+      if (sc.me === sc.bot) extra = `we're tied ${sc.me}-${sc.bot} now 😮`;
+      else if (sc.bot > sc.me) extra = botWon ? `that's ${sc.bot}-${sc.me} for me 😏` : `I still lead ${sc.bot}-${sc.me} though`;
+      else extra = botWon ? `you still lead ${sc.me}-${sc.bot} though` : `ugh, you lead ${sc.me}-${sc.bot} now`;
+    }
+    const st = onlineAccount && onlineAccount.currentStreak;
+    if (!botWon && st >= 3 && Math.random() < 0.7) extra = `${st} wins in a row?! 🔥`;
+  } catch (e) {}
+  let t = 2600 + Math.random() * 600;
+  if (extra) { botSay(extra, t); t += 1500 + Math.random() * 500; }
+  botSay(botPick(set.ask), t);
+  // Wenn man nichts schreibt: spaeter freundlich nachhaken
+  botSay(botPick(BOT_CHAT.nudge), 15000 + Math.random() * 3000, true);
+  botSay(botPick(BOT_CHAT.nudge), 32000 + Math.random() * 4000, true);
+}
+function botPostChatReply(userText) {
+  const tk = botChatToken, t = userText.toLowerCase();
+  const lost = (window._botChatBotWon === false), R = (re) => re.test(t);
+  botUserTyped = true;
+  if (R(/\b(rematch|revanche|revenge|again|yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet|one more|run it)\b/)) {
+    botSay(botPick(["let's go 🔥", "bet, starting!", "alright, get ready", "here we go"]), 700);
+    setTimeout(() => {
+      const wo = document.getElementById("winnerOverlay");
+      if (tk === botChatToken && onlineVsBot && wo && wo.style.display !== "none") requestRematch();
+    }, 1800);
+  }
+  else if (R(/\b(no|nope|nah|later|bye|gtg|cya)\b/)) botSay(botPick(["ok, see you 👋", "alright, gg", "fair enough", "aww, ok 😢"]), 800);
+  else if (R(/\b(noob|bad|trash|garbage|sucks?|bot)\b/)) botSay(botPick(["ouch 😅", "say that after a rematch", "rude 😤", "bold words 😏"]), 900);
+  else if (R(/\b(ez|easy|lol ez)\b/)) botSay(lost ? botPick(["lucky 😤", "wait for the rematch"]) : botPick(["lol okay", "easy for who? 😏"]), 900);
+  else if (R(/\b(lag|laggy|ping)\b/)) botSay(botPick(["sure, blame the lag 😏", "lag, huh? 😂", "classic excuse"]), 900);
+  else if (R(/\b(close|almost|so close)\b/)) botSay(botPick(["yeah, that was close", "so close 😮", "next one decides"]), 900);
+  else if (R(/\b(gl|good luck|glhf|hf)\b/)) botSay(botPick(["gl hf 🤝", "you too"]), 800);
+  else if (R(/\b(thx|thanks|thank you|ty)\b/)) botSay(botPick(["np", "anytime 🙂", "no problem"]), 800);
+  else if (R(/\b(hi|hey|hello|hallo|yo|sup)\b/)) botSay(botPick(["hey 👋", "yo", "hi there"]), 800);
+  else if (R(/\b(gg|wp|nice|good|well|great)\b/)) botSay(botPick(["gg 🤝", "thanks, you too", "gg wp"]), 800);
+  else if (R(/(lol|haha|lmao|xd|😂|🤣)/)) botSay(botPick(["😄", "haha", "lmao"]), 800);
+  else botSay(botPick(["haha", "fair enough", "rematch?", "😄", "true", "hmm 🤔"]), 900 + Math.random() * 700);
+}
+
 function showWinnerOverlay(winnerName, eloChange, eloRows) {
   document.getElementById("winnerText").innerHTML =
     `🏆 Winner: <span style="color:gold">${escapeHtml(dn(winnerName))}</span>`;
@@ -5820,9 +5911,12 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
   mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
 
-  document.getElementById("postChat").style.display = onlineVsBot ? "none" : "flex";
-  document.getElementById("winnerOverlay").classList.toggle("nochat", !!onlineVsBot);
+  document.getElementById("postChat").style.display = "flex";
+  document.getElementById("winnerOverlay").classList.remove("nochat");
   document.getElementById("postChatMsgs").innerHTML = "";
+  botChatToken++;
+  window._botChatBotWon = eloChange < 0;
+  if (onlineVsBot) botPostChatStart(eloChange < 0, window._lastMatchSecs);
   document.getElementById("winnerOverlay").style.display = "flex";
 
   if (!onlineVsBot && fbReady && onlineMatchId) {
@@ -5903,7 +5997,14 @@ function handlePostMatch(d) {
 function sendPostChat() {
   const inp = document.getElementById("postChatInput");
   const text = inp.value.trim();
-  if (!text || !fbReady || !onlineMatchId || onlineVsBot || Date.now() - lastPostChat < 600) return;
+  if (onlineVsBot) {
+    if (!text || Date.now() - lastPostChat < 600) return;
+    lastPostChat = Date.now(); inp.value = "";
+    postChatAddLocal(onlineAccount.name, text.slice(0, 200), true);
+    botPostChatReply(text);
+    return;
+  }
+  if (!text || !fbReady || !onlineMatchId || Date.now() - lastPostChat < 600) return;
   lastPostChat = Date.now();
   inp.value = "";
   RPC.setMatchPath(onlineMatchId, "postChat/" + Date.now() + "_" + onlineRole,
