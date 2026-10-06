@@ -3169,22 +3169,17 @@ function clampEloChange(delta) {
 // ───────── GLICKO-2 (identisch zu Lichess: tau 0.75, Start 1500 / RD 500 / Vol 0.09, RD 45..500) ─────────
 // Alle Spieler (auch neue Accounts) rechnen mit der Lichess-Mindest-RD 45 ("etabliert") -> keine Provisional-Spruenge, Ergebnis liegt natuerlich bei +1..+10 / -1..-10
 const G2 = { TAU: 0.75, DEF_RD: 45, DEF_VOL: 0.09, MIN_RD: 45, MAX_RD: 45, PERIODS_PER_DAY: 0.21436, SCALE: 173.7178 };
-// Nullsummen-Verteilung: pro Spiel werden insgesamt IMMER 10 Punkte verteilt (Gewinner +W, Verlierer -(10-W)).
-// W kommt aus der Glicko-2-Siegerwartung wie bei Lichess (g(RD) mit RD 45, E = 1/(1+e^(-g*(muA-muB)))):
-// je unwahrscheinlicher der Sieg, desto groesser W. Beide Clients rechnen mit denselben zwei Ratings -> gleiches Ergebnis.
-const ELO_POOL = 10, ELO_MIN_SHARE = 1;
-function glickoWinnerShare(winnerElo, loserElo) {
-  const phi = G2.DEF_RD / G2.SCALE;
-  const g = 1 / Math.sqrt(1 + 3 * phi * phi / (Math.PI * Math.PI));
-  const dMu = ((Number(winnerElo) || 1500) - (Number(loserElo) || 1500)) / G2.SCALE;
-  const E = 1 / (1 + Math.exp(-g * dMu));                       // erwartete Siegchance des Gewinners
-  const W = Math.round(Math.round(ELO_POOL * (1 - E) * 1e6) / 1e6);   // auf 6 Stellen gerundet -> alle Browser/Engines liefern dasselbe W
-  return Math.max(ELO_MIN_SHARE, Math.min(ELO_POOL - ELO_MIN_SHARE, W));   // 1..9, Rest geht an den Verlierer
-}
-// Aenderung fuer 'me' (Sieg: +W, Niederlage: -(10-W))
+// Standard-Elo (symmetrisch, ohne New-Account-Boost): E = 1/(1+10^((Gegner-Ich)/400)), Aenderung = K*(Ergebnis-E).
+// Sieger bekommt +K*(1-E_sieger), Verlierer verliert genau den gleichen Betrag. Favorit gewinnt -> wenig, Underdog gewinnt -> viel.
+// Alle Spieler (auch neue Accounts) nutzen dasselbe K. K=10 -> maximal +-10 pro Spiel (passt zu den Database-Rules).
+const ELO_K = 10;
+function eloExpected(ra, rb) { return 1 / (1 + Math.pow(10, (rb - ra) / 400)); }
+// Aenderung fuer 'me' (Sieg: +K*(1-E), Niederlage: -K*E), auf ganze Punkte gerundet, mindestens +-1
 function glickoResult(me, opp, won) {
-  const W = won ? glickoWinnerShare(me.elo, opp.elo) : glickoWinnerShare(opp.elo, me.elo);
-  const d = won ? W : -(ELO_POOL - W);
+  const E = eloExpected(Number(me.elo) || 1500, Number(opp.elo) || 1500);
+  const raw = Math.round((won ? ELO_K * (1 - E) : -ELO_K * E) * 1e6) / 1e6;   // 6 Stellen -> beide Clients rechnen identisch
+  let d = Math.round(raw);
+  if (d === 0) d = won ? 1 : -1;
   return { delta: clampEloChange(d), rd: G2.DEF_RD, vol: G2.DEF_VOL };
 }
 function normalEloChange(winnerElo, loserElo) {   // Fallback ohne Account-Objekte
