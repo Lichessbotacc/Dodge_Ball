@@ -7565,7 +7565,7 @@ async function startOnlineTV(targetUid) {
   const homeIv = setInterval(placeHome, 400);
   onlineUnsubscribes.push(() => { clearInterval(homeIv); if (homeEl) { homeEl.style.left = ""; homeEl.style.top = ""; } });
   const hideWinner = () => { const o = document.getElementById("tvWinnerOverlay"); if (o) o.remove(); const sb = document.getElementById("tvStallBanner"); if (sb) sb.remove(); };
-  const showWinner = (winner, scoreTxt, survTime) => {
+  const showWinner = (winner, scoreTxt, survTime, eloRows) => {
     hideWinner();
     const o = document.createElement("div");
     o.id = "tvWinnerOverlay";
@@ -7593,6 +7593,19 @@ async function startOnlineTV(targetUid) {
     }
     o.append(title, big);
     if (scoreTxt) { const s = document.createElement("div"); s.style.cssText = "margin-top:8px;font-size:15px;opacity:.8;"; s.setAttribute("translate", "no"); s.textContent = scoreTxt; o.append(s); }
+    if (eloRows && eloRows.length) {   // Elo-Aenderung beider Spieler (Sieger +, Verlierer -)
+      const box = document.createElement("div");
+      box.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12);display:flex;gap:28px;justify-content:center;flex-wrap:wrap;font-size:16px;";
+      eloRows.forEach(r => {
+        const c = document.createElement("div");
+        c.setAttribute("translate", "no");
+        const nm = document.createElement("div"); nm.style.cssText = "font-size:13px;opacity:.75;margin-bottom:2px;"; nm.textContent = r.name;
+        const dl = document.createElement("div"); dl.style.cssText = "font-size:24px;font-weight:800;color:" + (r.delta >= 0 ? "#00ff88" : "#ff5566") + ";"; dl.textContent = (r.delta >= 0 ? "+" : "−") + Math.abs(r.delta) + " ELO";
+        const nw = document.createElement("div"); nw.style.cssText = "font-size:12px;opacity:.65;"; nw.textContent = r.from + " → " + r.to;
+        c.append(nm, dl, nw); box.append(c);
+      });
+      o.append(box);
+    }
     document.body.appendChild(o);
   };
   const setStall = (on) => {
@@ -7787,7 +7800,23 @@ async function startOnlineTV(targetUid) {
         if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
         const winner = data && data.status === "done" && data.winner ? data.winner : null;
         const sc = data && Number.isFinite(data.p1Score) && Number.isFinite(data.p2Score) ? data.p1Score + " - " + data.p2Score : "";
-        showWinner(winner, sc);
+        let eloRows = null;
+        try {
+          const mm = Object.assign({}, curMeta || {}, data || {});
+          const e1 = Math.round(Number(mm.p1elo) || 1500), e2 = Math.round(Number(mm.p2elo) || 1500);
+          let w = null;   // 1 = Spieler 1 gewinnt, 2 = Spieler 2
+          if (winner) w = winner === mm.p1 ? 1 : (winner === mm.p2 ? 2 : null);
+          else if (data && data.status === "abandoned" && data.forfeitBy) w = data.forfeitBy === mm.p1uid ? 2 : (data.forfeitBy === mm.p2uid ? 1 : null);
+          if (w && mm.p1 && mm.p2) {
+            const d1 = glickoResult({ elo: e1 }, { elo: e2 }, w === 1).delta;
+            const d2 = glickoResult({ elo: e2 }, { elo: e1 }, w === 2).delta;
+            eloRows = [
+              { name: dn(mm.p1), delta: d1, from: e1, to: Math.max(100, e1 + d1) },
+              { name: dn(mm.p2), delta: d2, from: e2, to: Math.max(100, e2 + d2) }
+            ];
+          }
+        } catch (e) {}
+        showWinner(winner, sc, null, eloRows);
         if (winner && curMeta && curMeta.p1uid && curMeta.p2uid) {
           const m0 = curMeta, hh = document.getElementById("onlineScoreHUD");
           getHeadToHeadScore(m0.p1uid, m0.p2uid).then(r => { if (hh) hh.textContent = (r[m0.p1uid] || 0) + " - " + (r[m0.p2uid] || 0); }).catch(() => {});
