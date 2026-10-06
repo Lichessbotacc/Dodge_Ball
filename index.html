@@ -1445,6 +1445,11 @@ async function rpcModSetDailyPick(day, idx) {
   idx = Number(idx); if (!Number.isInteger(idx) || idx < 0 || idx > 500) throw new Error("Bad mode.");
   return set(ref(db, "dailyPick/" + day), idx);
 }
+// Admin: loest bei ALLEN geoeffneten Seiten das Pop-up "Bitte Seite neu laden" aus (Knoten updateNotice/ts)
+async function rpcModBroadcastReload() {
+  requireAdmin();
+  return set(ref(db, "updateNotice"), { ts: Date.now(), by: MOD_ADMIN_UID_RPC });
+}
 async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
@@ -1734,6 +1739,7 @@ async function rpcSendAppeal(name, text) {
 }
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
+  modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
@@ -7922,6 +7928,11 @@ canvas.addEventListener("touchstart", e => {
       }
     },
 
+    "updateNotice": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.uid === '6O1c9OKTRlbwzDlPuBG2ceMRdz63'"
+    },
+
     "usernames": {
       "$name": {
         ".read": true,
@@ -9194,12 +9205,11 @@ async function modDeleteChatMsg(key) {
 </script>
 <script>
 // ═══════════════════════════════════════════════
-//  UPDATE-HINWEIS: jede Stunde ein Pop-up "Bitte Seite neu laden" (mit Reload-Knopf)
-//  Test: Seite mit ?updatepopup=1 oeffnen -> Pop-up kommt sofort. Intervall: UPDATE_POPUP_MS.
+//  UPDATE-HINWEIS: KEIN Automatik-Timer mehr. Nur der Admin loest das Pop-up "Bitte Seite neu laden" per Button
+//  ("🔄 Update-Popup" in der Admin-Leiste) bei allen aus: schreibt updateNotice/ts, alle Clients hoeren darauf.
 //  Waehrend eines laufenden 1v1-Matches wird es zurueckgehalten (Reload = Aufgabe) und erscheint danach.
 // ═══════════════════════════════════════════════
 (function () {
-  const UPDATE_POPUP_MS = 60 * 60 * 1000;
   const T = s => (typeof tr === "function" ? tr(s) : s);
   try { if (typeof DICT !== "undefined" && DICT.de) Object.assign(DICT.de, {
     "New update available": "Neues Update verfügbar",
@@ -9224,9 +9234,40 @@ async function modDeleteChatMsg(key) {
     document.body.appendChild(ov);
   }
   function tryShow() { if (inMatch()) { setTimeout(tryShow, 5000); return; } show(); }
-  function schedule() { setTimeout(tryShow, UPDATE_POPUP_MS); }
-  schedule();
-  if (/[?&]updatepopup=1/.test(location.search)) setTimeout(show, 800);
+  // Broadcast-Listener: erster Snapshot = Ausgangsstand (kein Pop-up beim Seitenstart), jede spaetere Aenderung -> Pop-up
+  let _base, _got = false, _sub = false;
+  function isAdmin() { try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch (e) { return false; } }
+  function subscribe() {
+    if (_sub) return;
+    try {
+      if (!window._dobRPC || !window.dobIsReady || !window.dobIsReady()) return;
+      _sub = true;
+      window._dobRPC.on("updateNotice", d => {
+        const ts = d && Number(d.ts) || 0;
+        if (!_got) { _got = true; _base = ts; return; }
+        if (ts && ts !== _base) { _base = ts; if (!isAdmin()) tryShow(); }
+      });
+    } catch (e) { _sub = false; }
+  }
+  setInterval(subscribe, 2000); subscribe();
+  // Admin-Button
+  window.modBroadcastReload = async function () {
+    if (!isAdmin()) return;
+    if (!confirm("Pop-up \"Bitte Seite neu laden\" jetzt bei ALLEN Spielern anzeigen?")) return;
+    try { await window._dobRPC.modBroadcastReload(); alert("Gesendet."); }
+    catch (e) { alert("Fehlgeschlagen: " + (e && e.message) + " (Database Rules fuer updateNotice gesetzt?)"); }
+  };
+  function adminBtn() {
+    const ex = document.getElementById("updBcBtn");
+    if (!isAdmin()) { if (ex) ex.remove(); return; }
+    if (ex || typeof _adminBar !== "function") return;
+    const bar = _adminBar(); if (!bar) return;
+    const b = document.createElement("button"); b.id = "updBcBtn"; b.textContent = "🔄 Update-Popup";
+    b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
+    b.onclick = () => window.modBroadcastReload();
+    bar.appendChild(b);
+  }
+  setInterval(adminBtn, 3000);
 })();
 </script>
 <script>
