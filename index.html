@@ -9289,7 +9289,7 @@ async function modDeleteChatMsg(key) {
       window._dobRPC.on("updateNotice", d => {
         const ts = d && Number(d.ts) || 0;
         if (!_got) { _got = true; _base = ts; return; }
-        if (ts && ts !== _base) { _base = ts; if (!isAdmin()) tryShow(); }
+        if (ts && ts !== _base) { _base = ts; tryShow(); }   // auch der Admin bekommt das Pop-up
       });
     } catch (e) { _sub = false; }
   }
