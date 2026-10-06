@@ -2001,20 +2001,32 @@ function chatFilter(t) {
 }
 // Verbotene Namen (leicht erweiterbar). Leetspeak (h1tl3r, h!tler …) wird erkannt.
 const NAME_BLOCK = ["hitler","nazi","hakenkreuz","goebbels","himmler","1488","nigg"];
-// Namensregeln: mind. 3 Zeichen (1-2 Zeichen-Namen sind nicht erlaubt), nicht nur Zahlen, nicht nur Sonderzeichen
+// Namensregeln (wie lichess.org): 3-20 Zeichen, nur Buchstaben/Zahlen/_/-, muss mit einem Buchstaben beginnen,
+// muss mit Buchstabe oder Zahl enden, keine aufeinanderfolgenden _ oder -, nicht nur Zahlen, nicht nur Sonderzeichen
 function nameFormatProblem(n) {
   const t = String(n || "").trim();
   if (!t) return "";
   if ([...t].length < 3) return "short";
   if (/^\p{N}+$/u.test(t)) return "digits";
   if (/^[^\p{L}\p{N}]+$/u.test(t)) return "special";
+  if (!/^[a-zA-Z0-9_-]+$/.test(t)) return "chars";
+  if (t.length > 20) return "long";
+  if (!/^[a-zA-Z]/.test(t)) return "start";
+  if (!/[a-zA-Z0-9]$/.test(t)) return "end";
+  if (/[_-]{2,}/.test(t)) return "double";
   return "";
 }
 const NAME_FORMAT_MSG = {
   short:   "Names need at least 3 characters.",
   digits:  "A name can't consist only of numbers.",
-  special: "A name can't consist only of special characters."
+  special: "A name can't consist only of special characters.",
+  chars:   "Only letters, numbers, _ and - are allowed.",
+  long:    "Names can be at most 20 characters long.",
+  start:   "A name must start with a letter.",
+  end:     "A name must end with a letter or a number.",
+  double:  "A name can't contain consecutive _ or - characters."
 };
+const NAME_RULES_TEXT = "Usernames must be 3-20 characters long, may only contain letters, numbers, _ and -, must start with a letter, must end with a letter or a number, and must not contain consecutive _ or - characters.";
 function nameIsBlocked(n) {
   if (nameFormatProblem(n)) return true;
   const raw = String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3609,12 +3621,8 @@ async function changeUsername(newName) {
   if (!fbReady || !onlineAccount || !myUid) return;
   newName = newName.trim();
 
-  if ([...newName].length < 3) {
-    alert(NAME_FORMAT_MSG.short);
-    return;
-  }
-  if (!/^[a-zA-Z0-9_-]+$/.test(newName)) {
-    alert("Only letters, numbers, _ and - allowed.");
+  if (nameFormatProblem(newName)) {
+    alert(NAME_FORMAT_MSG[nameFormatProblem(newName)]);
     return;
   }
   if (nameIsBlocked(newName)) {
@@ -4276,8 +4284,8 @@ async function createAccount() {
   const info = document.getElementById("accountInfo");
 
   if (deviceHasAccount()) { showAccountAuthScreen("register"); return; }   // one account per device
-  if (!name || [...name].length < 3)     { info.textContent = NAME_FORMAT_MSG.short; info.style.color="#f44"; return; }
-  if (!/^[a-zA-Z0-9_-]+$/.test(name))    { info.textContent = "Only letters, numbers, _ and - allowed."; info.style.color="#f44"; return; }
+  if (!name)                             { info.textContent = NAME_FORMAT_MSG.short; info.style.color="#f44"; return; }
+  if (nameFormatProblem(name))           { info.textContent = NAME_FORMAT_MSG[nameFormatProblem(name)]; info.style.color="#f44"; return; }
   if (nameIsBlocked(name))               { info.textContent = NAME_FORMAT_MSG[nameFormatProblem(name)] || "This name is not allowed."; info.style.color="#f44"; return; }
   if (!password || password.length < 6)  { info.textContent = "Password must be at least 6 characters."; info.style.color="#f44"; return; }
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
@@ -7977,7 +7985,7 @@ function _modWarnInfo() {
   if (!_modIsAdmin() && n && typeof nameIsBlocked === "function" && nameIsBlocked(n)) {
     const fp = typeof nameFormatProblem === "function" ? nameFormatProblem(n) : "";
     if (fp) return { text: "Your username doesn't follow our username rules: " + NAME_FORMAT_MSG[fp]
-      + " From now on, usernames must have at least 3 characters and must not consist only of numbers or only of special characters."
+      + " " + NAME_RULES_TEXT
       + " Please choose a new username (or delete your account). You can't play until you have changed it.", deadline: 0 };
     return { text: "Your username is not allowed. Please choose a different one or delete your account.", deadline: 0 };
   }
@@ -8071,7 +8079,7 @@ async function _modDoRename() {
   const inp = document.getElementById("modNewName"), msg = document.getElementById("modMsg");
   if (!inp || !msg) return;
   const v = inp.value.trim();
-  if ([...v].length < 3 || !/^[a-zA-Z0-9_-]+$/.test(v)) { msg.textContent = "At least 3 characters; only letters, numbers, _ and -."; return; }
+  if (typeof nameFormatProblem === "function" && nameFormatProblem(v)) { msg.textContent = NAME_FORMAT_MSG[nameFormatProblem(v)]; return; }
   if (typeof nameIsBlocked === "function" && nameIsBlocked(v)) { msg.textContent = NAME_FORMAT_MSG[nameFormatProblem(v)] || "This name is not allowed."; return; }
   if (v.toLowerCase() === _modCurName().toLowerCase()) { msg.textContent = "Please choose a different name."; return; }
   msg.textContent = "Saving…";
