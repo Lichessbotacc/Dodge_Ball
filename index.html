@@ -9127,5 +9127,42 @@ async function modDeleteChatMsg(key) {
   catch (e) { alert("Failed: " + (e && e.message)); }
 }
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  UPDATE-HINWEIS: jede Stunde ein Pop-up "Bitte Seite neu laden" (mit Reload-Knopf)
+//  Test: Seite mit ?updatepopup=1 oeffnen -> Pop-up kommt sofort. Intervall: UPDATE_POPUP_MS.
+//  Waehrend eines laufenden 1v1-Matches wird es zurueckgehalten (Reload = Aufgabe) und erscheint danach.
+// ═══════════════════════════════════════════════
+(function () {
+  const UPDATE_POPUP_MS = 60 * 60 * 1000;
+  const T = s => (typeof tr === "function" ? tr(s) : s);
+  try { if (typeof DICT !== "undefined" && DICT.de) Object.assign(DICT.de, {
+    "New update available": "Neues Update verfügbar",
+    "A new update has been made. To continue playing, please reload the page.": "Es gibt ein neues Update. Um weiterzuspielen, lade bitte die Seite neu.",
+    "Reload now": "Jetzt neu laden", "Later": "Später"
+  }); } catch (e) {}
+  function inMatch() { try { return !!(running && mode === "online" && !survivalActive && !onlineResultHandled); } catch (e) { return false; } }
+  function show() {
+    if (document.getElementById("updatePopup")) return;
+    const ov = document.createElement("div");
+    ov.id = "updatePopup";
+    ov.style.cssText = "position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,0.78);backdrop-filter:blur(6px);padding:16px;box-sizing:border-box;animation:screenFade .3s ease;";
+    ov.innerHTML = '<div style="width:min(420px,94vw);text-align:center;background:linear-gradient(160deg,#1b1b29,#111119);border:1px solid rgba(0,255,136,0.35);border-radius:18px;padding:28px 26px;color:#eaf2fb;box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 40px rgba(0,255,136,.12);font-family:var(--font-body,sans-serif);">'
+      + '<div style="font-size:46px;line-height:1;margin-bottom:8px;">🔄</div>'
+      + '<div class="upT" style="font-family:var(--font-display,sans-serif);font-weight:800;font-size:26px;letter-spacing:.5px;color:#00ff88;margin-bottom:10px;"></div>'
+      + '<div class="upM" style="font-size:15px;line-height:1.5;color:#cfd6e4;margin-bottom:20px;"></div>'
+      + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;"><button class="upR" style="margin:0;"></button></div></div>';
+    ov.querySelector(".upT").textContent = T("New update available");
+    ov.querySelector(".upM").textContent = T("A new update has been made. To continue playing, please reload the page.");
+    ov.querySelector(".upR").textContent = "🔄 " + T("Reload now");
+    ov.querySelector(".upR").onclick = () => location.reload();
+    document.body.appendChild(ov);
+  }
+  function tryShow() { if (inMatch()) { setTimeout(tryShow, 5000); return; } show(); }
+  function schedule() { setTimeout(tryShow, UPDATE_POPUP_MS); }
+  schedule();
+  if (/[?&]updatepopup=1/.test(location.search)) setTimeout(show, 800);
+})();
+</script>
 </body>
 </html>
