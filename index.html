@@ -1489,6 +1489,22 @@ function requireAdmin() { const u = requireUid(); if (u !== MOD_ADMIN_UID_RPC) t
 async function rpcModSetSanction(uid, data) { requireAdmin(); return update(ref(db, "sanctions/" + uid), data); }
 async function rpcModClearSanction(uid)     { requireAdmin(); return remove(ref(db, "sanctions/" + uid)); }
 async function rpcModDeleteChat(id)         { requireAdmin(); return remove(ref(db, "chat/" + id)); }
+// Mute / Chat-Ban: Nachrichten einer Person loeschen (sinceMs = 0 -> ALLE, sonst nur die der letzten sinceMs Millisekunden)
+async function rpcModDeleteChatOf(uid, sinceMs) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
+  const v = (await get(query(ref(db, "chat"), orderByChild("uid"), equalTo(uid)))).val() || {};
+  const cutoff = Number(sinceMs) > 0 ? Date.now() - Number(sinceMs) : 0, up = {}; let n = 0;
+  Object.entries(v).forEach(([id, m]) => { if (m && m.uid === uid && (!cutoff || Number(m.ts) >= cutoff)) { up["chat/" + id] = null; n++; } });
+  if (n) await update(ref(db), up);
+  return n;
+}
+// Oeffentliche Markierung "Chat banned" (sanctions/ ist fuer andere Spieler nicht lesbar) -> wird im Profil angezeigt
+async function rpcModSetChatBan(uid, on) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  return on ? set(ref(db, "chatBans/" + uid), true) : remove(ref(db, "chatBans/" + uid));
+}
 async function rpcModRename(uid, oldName, newName) {
   requireAdmin();
   const up = {};
@@ -1698,7 +1714,7 @@ async function rpcSendAppeal(name, text) {
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
@@ -4300,6 +4316,8 @@ async function openOnlineProfile(uid) {
       svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
     } catch (e) {}
     const rk = await profileRanks(uid);
+    let chatBannedP = false;
+    try { chatBannedP = !!(await dbGet("chatBans/" + uid)); } catch (e) {}
     let dailyWinsN = 0;
     try { const dw = await dbGet("dailyWins/" + uid); dailyWinsN = dw ? Object.keys(dw).length : 0; } catch (e) {}
     const wins = p.wins ?? 0;
@@ -4308,7 +4326,8 @@ async function openOnlineProfile(uid) {
     const winrate = totalGames > 0 ? Math.round((wins / totalGames) * 100) : 0;
 
     document.getElementById("profileName").innerHTML =
-      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(dn(p.name))}</span>`;
+      `<span style="color:${p.name === "Online Bot" ? "#ffaa00" : "#00ff88"}">${escapeHtml(dn(p.name))}</span>`
+      + (chatBannedP ? `<div style="color:#ff4444;font-size:13px;font-weight:700;margin-top:4px;">🚫 Chat banned</div>` : "");
 
     document.getElementById("profileStats").innerHTML = `
       <div class="prof-row"><span class="prof-label">Elo</span><span class="prof-val">${Math.round(p.elo)}${rk.elo}</span></div>
@@ -8620,11 +8639,11 @@ function _modPanelRender() {
     mk("⚠ Warn", () => _modWarn(uid, p));
     mk("✏ Rename", () => _modRenameAct(uid, p));
     mk("🔇 Mute", () => _modMute(uid));
-    mk(s.chatBanned ? "💬 Allow chat" : "🚫 Chat ban", () => _modRPC().modSetSanction(uid, { chatBanned: s.chatBanned ? null : true }));
+    mk(s.chatBanned ? "💬 Allow chat" : "🚫 Chat ban", () => _modChatBanToggle(uid, s, p));
     mk(s.banned ? "♻ Unban" : "🔨 Ban + wipe data", () => _modBan(uid, s, p));
     if (s.banned) mk("🧹 Wipe data again", () => _modPurge(uid, p.name));
     mk("🗑 Delete records", () => _modDeleteRecordsAct(uid, p));
-    mk("🧹 Clear all", () => _modRPC().modClearSanction(uid));
+    mk("🧹 Clear all", async () => { await _modRPC().modClearSanction(uid); try { await _modRPC().modSetChatBan(uid, false); } catch (e) {} });
     row.appendChild(bar); list.appendChild(row);
   });
 }
@@ -8650,8 +8669,21 @@ async function _modRenameAct(uid, p) {
   try { await _modRPC().renameChatMessages(uid, nn); } catch (e) { console.warn("chat rename failed", e); }
 }
 async function _modMute(uid) {
-  const m = Number(prompt("Mute for how many minutes? (0 = unmute)", "60")); if (isNaN(m) || m < 0) _modCancel();
+  const m = Number(prompt("Mute for how many minutes? (0 = unmute)\nWhen muting, this player's chat messages of the last 30 minutes are deleted.", "60")); if (isNaN(m) || m < 0) _modCancel();
   await _modRPC().modSetSanction(uid, { muteUntil: m > 0 ? Date.now() + m * 60000 : null });
+  if (m > 0) { try { await _modRPC().modDeleteChatOf(uid, 30 * 60000); } catch (e) { console.warn("chat cleanup failed", e); alert("Muted, but the last 30 min of messages could not be deleted:\n" + (e && e.message)); } }
+}
+async function _modChatBanToggle(uid, s, p) {
+  const R = _modRPC();
+  if (s.chatBanned) {   // Chat wieder erlauben
+    await R.modSetSanction(uid, { chatBanned: null });
+    try { await R.modSetChatBan(uid, false); } catch (e) { console.warn("chatBans clear failed", e); }
+    return;
+  }
+  if (!confirm("Chat-ban " + ((p && p.name) || uid) + " and DELETE all of their chat messages?")) _modCancel();
+  await R.modSetSanction(uid, { chatBanned: true });
+  try { await R.modSetChatBan(uid, true); } catch (e) { console.warn("chatBans set failed", e); alert("Chat ban is active, but the public marker could not be written (Database Rules updated: chatBans?):\n" + (e && e.message)); }
+  try { await R.modDeleteChatOf(uid, 0); } catch (e) { console.warn("chat cleanup failed", e); alert("Chat banned, but his messages could not be deleted:\n" + (e && e.message)); }
 }
 // Dialog: welche Rekorde sollen geloescht werden? (zeigt die aktuellen Werte an)
 function _modPickRecords(name, cur) {
