@@ -4280,7 +4280,9 @@ const NET_SMOOTH = {
   MAX_EXTRAPOLATE_DIST: 140,
   // After this long with no packet at all, stop extrapolating and
   // just hold position (still alive-looking, just paused).
-  FREEZE_AFTER_MS: 1200
+  FREEZE_AFTER_MS: 1200,
+  // Online-1v1: so lange (ms) ohne neues Paket wird hoechstens weiter extrapoliert
+  ONLINE_EXTRAP_MS: 250
 };
 
 // Gemeinsame Paket-Verarbeitung für Online-Gegner UND Online TV (identisch sauber)
@@ -5457,7 +5459,7 @@ function startOnlineGame(matchData) {
     if (oppState) {
       const op = players.find(p => p.name !== myName);
       if (op) {
-        feedNetPlayer(op, oppState);
+        feedNetPlayer(op, oppState, 250);   // FIX: stehender Gegner -> Extrapolation beenden, auf echte Position zurueck
       }
     }
 
@@ -6837,6 +6839,8 @@ function update() {
         const drift = Math.hypot(p.tx - (p.baseTx ?? p.tx), p.ty - (p.baseTy ?? p.ty));
         if ((sx || sy) && drift < NET_SMOOTH.MAX_EXTRAPOLATE_DIST) { p.tx += sx; p.ty += sy; }
       }
+      // FIX: extrapolierte Ziele duerfen die Arena nie verlassen (sonst "verschwindet" der Ball am Rand)
+      { const r = p.radius || 0; p.tx = Math.max(r, Math.min(W() - r, p.tx)); p.ty = Math.max(r, Math.min(H() - r, p.ty)); }
       // Zeitbasierte (framerate-unabhängige) Glättung, passend zur Paketrate
       const iv = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(NET_SMOOTH.MIN_INTERVAL, p.netInterval || NET_SMOOTH.MIN_INTERVAL));
       const a = smoothingAlpha(timestep, 90 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.25);
@@ -6914,7 +6918,7 @@ function update() {
         // Dead-reckon the *target* point forward using their last
         // known velocity, but only while the gap is still plausible
         // (not a dead connection) and only up to a max distance.
-        if (sinceLastPacket > 0 && sinceLastPacket < NET_SMOOTH.FREEZE_AFTER_MS) {
+        if (sinceLastPacket > 0 && sinceLastPacket < NET_SMOOTH.ONLINE_EXTRAP_MS) {
           const dtFrame = timestep; // ~16.6ms, one fixed sim step
           let stepX = (opp.netVX || 0) * dtFrame;
           let stepY = (opp.netVY || 0) * dtFrame;
@@ -6928,6 +6932,15 @@ function update() {
             opp.ty += stepY;
           }
         }
+
+        // FIX: kein frisches Paket mehr (steht still oder laggt) -> Ziel sanft zurueck auf die echte letzte Position,
+        // damit die Extrapolation (bis 140px) den Gegner nicht dauerhaft neben/ausserhalb der Arena anzeigt
+        if (sinceLastPacket >= NET_SMOOTH.ONLINE_EXTRAP_MS && opp.baseTx !== undefined) {
+          const back = smoothingAlpha(timestep, 120);
+          opp.tx += (opp.baseTx - opp.tx) * back;
+          opp.ty += (opp.baseTy - opp.ty) * back;
+        }
+        { const r = opp.radius || 0; opp.tx = Math.max(r, Math.min(W() - r, opp.tx)); opp.ty = Math.max(r, Math.min(H() - r, opp.ty)); }
 
         // Adaptive catch-up: the worse (larger) their recent packet
         // interval has been, the longer we give ourselves to close
@@ -6955,6 +6968,7 @@ function update() {
     }
 
     if (me && me.alive) checkOnlineCollision(me);
+    if (me && me.alive) checkOpponentPassThrough(me);
     return;
   }
   if (mode === "streak") { updateStreak(); return; }
@@ -7034,6 +7048,46 @@ function checkOnlineCollision(me) {
       }
       return;
     }
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// FIX (Bug-Report "Gegner laggt und geht 10x durch den roten Ball"):
+// Jeder Client prueft nur seine EIGENE Kollision. Laggt der Gegner, sind seine lokalen Baelle
+// gegenueber dem Host verschoben -> er geht aus Sicht des Hosts durch Baelle, ohne selbst zu sterben.
+// Der HOST (dessen Ballzustand die Wahrheit ist) prueft deshalb zusaetzlich die zuletzt GEMELDETE
+// Gegner-Position (nicht die extrapolierte). Bewusst konservativ, damit niemand unfair verliert:
+//   - nur tiefe Ueberlappungen (OPP_PASS.DEPTH * Radiensumme)
+//   - erst ab OPP_PASS.EVENTS getrennten Durchgaengen innerhalb OPP_PASS.WINDOW_MS
+//     ODER ununterbrochener Ueberlappung >= OPP_PASS.STUCK_MS
+const OPP_PASS = { DEPTH: 0.65, EVENTS: 3, WINDOW_MS: 5000, STUCK_MS: 800, GRACE_MS: 3000 };
+let _oppPass = { matchId: null, inside: new Set(), events: [], stuckSince: 0 };
+function checkOpponentPassThrough(me) {
+  if (onlineVsBot || !onlineIsHost || onlineResultHandled || survivalActive) return;
+  if (onlineMatchStatus !== "playing") return;
+  const opp = players.find(p => p.name !== me.name);
+  if (!opp || opp.alive === false || opp.baseTx === undefined || !opp.lastPacketAt) return;
+  if (_oppPass.matchId !== onlineMatchId) _oppPass = { matchId: onlineMatchId, inside: new Set(), events: [], stuckSince: 0 };
+  const now = Date.now();
+  if (now - startTime < OPP_PASS.GRACE_MS) return;
+  const nowInside = new Set();
+  for (let i = 0; i < balls.length; i++) {
+    const b = balls[i];
+    const lim = (opp.radius + b.radius) * OPP_PASS.DEPTH;
+    const dx = opp.baseTx - b.x, dy = opp.baseTy - b.y;
+    if (dx * dx + dy * dy < lim * lim) {
+      nowInside.add(i);
+      if (!_oppPass.inside.has(i)) _oppPass.events.push(now);   // neuer, getrennter Durchgang
+    }
+  }
+  _oppPass.inside = nowInside;
+  _oppPass.events = _oppPass.events.filter(ts => now - ts <= OPP_PASS.WINDOW_MS);
+  if (nowInside.size) { if (!_oppPass.stuckSince) _oppPass.stuckSince = now; } else _oppPass.stuckSince = 0;
+  const stuck = _oppPass.stuckSince && now - _oppPass.stuckSince >= OPP_PASS.STUCK_MS;
+  if (_oppPass.events.length >= OPP_PASS.EVENTS || stuck) {
+    opp.alive = false;
+    challengeToast("Opponent passed through balls (lag) – you win", "#00ff88");
+    reportOnlineResult(me.name, opp.name);
   }
 }
 
@@ -8096,7 +8150,7 @@ async function startOnlineTV(targetUid) {
           if (d.b) { try { applyStreakTvBalls(JSON.parse(d.b)); } catch(e) {} }
           return;
         }
-        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true });
+        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true }, 250);
         setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
         tvClock = { base: (d.t || 0) / 60, at: Date.now() };
         if (d.b) { try { applyBallCorrection(JSON.parse(d.b), 0.35); } catch(e) {} }
