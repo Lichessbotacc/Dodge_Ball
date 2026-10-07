@@ -2047,14 +2047,9 @@ function renderPresence(playersData) {
     }
 
     let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
-    // Geraet immer anzeigen: fehlt es im gewaehlten Eintrag (z.B. alte Seite schreibt Status ohne Geraet), das Geraet eines anderen
-    // Eintrags mit gleichem Namen nehmen; ist wirklich nichts bekannt, ein neutrales Icon zeigen
-    const _devByName = {};
-    Object.values(playersData).forEach(q => { if (q && q.device && q.name && (!_devByName[String(q.name).toLowerCase()] || (q.lastActive || 0) > _devByName[String(q.name).toLowerCase()].at)) _devByName[String(q.name).toLowerCase()] = { d: q.device, at: q.lastActive || 0 }; });
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
-      const _dvEntry = _devByName[String(p.name || "").toLowerCase()];
-      const _dv = isMe ? (p.device || detectDeviceType()) : (p.device || (_dvEntry && _dvEntry.d) || "");
+      const _dv = isMe ? (p.device || detectDeviceType()) : (p.device || "");   // nur ein wirklich gespeichertes Geraet zeigen, nichts raten
       const _busy = statusInMatch(p.status);
       const _pend = challengeOut.has(p.uid), _other = challengeOut.size > 0 && !_pend;
       const _tvBtn = (!isMe && fbReady && _busy)
@@ -2069,7 +2064,7 @@ function renderPresence(playersData) {
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              class="pr-row"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
-          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}${' <span title="' + escapeHtml(deviceIcon(_dv) ? _dv : "desktop") + '" style="font-size:12px;opacity:.85;">' + deviceIcon(deviceIcon(_dv) ? _dv : "desktop") + '</span>'}</span>
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}${_dv && deviceIcon(_dv) ? ' <span title="' + escapeHtml(_dv) + '" style="font-size:12px;opacity:.85;">' + deviceIcon(_dv) + '</span>' : ''}</span>
           <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
       `;
@@ -3924,6 +3919,12 @@ function detectDeviceType() {
     const ua = navigator.userAgent || "", touch = (navigator.maxTouchPoints || 0) > 1;
     if (/iPad|Tablet|PlayBook|Silk/i.test(ua) || (/Macintosh/.test(ua) && touch) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) return "tablet";
     if (/iPhone|iPod|Android.*Mobile|Mobile|Opera Mini|IEMobile/i.test(ua)) return "mobile";
+    // Tablet/Handy im "Desktop-Modus": UA sieht aus wie PC, aber reiner Touch (kein Mauszeiger/Hover) -> nach Bildschirmgroesse einordnen
+    const mm = q => { try { return window.matchMedia(q).matches; } catch (e) { return false; } };
+    if (mm("(pointer: coarse)") && mm("(hover: none)") && !mm("(any-pointer: fine)")) {
+      const sh = Math.min(screen.width || 0, screen.height || 0);
+      if (sh) return sh >= 600 ? "tablet" : "mobile";
+    }
   } catch (e) {}
   return "desktop";
 }
