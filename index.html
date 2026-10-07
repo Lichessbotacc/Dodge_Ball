@@ -1746,6 +1746,13 @@ async function rpcModDeleteRecords(uid, what) {
   try { await update(ref(db, "sanctions/" + uid), { recordsWiped: { ts: Date.now(), survival: !!what.survival, streak: !!what.streak, daily: !!what.daily, winstreak: !!what.winstreak } }); } catch (e) { failed.push("sanctions/" + uid + "/recordsWiped"); }
   return { total: list.length, failed };
 }
+async function rpcModApplyDailyWins(updates) {
+  requireAdmin();
+  const keys = Object.keys(updates || {});
+  if (!keys.length || keys.length > 500) throw new Error("Bad daily wins update.");
+  for (const k of keys) if (!/^dailyWins\/[A-Za-z0-9_-]{6,128}\/\d{4}-\d{2}-\d{2}$/.test(k) || updates[k] !== true) throw new Error("Bad path: " + k);
+  return update(ref(db), updates);
+}
 async function rpcModApplyLeague(updates) {
   requireAdmin();
   const keys = Object.keys(updates || {});
@@ -1855,7 +1862,7 @@ async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || "")
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -3160,6 +3167,16 @@ async function dailyCleanup(force) {   // eigene Replays aufraeumen: Survival nu
     try { localStorage.setItem("dobRepClean", today); } catch (e) {}
   } catch (e) { console.warn("replay cleanup failed", e); }
 }
+function dailyEffIdx(day, entries) {
+  const pk = _dailyPicks[day];
+  if (Number.isInteger(pk)) return pk;
+  let best = null;
+  Object.values(entries || {}).forEach(v => {
+    const c = _dEntryIdx(v), ts = Number(v && v.ts) || 0;
+    if (c !== null && (!best || ts > best.ts)) best = { c, ts };
+  });
+  return best ? best.c : dailyIdxFor(day);
+}
 async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ich Erster? -> Sieg eintragen
   if (!fbReady || !myUid || !RPC) return;
   try {
@@ -3173,7 +3190,8 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
       if (!me) continue;
       const all = await dbGet("daily/" + day);
       const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
-      const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === dailyIdxFor(day))).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+      const eff = dailyEffIdx(day, all);
+      const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
       if (arr.length && arr[0].u === myUid) await RPC.claimDailyWin(day);
     }
   } catch (e) { console.warn("daily wins check failed", e); }
@@ -10111,6 +10129,37 @@ async function leagueAdminResolveAll() {
   return applied;
 }
 setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000);
+let _dwAdminBusy = false;
+async function dailyAdminClaimAll() {
+  if (!_modIsAdmin() || !_modRPC() || _dwAdminBusy) return;
+  _dwAdminBusy = true;
+  try {
+    if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+    if (!_dailyPicksLoaded) return;
+    const R = _modRPC(), today = dailyKeyNow(), up = {};
+    const [daily, pl, wins] = await Promise.all([R.get("daily"), R.get("players"), R.get("dailyWins")]);
+    for (const [day, users] of Object.entries(daily || {})) {
+      if (!(day < today)) continue;
+      const eff = dailyEffIdx(day, users);
+      const arr = Object.entries(users || {})
+        .filter(([u, v]) => pl && pl[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff))
+        .map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 }))
+        .filter(x => x.t > 0)
+        .sort((a, b) => b.t - a.t || a.ts - b.ts);
+      if (!arr.length) continue;
+      const w = arr[0].u;
+      if (!(wins && wins[w] && wins[w][day])) up["dailyWins/" + w + "/" + day] = true;
+    }
+    const keys = Object.keys(up);
+    for (let i = 0; i < keys.length; i += 400) {
+      const part = {}; keys.slice(i, i + 400).forEach(k => part[k] = true);
+      await R.modApplyDailyWins(part);
+    }
+    if (keys.length) { try { delete _DB_CACHE["dailyWins"]; leagueToast("👑 " + keys.length + " daily win(s) credited", "#00ff88"); } catch (e) {} }
+  } catch (e) { console.warn("daily wins admin failed", e); }
+  _dwAdminBusy = false;
+}
+setTimeout(() => { dailyAdminClaimAll(); setInterval(dailyAdminClaimAll, 5 * 60 * 1000); }, 30000);
 // Geister-Streams (Streak/Survival-Eintraege, die nicht mehr aktualisiert werden, z.B. Tab im Hintergrund/Handy gesperrt) loeschen
 const _liveSeen = {};
 async function liveAdminCleanup() {
