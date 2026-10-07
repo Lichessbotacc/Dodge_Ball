@@ -1493,10 +1493,15 @@ async function rpcModSetDailyPick(day, idx) {
 // Admin: loest bei ALLEN geoeffneten Seiten das Pop-up "Bitte Seite neu laden" aus (Knoten updateNotice/ts)
 async function rpcModBroadcastReload(text) {
   requireAdmin();
-  const rec = { ts: Date.now(), by: MOD_ADMIN_UID_RPC };
-  const t = String(text || "").trim().slice(0, 1000);
-  if (t) rec.text = t;   // optional: was wurde geaendert (wird im Pop-up angezeigt)
-  return set(ref(db, "updateNotice"), rec);
+  const ts = Date.now(), t = String(text || "").trim().slice(0, 1000);
+  // update statt set: bisherige Nachrichten (updateNotice/log) bleiben erhalten und sammeln sich fuer Spieler, die einen Hinweis verpasst haben
+  const up = { ts, by: MOD_ADMIN_UID_RPC, text: t || null };
+  if (t) up["log/" + ts] = { ts, text: t };
+  await update(ref(db, "updateNotice"), up);
+  try {   // nur die letzten 30 Nachrichten behalten
+    const lg = (await get(ref(db, "updateNotice/log"))).val() || {}, ks = Object.keys(lg).sort();
+    if (ks.length > 30) { const rm = {}; ks.slice(0, ks.length - 30).forEach(k => { rm["log/" + k] = null; }); await update(ref(db, "updateNotice"), rm); }
+  } catch (e) {}
 }
 async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
@@ -9656,7 +9661,7 @@ async function modDeleteChatMsg(key) {
   try { if (typeof DICT !== "undefined" && DICT.de) Object.assign(DICT.de, {
     "New update available": "Neues Update verfügbar",
     "A new update has been made. To continue playing, please reload the page.": "Es gibt ein neues Update. Um weiterzuspielen, lade bitte die Seite neu.",
-    "Reload now": "Jetzt neu laden", "Later": "Später", "What's new": "Was ist neu"
+    "Reload now": "Jetzt neu laden", "Later": "Später", "What's new": "Was ist neu", "Since your last visit": "Seit deinem letzten Besuch"
   }); } catch (e) {}
   function inMatch() {   // laufendes 1v1, Survival/Daily oder Streak-Run: Pop-up zurueckhalten (Reload wuerde den Lauf verlieren)
     try {
@@ -9666,28 +9671,53 @@ async function modDeleteChatMsg(key) {
     } catch (e) {}
     return false;
   }
-  let _noteText = "";   // zuletzt gesendeter "Was wurde geaendert"-Text
-  function show() {
-    if (document.getElementById("updatePopup")) return;
+  const SEEN_KEY = "dobUpdSeen";   // Zeitstempel der letzten Update-Nachricht, die dieser Browser schon gesehen hat
+  const getSeen = () => { try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch (e) { return 0; } };
+  const setSeen = v => { try { localStorage.setItem(SEEN_KEY, String(v)); } catch (e) {} };
+  let _log = [], _base = 0;   // _log: alle bekannten Nachrichten [{ts,text}] aufsteigend, _base: ts der neuesten Meldung
+  const pending = () => { const sn = getSeen(); return _log.filter(e => e.ts > sn && e.text); };
+  function readLog(d) {
+    const m = new Map();
+    if (d && d.log && typeof d.log === "object") Object.values(d.log).forEach(e => { if (e && e.text) m.set(Number(e.ts) || 0, String(e.text).slice(0, 1000)); });
+    if (d && d.text && d.ts && !m.has(Number(d.ts))) m.set(Number(d.ts), String(d.text).slice(0, 1000));   // aeltere Meldungen ohne Log
+    _log = [...m.entries()].sort((x, y) => x[0] - y[0]).map(([ts, text]) => ({ ts, text }));
+  }
+  function show(info) {   // info = true: nur "Was ist neu" seit dem letzten Besuch (kein Reload noetig)
+    const old = document.getElementById("updatePopup"); if (old) old.remove();
     const ov = document.createElement("div");
     ov.id = "updatePopup";
     ov.style.cssText = "position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,0.78);backdrop-filter:blur(6px);padding:16px;box-sizing:border-box;animation:screenFade .3s ease;";
     ov.innerHTML = '<div style="width:min(420px,94vw);text-align:center;background:linear-gradient(160deg,#1b1b29,#111119);border:1px solid rgba(0,255,136,0.35);border-radius:18px;padding:28px 26px;color:#eaf2fb;box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 40px rgba(0,255,136,.12);font-family:var(--font-body,sans-serif);">'
-      + '<div style="font-size:46px;line-height:1;margin-bottom:8px;">🔄</div>'
+      + '<div style="font-size:46px;line-height:1;margin-bottom:8px;">' + (info ? "✨" : "🔄") + '</div>'
       + '<div class="upT" style="font-family:var(--font-display,sans-serif);font-weight:800;font-size:26px;letter-spacing:.5px;color:#00ff88;margin-bottom:10px;"></div>'
       + '<div class="upM" style="font-size:15px;line-height:1.5;color:#cfd6e4;margin-bottom:20px;"></div>'
-      + '<div class="upC" style="display:none;text-align:left;font-size:14px;line-height:1.45;color:#eaf2fb;background:rgba(0,255,136,.07);border:1px solid rgba(0,255,136,.25);border-radius:12px;padding:10px 14px;margin:-8px 0 20px;max-height:34vh;overflow:auto;white-space:pre-wrap;word-break:break-word;"></div>'
+      + '<div class="upC" style="display:none;text-align:left;font-size:14px;line-height:1.45;color:#eaf2fb;background:rgba(0,255,136,.07);border:1px solid rgba(0,255,136,.25);border-radius:12px;padding:10px 14px;margin:-8px 0 20px;max-height:34vh;overflow:auto;word-break:break-word;"></div>'
       + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;"><button class="upR" style="margin:0;"></button></div></div>';
-    ov.querySelector(".upT").textContent = T("New update available");
-    ov.querySelector(".upM").textContent = T("A new update has been made. To continue playing, please reload the page.");
-    if (_noteText) { const c = ov.querySelector(".upC"); c.style.display = "block"; c.textContent = "✨ " + T("What's new") + ":\n" + _noteText; }
-    ov.querySelector(".upR").textContent = "🔄 " + T("Reload now");
-    ov.querySelector(".upR").onclick = () => location.reload();
+    ov.querySelector(".upT").textContent = info ? T("What's new") : T("New update available");
+    ov.querySelector(".upM").textContent = info ? T("Since your last visit") + ":" : T("A new update has been made. To continue playing, please reload the page.");
+    const notes = pending();
+    if (notes.length) {   // alle Nachrichten, die dieser Browser noch nicht gesehen hat, untereinander
+      const c = ov.querySelector(".upC"); c.style.display = "block";
+      notes.forEach((e, i) => {
+        const blk = document.createElement("div");
+        if (i) blk.style.cssText = "margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12);";
+        const dt = document.createElement("div"); dt.style.cssText = "font-size:11px;opacity:.55;margin-bottom:2px;"; dt.textContent = new Date(e.ts).toLocaleDateString();
+        const tx = document.createElement("div"); tx.style.cssText = "white-space:pre-wrap;"; tx.textContent = e.text;
+        blk.append(dt, tx); c.append(blk);
+      });
+    }
+    if (info) {
+      ov.querySelector(".upR").textContent = "OK";
+      ov.querySelector(".upR").onclick = () => { setSeen(_base); ov.remove(); };
+    } else {
+      ov.querySelector(".upR").textContent = "🔄 " + T("Reload now");
+      ov.querySelector(".upR").onclick = () => { setSeen(_base); location.reload(); };
+    }
     document.body.appendChild(ov);
   }
-  function tryShow() { if (inMatch()) { setTimeout(tryShow, 5000); return; } show(); }
-  // Broadcast-Listener: erster Snapshot = Ausgangsstand (kein Pop-up beim Seitenstart), jede spaetere Aenderung -> Pop-up
-  let _base, _got = false, _sub = false;
+  function tryShow() { if (inMatch()) { setTimeout(tryShow, 5000); return; } show(false); }
+  // Broadcast-Listener: erster Snapshot = Ausgangsstand (kein Reload-Pop-up beim Seitenstart), jede spaetere Aenderung -> Pop-up
+  let _got = false, _sub = false;
   function isAdmin() { try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch (e) { return false; } }
   function subscribe() {
     if (_sub) return;
@@ -9696,8 +9726,16 @@ async function modDeleteChatMsg(key) {
       _sub = true;
       window._dobRPC.on("updateNotice", d => {
         const ts = d && Number(d.ts) || 0;
-        if (!_got) { _got = true; _base = ts; return; }
-        if (ts && ts !== _base) { _base = ts; _noteText = String(d.text || "").slice(0, 1000); tryShow(); }   // auch der Admin bekommt das Pop-up
+        readLog(d);
+        if (!_got) {
+          _got = true; _base = ts;
+          // Seitenstart: neue Spieler/Browser starten ohne Hinweise; wer Nachrichten verpasst hat (laenger nicht offen), sieht sie gesammelt
+          if (!getSeen()) setSeen(ts);
+          else if (pending().length) { const w = () => { if (inMatch()) setTimeout(w, 5000); else show(true); }; setTimeout(w, 1500); }
+          else if (ts > getSeen()) setSeen(ts);
+          return;
+        }
+        if (ts && ts !== _base) { _base = ts; tryShow(); }   // auch der Admin bekommt das Pop-up; ein offenes Pop-up wird mit allen Nachrichten neu aufgebaut
       });
     } catch (e) { _sub = false; }
   }
