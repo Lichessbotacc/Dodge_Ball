@@ -2703,18 +2703,23 @@ let _dailyKey = null;
 // emerge=Ticks bis der Ball auf Endgroesse waechst, from="top"|"echo" (Spawnort), delay=Echo-Verzoegerung in Ticks,
 // col=Farbe, burst={n,v,r,life,col} (Feuerwerk beim Ablaufen).
 // Verfolger laufen wie im Streak-Modus ab (9 s = 540 Ticks) und spawnen alle 1,5 s (90 Ticks) nach.
+// online=true: Baelle spawnen exakt wie im normalen Online-/Survival-Modus (makeOnlineBall: Groesse 15-35, Tempo (5-11)*0.5, 220 px Abstand, 1 pro Sekunde, keiner verschwindet).
+// field={type}: Feld-Modi mit Hindernissen, die reine Funktion von Tick + Bildgroesse + Tages-Seed sind (live und im Replay identisch):
+//   "laser" = rotierender Laser aus der Mitte (wird schneller), "shrink" = Waende ruecken zusammen, "portal" = Baelle fliegen durch die Waende, "flap" = Saeulen mit Luecken.
+const _onlGroup = () => ({ n: 0, cap: 99999, respawn: 60, online: true });
 const DAILY_CHALLENGES = [
-  { icon: "🐌", name: "70 Slow Balls",      groups: [{ n: 70, v: 1.6 }] },
+  { icon: "🔦", name: "Laser + Balls",      field: { type: "laser" }, groups: [_onlGroup()] },
   { icon: "🪨", name: "Giants",             groups: [{ n: 0, cap: 99999, respawn: 120, v: 3.2, r: [55, 70] }] },   // startet leer, alle 2 s (120 Ticks) kommt ein Riese dazu, keiner verschwindet
-  { icon: "🐝", name: "80 Tiny Swarm",      playerR: 8, groups: [{ n: 80, v: 3, r: [8, 8] }] },   // playerR: dein Ball ist genau so gross wie die anderen
+  { icon: "🧱", name: "Shrinking Arena",    field: { type: "shrink" }, groups: [_onlGroup()] },
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
   { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
   // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
   { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 55, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
-  // Overdrive: 5 Baelle, Tempo waechst ohne Obergrenze (accMax riesig)
-  { icon: "🚀", name: "Overdrive",          groups: [{ n: 5, v: 1.8, acc: 0.0018, accMax: 1e9, col: "#ffd24a" }] },
+  { icon: "🌀", name: "Portal",             field: { type: "portal" }, groups: [_onlGroup()] },
   // Fireworks: Spawnabstand wird mit jedem Feuerwerk ganz langsam kuerzer (-0.5 Tick pro Spawn, bis min. 10 Ticks), kein Limit gleichzeitiger Feuerwerke
-  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
+  { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] },
+  // Flappy: nur Saeulen (keine Baelle). Luecken werden enger (bis zum Limit) und die Saeulen kommen immer dichter (bis zum Limit)
+  { icon: "🐦", name: "Flappy",             field: { type: "flap" }, groups: [] }
 ];
 // ── Welcher Modus ist an welchem Tag dran? ──
 // 1) Mod-Festlegung dailyPick/{tag} (Index) hat Vorrang.  2) Sonst Zufall (pro Tag fest per Seed, fuer alle Spieler gleich),
@@ -2774,7 +2779,109 @@ function dailyLightFx(c, L, px, py, tick, Wd, Hd) {   // Lichtschein um den Ball
     if (ph < L.flash) { c.globalAlpha = 0.16 * (ph < L.flash * 0.6 ? 1 : (L.flash - ph) / (L.flash * 0.4)); c.fillStyle = "#cfe3ff"; c.fillRect(0, 0, Wd, Hd); c.globalAlpha = 1; }
   }
 }
+// ── Feld-Modi: alles ist eine reine Funktion von Tick T, Bildgroesse und Tages-Seed -> live und im Replay identisch ──
+const FLD = { laserArm: 90, laserW: 0.014, laserRamp: 1500, shrinkTicks: 2700, shrinkX: 0.30, shrinkY: 0.28,
+  flapPw: 0.05, flapGap0: 0.5, flapGapMin: 0.2, flapI0: 100, flapIMin: 36, flapIStep: 2.5, flapGapStep: 0.012 };
+function _fh(seed, i) { let h = (seed ^ Math.imul(i + 1, 2654435761)) >>> 0; h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function _segD(x, y, x1, y1, x2, y2) { const dx = x2 - x1, dy = y2 - y1; let u = ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy); u = Math.max(0, Math.min(1, u)); return Math.hypot(x - x1 - u * dx, y - y1 - u * dy); }
+function fieldMargin(T, Wd, Hd) { const f = Math.min(1, T / FLD.shrinkTicks); return [f * FLD.shrinkX * Wd, f * FLD.shrinkY * Hd]; }   // Shrink: Wandabstand links/rechts bzw. oben/unten
+function laserAngle(T, seed) { return _fh(seed, 0) * Math.PI * 2 + FLD.laserW * (T + T * T / (2 * FLD.laserRamp)); }   // Drehgeschwindigkeit waechst linear mit der Zeit
+const laserHalf = (Hd) => Math.max(3, Hd * 0.006);
+// Flappy: Spawnzeit und Luecke der i-ten Saeule sind deterministisch (Seed). Abstand schrumpft bis flapIMin, Luecke bis flapGapMin.
+const _flC = { key: null, t: [], gy: [] };
+const flapGap = (i, Hd) => Math.max(FLD.flapGapMin, FLD.flapGap0 - FLD.flapGapStep * i) * Hd;
+const flapV = (Wd) => Wd * 0.004;
+function flapList(T, seed, Wd, Hd) {
+  const key = seed + "|" + Wd + "|" + Hd;
+  if (_flC.key !== key) { _flC.key = key; _flC.t = []; _flC.gy = []; }
+  while (!_flC.t.length || _flC.t[_flC.t.length - 1] <= T + 5) {
+    const i = _flC.t.length, gh = flapGap(i, Hd);
+    _flC.t.push(i === 0 ? 60 : _flC.t[i - 1] + Math.max(FLD.flapIMin, Math.round(FLD.flapI0 - FLD.flapIStep * (i - 1))));
+    let gy = i === 0 ? Hd / 2 : _flC.gy[i - 1] + (_fh(seed, i) - 0.5) * 0.8 * Hd;
+    _flC.gy.push(Math.max(gh / 2 + 20, Math.min(Hd - gh / 2 - 20, gy)));
+  }
+  const w = FLD.flapPw * Wd, v = flapV(Wd), life = (Wd + 2 * w) / v, out = [];
+  for (let i = _flC.t.length - 1; i >= 0; i--) {
+    const age = T - _flC.t[i]; if (age < 0) continue; if (age > life) break;
+    out.push({ x: Wd + w - v * age, gy: _flC.gy[i], gh: flapGap(i, Hd), w });
+  }
+  return out;
+}
+function fieldClear(kind, x, y, T, Wd, Hd, seed) {   // Abstand zum Hindernis (<= 0 = drin), 999 = keins
+  if (kind === "laser") {
+    if (T < FLD.laserArm) return 999;
+    const a = laserAngle(T, seed), L = Math.hypot(Wd, Hd);
+    return _segD(x, y, Wd / 2, Hd / 2, Wd / 2 + Math.cos(a) * L, Hd / 2 + Math.sin(a) * L) - laserHalf(Hd);
+  }
+  if (kind === "shrink") { const m = fieldMargin(T, Wd, Hd); return Math.min(x - m[0], Wd - m[0] - x, y - m[1], Hd - m[1] - y); }
+  if (kind === "flap") {
+    let best = 999;
+    for (const o of flapList(T, seed, Wd, Hd)) {
+      const dx = Math.max(o.x - o.w - x, 0, x - o.x - o.w);
+      for (const r of [[0, o.gy - o.gh / 2], [o.gy + o.gh / 2, Hd]]) best = Math.min(best, Math.hypot(dx, Math.max(r[0] - y, 0, y - r[1])));
+    }
+    return best;
+  }
+  return 999;
+}
+function dailyFieldHit(me) {   // live: ganze zurueckgelegte Strecke pruefen (Maus kann springen)
+  const f = dailyActiveCh().field; if (!f || f.type === "portal") return false;
+  const Wd = W(), Hd = H(), T = survTick, seed = dailySeed(_dailyKey);
+  const x0 = me._cx === undefined ? me.x : me._cx, y0 = me._cy === undefined ? me.y : me._cy;
+  const d = Math.hypot(me.x - x0, me.y - y0), n = f.type === "shrink" ? 1 : Math.max(1, Math.min(60, Math.ceil(d / Math.max(4, me.radius * 0.7))));
+  for (let k = 1; k <= n; k++) { const u = k / n; if (fieldClear(f.type, x0 + (me.x - x0) * u, y0 + (me.y - y0) * u, T, Wd, Hd, seed) < me.radius) return true; }
+  return false;
+}
+function dailyMoveBall(b, Wd, Hd, T, kind) {   // Ballbewegung live UND im Replay (Portal: durch die Waende, Shrink: engere Waende)
+  b.x += b.vx; b.y += b.vy;
+  if (kind === "portal") { if (b.x < 0) b.x += Wd; else if (b.x >= Wd) b.x -= Wd; if (b.y < 0) b.y += Hd; else if (b.y >= Hd) b.y -= Hd; return; }
+  const m = kind === "shrink" ? fieldMargin(T, Wd, Hd) : [0, 0];
+  const l = m[0] + b.radius, r = Wd - m[0] - b.radius, tp = m[1] + b.radius, bt = Hd - m[1] - b.radius;
+  if (b.x < l) { b.vx = Math.abs(b.vx); b.x = l; }
+  if (b.x > r) { b.vx = -Math.abs(b.vx); b.x = r; }
+  if (b.y < tp) { b.vy = Math.abs(b.vy); b.y = tp; }
+  if (b.y > bt) { b.vy = -Math.abs(b.vy); b.y = bt; }
+}
+function dailyFieldDraw(c, kind, T, Wd, Hd, seed) {
+  if (kind === "laser") {
+    const a = laserAngle(T, seed), L = Math.hypot(Wd, Hd), hw = laserHalf(Hd), armed = T >= FLD.laserArm;
+    c.save(); c.globalAlpha = armed ? 1 : 0.25 + 0.15 * Math.sin(T / 5);
+    c.strokeStyle = "#ff2d55"; c.lineWidth = hw * 2; c.lineCap = "round";
+    c.beginPath(); c.moveTo(Wd / 2, Hd / 2); c.lineTo(Wd / 2 + Math.cos(a) * L, Hd / 2 + Math.sin(a) * L); c.stroke();
+    if (armed) { c.strokeStyle = "#ffd0d8"; c.lineWidth = hw * 0.7; c.beginPath(); c.moveTo(Wd / 2, Hd / 2); c.lineTo(Wd / 2 + Math.cos(a) * L, Hd / 2 + Math.sin(a) * L); c.stroke(); }
+    c.globalAlpha = 1; c.fillStyle = "#fff"; c.beginPath(); c.arc(Wd / 2, Hd / 2, hw * 2.2, 0, Math.PI * 2); c.fill(); c.restore();
+  } else if (kind === "shrink") {
+    const m = fieldMargin(T, Wd, Hd);
+    c.save(); c.fillStyle = "rgba(255,45,85,.28)";
+    c.fillRect(0, 0, Wd, m[1]); c.fillRect(0, Hd - m[1], Wd, m[1]); c.fillRect(0, m[1], m[0], Hd - 2 * m[1]); c.fillRect(Wd - m[0], m[1], m[0], Hd - 2 * m[1]);
+    c.strokeStyle = "#ff2d55"; c.lineWidth = 3; c.strokeRect(m[0], m[1], Wd - 2 * m[0], Hd - 2 * m[1]); c.restore();
+  } else if (kind === "portal") {
+    c.save(); c.strokeStyle = "#b388ff"; c.lineWidth = 6; c.strokeRect(3, 3, Wd - 6, Hd - 6); c.restore();
+  } else if (kind === "flap") {
+    c.save(); c.fillStyle = "#ff7a1f";
+    for (const o of flapList(T, seed, Wd, Hd)) { c.fillRect(o.x - o.w, 0, o.w * 2, o.gy - o.gh / 2); c.fillRect(o.x - o.w, o.gy + o.gh / 2, o.w * 2, Hd - o.gy - o.gh / 2); }
+    c.restore();
+  }
+}
+function dailyPortalGhosts(c, bl, Wd, Hd) {   // Baelle am Rand auch auf der Gegenseite zeigen (Portal)
+  c.fillStyle = "#ff4444";
+  for (const b of bl) for (const ox of [-Wd, 0, Wd]) for (const oy of [-Hd, 0, Hd]) {
+    if (!ox && !oy) continue;
+    const x = b.x + ox, y = b.y + oy;
+    if (x + b.radius > 0 && x - b.radius < Wd && y + b.radius > 0 && y - b.radius < Hd) { c.beginPath(); c.arc(x, y, b.radius, 0, Math.PI * 2); c.fill(); }
+  }
+}
 function dailyMakeBall(g, gi, T, initial) {
+  if (g.online) {   // wie im normalen Modus; im Shrink-Modus nur innerhalb der aktuellen Arena
+    const f = dailyActiveCh().field, m = (f && f.type === "shrink") ? fieldMargin(T, W(), H()) : [0, 0], me0 = players[0];
+    let ob, k = 0;
+    do {
+      ob = makeOnlineBall();
+      ob.x = Math.max(m[0] + ob.radius, Math.min(W() - m[0] - ob.radius, ob.x));
+      ob.y = Math.max(m[1] + ob.radius, Math.min(H() - m[1] - ob.radius, ob.y));
+    } while (me0 && m[0] > 0 && Math.hypot(ob.x - me0.x, ob.y - me0.y) < me0.radius + ob.radius + 200 && k++ < 20);
+    ob.gi = gi; return ob;
+  }
   const rng = Math.random, me = players[0];
   const cx = me ? me.x : W() / 2, cy = me ? me.y : H() / 2, mr = me ? me.radius : 12;
   const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10;
@@ -2923,6 +3030,7 @@ function startSurvival(daily, testIdx) {
   try { if (fbReady && myUid) RPC.armSurvivalLiveDisconnect().catch(() => {}); } catch (e) {}
   survRec = { v: 1, w: W(), h: H(), c: myBallColor, r: me.radius, p: [Math.round(me.x), Math.round(me.y)], s: [] };
   _dailyLight = _dailyKey ? (dailyActiveCh().light || null) : null; if (_dailyLight) survRec.lt = _dailyLight;
+  if (_dailyKey) { const _f = dailyActiveCh().field; if (_f) { survRec.fd = _f.type; survRec.fs = dailySeed(_dailyKey); } }   // Feld-Modus fuers Replay
   if (_dailyKey) for (const b of balls) dailyRec(b, 1);
   const hud = document.createElement("div");
   hud.id = "survivalHUD";
@@ -3218,20 +3326,14 @@ function playSurvivalReplay(rec, label) {
     }
     const pp = posAt(Math.min(tick, rec.n));
     for (const b of bl) if (b.h) { let d = Math.atan2(pp[1] - b.y, pp[0] - b.x) - Math.atan2(b.vy, b.vx); while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; const na = Math.atan2(b.vy, b.vx) + Math.max(-b.h, Math.min(b.h, d)); b.vx = Math.cos(na) * b.hs; b.vy = Math.sin(na) * b.hs; }
-    for (const b of bl) {
-      dailyAdv(b);
-      b.x += b.vx; b.y += b.vy;
-      if (b.x - b.radius < 0)  { b.vx =  Math.abs(b.vx); b.x = b.radius; }
-      if (b.x + b.radius > Wd) { b.vx = -Math.abs(b.vx); b.x = Wd - b.radius; }
-      if (b.y - b.radius < 0)  { b.vy =  Math.abs(b.vy); b.y = b.radius; }
-      if (b.y + b.radius > Hd) { b.vy = -Math.abs(b.vy); b.y = Hd - b.radius; }
-    }
+    for (const b of bl) { dailyAdv(b); dailyMoveBall(b, Wd, Hd, tick, rec.fd || null); }
   };
   const frame = () => {
     if (closed) return;
     const target = Math.min(rec.n, Math.floor((performance.now() - t0) / (1000 / 60)));
     while (tick < target) step();
     c.clearRect(0, 0, Wd, Hd);
+    if (rec.fd) dailyFieldDraw(c, rec.fd, Math.min(tick, rec.n), Wd, Hd, rec.fs || 0);
     const _L = rec.lt || null, _pp = posAt(Math.min(tick, rec.n)), _alive = tick < rec.n;
     if (_L && _alive) dailyLightFx(c, _L, _pp[0], _pp[1], tick, Wd, Hd);
     for (const b of bl) {
@@ -3239,6 +3341,7 @@ function playSurvivalReplay(rec, label) {
       let al = 1; if (b.exp) { const left = (b.exp - tick) * (1000 / 60); if (left < 2000) al = Math.floor(left / 120) % 2 ? 0.35 : 0.9; }
       c.globalAlpha = al * _v; c.beginPath(); c.arc(b.x, b.y, b.radius, 0, Math.PI * 2); c.fillStyle = b.col || (b.h ? "#ff9d00" : "#ff4444"); c.fill(); c.globalAlpha = 1;
     }
+    if (rec.fd === "portal") dailyPortalGhosts(c, bl, Wd, Hd);
     const [px, py] = posAt(tick);
     c.beginPath(); c.arc(px, py, rec.r || 18, 0, Math.PI * 2); c.fillStyle = rec.c || "#00ff88"; c.fill();
     c.fillStyle = "#fff"; c.font = "700 28px system-ui,sans-serif"; c.textAlign = "left";
@@ -7086,8 +7189,9 @@ function update() {
       }
     }
 
+    const _fk = _isDaily ? ((dailyActiveCh().field || {}).type || null) : null;
     for (const b of balls) {
-      if (_isDaily) dailyAdv(b);
+      if (_isDaily) { dailyAdv(b); dailyMoveBall(b, W(), H(), survTick, _fk); continue; }
       b.x += b.vx; b.y += b.vy;
       if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
       if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
@@ -7178,6 +7282,7 @@ function update() {
       me.y = Math.max(me.radius, Math.min(H()-me.radius, me.y));
     }
 
+    if (me && me.alive && survivalActive && _isDaily && dailyFieldHit(me)) { me.alive = false; endSurvival(false); return; }   // Laser / Wand / Saeule
     if (me && me.alive) checkOnlineCollision(me);
     if (me && me.alive) checkOpponentPassThrough(me);
     return;
@@ -7807,6 +7912,9 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 
   const _lme = (_dailyLight && _dailyKey && survivalActive) ? players[0] : null, _lOn = !!(_lme && _lme.alive);
   if (_lOn) dailyLightFx(ctx, _dailyLight, _lme.x, _lme.y, survTick, W(), H());
+  const _fdd = (_dailyKey && survivalActive) ? (dailyActiveCh().field || null) : null;
+  if (_fdd) dailyFieldDraw(ctx, _fdd.type, survTick, W(), H(), dailySeed(_dailyKey));
+  if (_fdd && _fdd.type === "portal") dailyPortalGhosts(ctx, balls, W(), H());
   for (const b of balls) {
     const _lv = _lOn ? dailyVis(_dailyLight, b, _lme.x, _lme.y, survTick) : 1; if (_lv <= 0) continue;
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
