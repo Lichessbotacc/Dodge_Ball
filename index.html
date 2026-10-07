@@ -1268,11 +1268,12 @@ async function rpcGet(path)        { return (await get(ref(db, path))).val(); }
 // Live-Listener mit Netz-Fallback: kommt innerhalb von 6 s kein Snapshot (WebSocket blockiert/instabil), wird alle 3 s per get() nachgeladen
 function onValueRobust(r, cb) {
   let got = false, stopped = false, iv = null;
+  const _slowPoll = ["players", "survival", "streakBoard", "dailyWins", "daily"].includes(r.key);   // grosse Pfade: Fallback-Polling nur alle 20 s statt 3 s
   const stopPoll = () => { if (iv) { clearInterval(iv); iv = null; } };
   const unsub = onValue(r, snap => { got = true; stopPoll(); cb(snap.val()); }, err => console.warn("listener error", err && err.code, err && err.message));
   const t = setTimeout(() => {
     if (got || stopped) return;
-    iv = setInterval(async () => { if (stopped) return; try { const sn = await get(r); if (!stopped) cb(sn.val()); } catch (e) {} }, 3000);
+    iv = setInterval(async () => { if (stopped) return; try { const sn = await get(r); if (!stopped) cb(sn.val()); } catch (e) {} }, _slowPoll ? 20000 : 3000);
   }, 6000);
   return () => { stopped = true; clearTimeout(t); stopPoll(); try { unsub(); } catch (e) {} };
 }
@@ -1943,7 +1944,20 @@ async function onFirebaseAndAuthReady() {
 // keeps the diff in the game logic itself minimal while removing the
 // vulnerability (no function here can write to an arbitrary path).
 // ─────────────────────────────────────────────
-async function dbGet(path)  { return RPC ? RPC.get(path) : null; }
+// Cache fuer grosse Tabellen: verhindert, dass jedes Leaderboard/Profil die komplette Tabelle neu laedt (spart Download-Traffic).
+// Parallele Aufrufe teilen sich denselben Request. TTL 60 s.
+const _DB_CACHE = {};
+const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily"]);
+async function dbGet(path) {
+  if (!RPC) return null;
+  if (!_DB_CACHE_PATHS.has(path)) return RPC.get(path);
+  const c = _DB_CACHE[path];
+  if (c && Date.now() - c.t < 60000) return c.p;
+  const p = RPC.get(path);
+  _DB_CACHE[path] = { t: Date.now(), p };
+  p.catch(() => { if (_DB_CACHE[path] && _DB_CACHE[path].p === p) delete _DB_CACHE[path]; });
+  return p;
+}
 function dbOn(path, cb)     { return RPC ? RPC.on(path, cb) : (() => {}); }
 
 async function getHeadToHeadScore(uidA, uidB) {
