@@ -1455,15 +1455,16 @@ async function rpcSaveSurvival(time, replayStr, name) {
   const uid = requireUid();
   return update(ref(db), {
     ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
-    ["survivalReplays/" + uid]: String(replayStr)
+    ["survivalReplays/" + uid]: replayStr ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
   });
 }
 // Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
-async function rpcSaveDaily(day, time, name) {
+async function rpcSaveDaily(day, time, name, ch) {
   requireNotBanned();
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
-  return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: Date.now() });
+  ch = Number(ch); if (!Number.isInteger(ch) || ch < 0 || ch > 500) throw new Error("Bad mode.");
+  return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: Date.now(), ch });
 }
 // Daily-Replay: nur eigener Knoten dailyReplays/{uid}/{YYYY-MM-DD}
 async function rpcSaveDailyReplay(day, str) {
@@ -1476,6 +1477,30 @@ async function rpcRemoveDailyReplay(day) {
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   return remove(ref(db, "dailyReplays/" + uid + "/" + day));
+}
+// Replay-Aufraeumen (eigene Replays) und Admin-Aufraeumen (alle Replays)
+async function rpcRemoveOwnDailyReplays(days) {
+  const uid = requireUid(), up = {};
+  (Array.isArray(days) ? days : []).slice(0, 400).forEach(d => { if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) up["dailyReplays/" + uid + "/" + d] = null; });
+  if (Object.keys(up).length) return update(ref(db), up);
+}
+async function rpcRemoveOwnSurvivalReplay() { const uid = requireUid(); return remove(ref(db, "survivalReplays/" + uid)); }
+// Admin: nur die Schluessel eines Knotens holen (REST shallow) - laedt KEINE Replay-Daten herunter
+async function rpcModShallowKeys(path) {
+  requireAdmin();
+  path = String(path);
+  if (!/^(survivalReplays|dailyReplays|dailyReplays\/[A-Za-z0-9_-]{1,128})$/.test(path)) throw new Error("Bad path.");
+  const tok = await auth.currentUser.getIdToken();
+  const r = await fetch(db.app.options.databaseURL + "/" + path + ".json?shallow=true&auth=" + encodeURIComponent(tok));
+  if (!r.ok) throw new Error("Shallow read failed (" + r.status + ")");
+  const v = await r.json();
+  return v && typeof v === "object" ? Object.keys(v) : [];
+}
+async function rpcModDeleteReplayPaths(paths) {
+  requireAdmin();
+  const ok = (Array.isArray(paths) ? paths : []).map(String).filter(p => /^(survivalReplays\/[A-Za-z0-9_-]{1,128}|dailyReplays\/[A-Za-z0-9_-]{1,128}\/\d{4}-\d{2}-\d{2})$/.test(p));
+  for (let i = 0; i < ok.length; i += 40) { const up = {}; ok.slice(i, i + 40).forEach(p => { up[p] = null; }); await update(ref(db), up); }
+  return ok.length;
 }
 // Daily-Sieg: nur eigener Knoten dailyWins/{uid}/{YYYY-MM-DD}
 async function rpcClaimDailyWin(day) {
@@ -1798,7 +1823,7 @@ async function rpcSendAppeal(name, text) {
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
@@ -2680,6 +2705,7 @@ function dailyIdxFor(key, depth) {
   const r = dailySeed("pick|" + key) % cand.length;
   return (_dailyIdxCache[ck] = cand[r]);
 }
+let _dailyRunIdx = null;   // Modus-Index, mit dem der aktuelle Daily-Lauf gestartet wurde (wird mit dem Eintrag gespeichert)
 let _dailyTest = null;   // nur Admin: Testlauf eines beliebigen Modus (wird nie gespeichert)
 function dailyChallengeFor(key) { return DAILY_CHALLENGES[dailyIdxFor(key)]; }
 function dailyActiveCh() { return _dailyTest || dailyChallengeFor(_dailyKey); }
@@ -2688,7 +2714,12 @@ async function dailyPicksRefresh() {
   try { if (typeof RPC !== "undefined" && RPC) { const v = await RPC.get("dailyPick"); _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); _dailyPicksLoaded = true; } } catch (e) { console.warn("dailyPick load failed", e); }
   try { updDailyBtn(); } catch (e) {}
 }
-async function startDaily() { await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]); startSurvival(true); }
+async function startDaily() {
+  await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+  // Modus unsicher (Festlegung noch nicht geladen) -> nicht starten, sonst landet ein Lauf im falschen Modus auf der Tafel
+  if (!_dailyPicksLoaded && typeof fbReady !== "undefined" && fbReady) { alert("Could not load today's mode. Check your connection and try again."); return; }
+  startSurvival(true);
+}
 setInterval(dailyPicksRefresh, 60000); setTimeout(dailyPicksRefresh, 1500); setTimeout(dailyPicksRefresh, 5000);
 let _dailyRun = null;
 // ── Licht-Modi: Sichtbarkeit (0..1) eines Balls, gleiche Funktion live und im Replay ──
@@ -2837,6 +2868,7 @@ function dailySeed(k) { let h = 2166136261; for (let i = 0; i < k.length; i++) {
 function startSurvival(daily, testIdx) {
   _dailyKey = daily === true ? dailyKeyNow() : null;
   _dailyTest = (daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null;
+  _dailyRunIdx = _dailyKey ? dailyIdxFor(_dailyKey) : null;
   if (!guestGate("survival")) return;
   countModeRun("survPlayed");
   try { cleanupOnline(); } catch (e) {}
@@ -2943,7 +2975,9 @@ async function endSurvival(camped) {
       const old = await dbGet("survival/" + myUid);
       best = (old && Number(old.time)) || 0;
       if (t > best && t >= 1) {
-        await RPC.saveSurvival(t, JSON.stringify(rec), onlineAccount.name);
+        let keepRep = true;
+        try { const svAll = (await RPC.get("survival")) || {}; keepRep = Object.entries(svAll).filter(([u, v]) => u !== myUid && (Number(v && v.time) || 0) > t).length < REPLAY_TOP_SURV; } catch (e) {}
+        await RPC.saveSurvival(t, keepRep ? JSON.stringify(rec) : null, onlineAccount.name);
         isRecord = true; best = t;
       }
     }
@@ -2951,29 +2985,82 @@ async function endSurvival(camped) {
   _survInfo = { best, isRecord, saved };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
-async function dailyCleanup() {   // eigene Replays vergangener Tage loeschen
+// ── Replay-Aufbewahrung: Survival nur Top 5, Daily nur Top 3 (pro Modus ueber alle Tage + Top 3 von heute) ──
+const REPLAY_TOP_SURV = 5, REPLAY_TOP_DAILY = 3;
+function _dEntryIdx(r) { const n = r && r.ch; return (typeof n === "number" && Number.isInteger(n) && n >= 0) ? n : null; }   // null = alter Eintrag ohne Modus
+function survivalKeepUids(sv, pl) {   // gleiche Logik wie die Survival-Rangliste
+  return new Set(Object.entries(sv || {}).filter(([u]) => !pl || pl[u])
+    .map(([u, r]) => ({ u, time: Number(r && r.time) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }))
+    .filter(r => r.time > 0).sort((a, b) => b.time - a.time)
+    .filter((r, i, arr) => { const k = String(dn(r.name)).trim().toLowerCase(); return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === k) === i; })
+    .slice(0, REPLAY_TOP_SURV).map(r => r.u));
+}
+function dailyKeepSet(daily, pl, today) {   // Menge "uid|day" der Daily-Replays, die behalten werden
+  const keep = new Set(), perMode = {}, todayRows = [], todayIdx = dailyIdxFor(today);
+  Object.entries(daily || {}).forEach(([day, users]) => {
+    Object.entries(users || {}).forEach(([uid, r]) => {
+      if (!r || (pl && !pl[uid])) return;
+      const time = Number(r.time) || 0, ts = Number(r.ts) || 0; if (time <= 0) return;
+      const ci = _dEntryIdx(r), idx = ci !== null ? ci : dailyIdxFor(day);
+      if (day === today && ci === todayIdx) todayRows.push({ uid, day, time, ts });
+      const m = perMode[idx] || (perMode[idx] = {}), cur = m[uid];
+      if (!cur || time > cur.time || (time === cur.time && ts < cur.ts)) m[uid] = { uid, day, time, ts };
+    });
+  });
+  const cmp = (a, b) => b.time - a.time || a.ts - b.ts;
+  todayRows.sort(cmp).slice(0, REPLAY_TOP_DAILY).forEach(x => keep.add(x.uid + "|" + x.day));
+  Object.values(perMode).forEach(m => Object.values(m).sort(cmp).slice(0, REPLAY_TOP_DAILY).forEach(x => keep.add(x.uid + "|" + x.day)));
+  return keep;
+}
+// Admin: ALLE Replays loeschen ausser Survival Top 5 und Daily Top 3 (laedt nur Schluessel, keine Replay-Daten)
+async function modCleanupReplays(silent) {
+  if (!_modIsAdminSafe()) return false;
+  if (!silent && !confirm("Delete ALL replays except Survival top " + REPLAY_TOP_SURV + " and Daily top " + REPLAY_TOP_DAILY + "? This cannot be undone.")) return false;
+  const R = _modRPC();
+  try {
+    await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+    if (!_dailyPicksLoaded) throw new Error("Daily modes not loaded - try again.");
+    const [sv, pl, daily] = await Promise.all([R.get("survival"), R.get("players"), R.get("daily")]);
+    const paths = []; let nS = 0, nD = 0;
+    if (sv && Object.keys(sv).length) {   // Schutz: bei leerem/fehlgeschlagenem Lesen nichts loeschen
+      const keepS = survivalKeepUids(sv, pl);
+      (await R.modShallowKeys("survivalReplays")).forEach(u => { if (!keepS.has(u)) { paths.push("survivalReplays/" + u); nS++; } });
+    }
+    if (daily && Object.keys(daily).length) {
+      const keepD = dailyKeepSet(daily, pl, dailyKeyNow());
+      for (const u of await R.modShallowKeys("dailyReplays")) {
+        const days = await R.modShallowKeys("dailyReplays/" + u);
+        days.forEach(d => { if (!keepD.has(u + "|" + d)) { paths.push("dailyReplays/" + u + "/" + d); nD++; } });
+      }
+    }
+    await R.modDeleteReplayPaths(paths);
+    if (!silent) alert("Done. Deleted " + nS + " survival replays and " + nD + " daily replays.");
+    return true;
+  } catch (e) { console.warn("replay cleanup failed", e); if (!silent) alert("Cleanup failed: " + (e && e.message || e)); return false; }
+}
+async function dailyCleanup(force) {   // eigene Replays aufraeumen: Survival nur Top 5, Daily nur Top 3
   if (!fbReady || !myUid || !RPC) return;
   try {
-    // Pro Modus bleibt nur das Replay der eigenen BESTEN Zeit erhalten (Mode-Bestenlisten im Daily-Tab); das heutige Replay bleibt immer
-    const all = await dbGet("dailyReplays/" + myUid), today = dailyKeyNow();
-    if (!all) return;
+    const today = dailyKeyNow();
+    if (!force) { try { if (localStorage.getItem("dobRepClean") === today) return; } catch (e) {} }   // normal nur 1x pro Tag
     if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
     if (!_dailyPicksLoaded) return;   // Modus-Zuordnung unsicher -> lieber nichts loeschen
-    const best = new Map(), runs = {};   // best: Modus -> { day, time, ts }
-    for (const d of Object.keys(all)) {
-      const e = await dbGet("daily/" + d + "/" + myUid);
-      runs[d] = e ? { time: Number(e.time) || 0, ts: Number(e.ts) || 0 } : null;
-      if (!runs[d] || runs[d].time <= 0) continue;
-      const c = dailyChallengeFor(d), cur = best.get(c);
-      if (!cur || runs[d].time > cur.time || (runs[d].time === cur.time && runs[d].ts < cur.ts)) best.set(c, { day: d, time: runs[d].time, ts: runs[d].ts });
+    const g = p => force ? RPC.get(p) : dbGet(p);
+    const [daily, pl, sv] = await Promise.all([g("daily"), g("players"), g("survival")]);
+    if (daily && Object.keys(daily).length) {
+      const keep = dailyKeepSet(daily, pl, today), mine = [];
+      Object.keys(daily).forEach(d => { if (daily[d] && daily[d][myUid] && !keep.has(myUid + "|" + d)) mine.push(d); });
+      if (mine.length) await RPC.removeOwnDailyReplays(mine);
     }
-    const keep = new Set([today]); best.forEach(v => keep.add(v.day));
-    for (const d of Object.keys(all)) if (!keep.has(d)) await RPC.removeDailyReplay(d);
-  } catch (e) { console.warn("daily cleanup failed", e); }
+    if (sv && sv[myUid] && Object.keys(sv).length && !survivalKeepUids(sv, pl).has(myUid)) await RPC.removeOwnSurvivalReplay();
+    try { localStorage.setItem("dobRepClean", today); } catch (e) {}
+  } catch (e) { console.warn("replay cleanup failed", e); }
 }
 async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ich Erster? -> Sieg eintragen
   if (!fbReady || !myUid || !RPC) return;
   try {
+    if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+    if (!_dailyPicksLoaded) return;
     const mine = (await dbGet("dailyWins/" + myUid)) || {}, base = Date.parse(dailyKeyNow() + "T12:00:00Z");
     for (let i = 1; i <= 14; i++) {
       const day = new Date(base - i * 86400000).toISOString().slice(0, 10);
@@ -2982,12 +3069,13 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
       if (!me) continue;
       const all = await dbGet("daily/" + day);
       const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
-      const arr = Object.entries(all || {}).filter(([u]) => pls[u]).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+      const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === dailyIdxFor(day))).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
       if (arr.length && arr[0].u === myUid) await RPC.claimDailyWin(day);
     }
   } catch (e) { console.warn("daily wins check failed", e); }
 }
-const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); dailyClaimWins(); } }, 4000);
+const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); dailyClaimWins();
+  try { if (_modIsAdminSafe() && localStorage.getItem("dobAdminRepClean") !== dailyKeyNow()) setTimeout(() => modCleanupReplays(true).then(ok => { if (ok) { try { localStorage.setItem("dobAdminRepClean", dailyKeyNow()); } catch (e) {} } }), 20000); } catch (e) {} } }, 4000);
 // Tageswechsel (0:00 Berlin) erkennen: Sieg von gestern sofort eintragen, ohne dass die Seite neu geladen werden muss
 let _dcLastDay = dailyKeyNow(), _dcBusy = false;
 async function _dcRecheck() { if (_dcBusy) return; _dcBusy = true; try { await dailyClaimWins(); dailyCleanup(); } finally { _dcBusy = false; } }
@@ -2998,7 +3086,7 @@ async function watchDailyReplay(day, uid, label) {
   if (!fbReady) return;
   let rec = null;
   try { const raw = await dbGet("dailyReplays/" + uid + "/" + day); rec = raw && JSON.parse(raw); } catch (e) {}
-  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay found."); return; }
+  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay available (replays are only kept for the top " + REPLAY_TOP_DAILY + ")."); return; }
   playSurvivalReplay(rec, label);
 }
 async function _endDaily(t, camped, rec) {
@@ -3007,20 +3095,30 @@ async function _endDaily(t, camped, rec) {
   try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}   // nur Notfall-Wert (offline/Gast)
   try {
     if (fbReady && myUid && onlineAccount) {
+      await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);   // Modus nochmal pruefen: wurde er waehrend des Laufs geaendert, zaehlt der Lauf nicht
+      if (_dailyRunIdx !== null && dailyIdxFor(key) !== _dailyRunIdx) {
+        _survInfo = { lost: true, stale: true, daily: true, key, best: 0, isRecord: false, saved: true, top: [], rank: 0 };
+        if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
+        return;
+      }
       const old = await dbGet("daily/" + key + "/" + myUid);
       best = (old && Number(old.time)) || 0;   // Datenbank ist massgeblich: wurden die Zeiten geloescht, zaehlt die alte lokale Bestzeit nicht mehr
       if (!old) { try { localStorage.removeItem("dobDaily"); } catch (e) {} }
       if (t > best && t >= 1) {
-        await RPC.saveDaily(key, t, onlineAccount.name); isRecord = true; best = t;
-        try { await RPC.saveDailyReplay(key, JSON.stringify(rec)); } catch (e) { console.warn("daily replay save failed", e); }
-        dailyCleanup();
+        await RPC.saveDaily(key, t, onlineAccount.name, _dailyRunIdx); isRecord = true; best = t;
+        try {   // Replay nur speichern, wenn der Lauf zu den Top 3 gehoert
+          const [dAll, plAll] = await Promise.all([RPC.get("daily"), RPC.get("players")]);
+          if (dailyKeepSet(dAll, plAll, dailyKeyNow()).has(myUid + "|" + key)) await RPC.saveDailyReplay(key, JSON.stringify(rec));
+          else await RPC.removeDailyReplay(key);
+        } catch (e) { console.warn("daily replay save failed", e); }
+        dailyCleanup(true);
       }
     } else if (t > best) { isRecord = true; best = t; }
   } catch (e) { saved = false; if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
-    if (all) { const arr = Object.entries(all).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
+    if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) !== null && _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
   } catch (e) {}
   _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
@@ -3034,7 +3132,7 @@ function renderSurvivalResult(t, camped) {
   }
   const i = _survInfo;
   const dly = i && i.daily;
-  const line = (i && i.lost) ? "📡 Connection lost – this run was not counted." : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
+  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
     : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
@@ -3042,7 +3140,7 @@ function renderSurvivalResult(t, camped) {
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped === "disconnect" ? "📡 Connection lost – you lost" : camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
-    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + ' ▶</div>').join('') + '</div>' : '')
+    + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + (k < REPLAY_TOP_DAILY ? ' ▶' : '') + '</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
     + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
@@ -3054,7 +3152,7 @@ async function watchSurvivalReplay(uid, label) {
   if (!fbReady) return;
   let rec = null;
   try { const raw = await dbGet("survivalReplays/" + uid); rec = raw && JSON.parse(raw); } catch (e) {}
-  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay found."); return; }
+  if (!rec || !Array.isArray(rec.p) || !rec.n) { alert("No replay available (replays are only kept for the top " + REPLAY_TOP_SURV + ")."); return; }
   playSurvivalReplay(rec, label);
 }
 function playSurvivalReplay(rec, label) {
@@ -3163,14 +3261,14 @@ async function loadDailyBoard(sel) {
   t.innerHTML = _dailyTabsHtml(sel)
     + '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? '📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key : mch.icon + ' ' + escapeHtml(mch.name) + ' · best times of all days') + '</span></div>'
     + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
-  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button></div>');
+  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modCleanupReplays()">🧹 Clean replays</button></div>');
   if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     let rows;
     if (isToday) {
       const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
       rows = Object.entries(dl || {})
-        .filter(([uid]) => !pl || pl[uid])
+        .filter(([uid, r]) => (!pl || pl[uid]) && _dEntryIdx(r) !== null && _dEntryIdx(r) === dailyIdxFor(key))   // nur Laeufe im Modus von heute
         .map(([uid, r]) => ({ uid, day: key, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }));
     } else {
       if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
@@ -3178,9 +3276,10 @@ async function loadDailyBoard(sel) {
       const best = {};   // pro Spieler die beste Zeit in diesem Modus (ueber alle Tage)
       Object.entries(all || {}).forEach(([day, users]) => {
         let c; try { c = dailyChallengeFor(day); } catch (e) { return; }
-        if (c !== mch) return;
         Object.entries(users || {}).forEach(([uid, r]) => {
           if (pl && !pl[uid]) return;
+          const ci = _dEntryIdx(r), ec = ci !== null ? DAILY_CHALLENGES[ci] : c;   // gespeicherter Modus des Laufs hat Vorrang
+          if (ec !== mch) return;
           const time = Number(r && r.time) || 0, ts = Number(r && r.ts) || 0;
           if (time <= 0) return;
           const cur = best[uid];
@@ -3193,7 +3292,7 @@ async function loadDailyBoard(sel) {
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? 'No runs yet today – be the first!' : 'No runs in this mode yet') + '</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}${isToday ? "" : '<br><small style="opacity:.6;">' + r.day + '</small>'}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${r.day}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span>${i < REPLAY_TOP_DAILY ? `<button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${r.day}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button>` : ""}</span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadDailyWinsBoard() {
@@ -3228,7 +3327,7 @@ async function loadSurvivalBoard() {
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No survival records yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span>${i < REPLAY_TOP_SURV ? `<button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchSurvivalReplay('${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button>` : ""}</span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 
