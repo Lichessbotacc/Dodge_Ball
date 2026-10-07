@@ -5384,7 +5384,7 @@ function startOnlineGame(matchData) {
   oppPlayer.netVY = 0;
 
   if (onlineVsBot) {
-    const s = 0.20;
+    const s = 0.17;   // Online-Bot-Staerke (war 0.20)
     oppPlayer.skill      = { aim:s, reaction:s, movement:s, awareness:s, aggression:s };
     oppPlayer.speed      = 2.5  + s * 8;
     oppPlayer.reaction   = 2    + s * 6;
