@@ -7790,27 +7790,9 @@ function tvBuildBoard(rows) {
       const last = merged[merged.length - 1];
       if (cl[i][0] <= last[1] + 1) last[1] = Math.max(last[1], cl[i][1]); else merged.push(cl[i]);
     }
-    if (merged.some(c => c[1] - c[0] > 7)) {
-      // Platz hat sich um viele Raenge geaendert (z.B. viele Spieler mit aehnlicher ELO): statt gar nichts zu zeigen,
-      // kompakte Zeile pro Spieler mit altem -> neuem Platz
-      const box2 = document.createElement("div");
-      box2.style.cssText = "margin:16px auto 0;width:min(340px,80vw);text-align:left;font-size:14px;animation:tvRise .5s ease .5s both;";
-      uids.forEach(u => {
-        const e = list.find(x => x.uid === u); if (!e) return;
-        const rb = B.findIndex(x => x.uid === u) + 1, ra = A.findIndex(x => x.uid === u) + 1, dr = rb - ra, ch = e.ch;
-        const r = document.createElement("div"); r.setAttribute("translate", "no");
-        r.style.cssText = "display:flex;align-items:center;gap:10px;padding:5px 10px;margin-top:4px;border-radius:8px;background:" + (ch > 0 ? "rgba(0,255,136,.14)" : ch < 0 ? "rgba(255,85,102,.14)" : "rgba(255,255,255,.05)") + ";";
-        const rk = document.createElement("span"); rk.style.cssText = "min-width:92px;opacity:.8;font-size:12px;"; rk.textContent = "#" + rb + " → #" + ra;
-        const nm = document.createElement("span"); nm.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;"; nm.textContent = e.name;
-        const el = document.createElement("span"); el.style.cssText = "min-width:44px;text-align:right;font-weight:700;color:" + (ch > 0 ? "#00ff88" : ch < 0 ? "#ff5566" : "#cfd6e4") + ";"; el.textContent = e.after;
-        const bd = document.createElement("span"); bd.style.cssText = "width:40px;text-align:right;font-size:12px;font-weight:700;color:" + (dr > 0 ? "#00ff88" : dr < 0 ? "#ff5566" : "#9aa0aa") + ";"; bd.textContent = dr > 0 ? "▲" + dr : dr < 0 ? "▼" + (-dr) : "＝";
-        r.append(rk, nm, el, bd); box2.append(r);
-      });
-      return box2;
-    }
     const RH = 30, SEP = 24;
     const box = document.createElement("div");
-    box.style.cssText = "position:relative;margin:16px auto 0;width:min(340px,80vw);text-align:left;font-size:14px;animation:tvRise .5s ease .5s both;";
+    box.style.cssText = "position:relative;width:100%;text-align:left;font-size:14px;";
     const nodes = [];   // { r, rk, el, e, afterTop, afterRank }
     let y = 0;
     merged.forEach((c, ci) => {
@@ -7841,7 +7823,15 @@ function tvBuildBoard(rows) {
       y += winB.length * RH;
     });
     box.style.height = y + "px";
+    // Wrapper: bei sehr vielen Zeilen (grosse Rang-Spruenge) scrollt der Ausschnitt mit, die Animation laeuft immer
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin:16px auto 0;width:min(340px,80vw);max-height:300px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;animation:tvRise .5s ease .5s both;";
+    wrap.append(box);
+    const mover = nodes.find(n => n.e.uid === uids[0]) || nodes[0];
+    const centerOn = (top, smooth) => { const tgt = Math.max(0, top + RH / 2 - wrap.clientHeight / 2); if (smooth && wrap.scrollTo) wrap.scrollTo({ top: tgt, behavior: "smooth" }); else wrap.scrollTop = tgt; };
+    if (y > 300 && mover) setTimeout(() => centerOn(parseFloat(mover.r.style.top) || 0, false), 700);
     setTimeout(() => {
+      if (y > 300 && mover) centerOn(mover.afterTop, true);
       nodes.forEach(n => {
         n.r.style.top = n.afterTop + "px"; n.rk.textContent = "#" + n.afterRank;
         if (n.e.ch) {
@@ -7853,7 +7843,7 @@ function tvBuildBoard(rows) {
         }
       });
     }, 1300);
-    return box;
+    return wrap;
   } catch (err) { console.warn("TV board failed", err); return null; }
 }
 function watchPlayerTV(uid) {
