@@ -116,6 +116,7 @@ import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimest
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getAnalytics }     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
 
+const APPCHECK_SITE_KEY = "";
 const firebaseConfig = {
   apiKey: "AIzaSyCd0qjg9NI_v73xOxP76yHbsNoo8ZEEpBs",
   authDomain: "darkonballs-restore.firebaseapp.com",
@@ -139,6 +140,8 @@ let _myUid     = null;
 
 try {
   _app = initializeApp(firebaseConfig);
+  // App Check (reCAPTCHA v3): Schluessel aus der Firebase Console hier eintragen. Leer = aus.
+  if (APPCHECK_SITE_KEY) { try { const ac = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js"); ac.initializeAppCheck(_app, { provider: new ac.ReCaptchaV3Provider(APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true }); } catch (e) { console.warn("App Check init failed", e); } }
   _db  = getDatabase(_app);
   // FIX: persistence chain (IndexedDB first, localStorage as fallback) set at init time.
   // The old un-awaited setPersistence(browserLocalPersistence) forced localStorage-only storage,
@@ -1281,9 +1284,15 @@ function rpcOn(path, cb)           { return onValueRobust(ref(db, path), cb); }
 
 // ── identity-gated writes: target is ALWAYS derived from the caller's
 //    own uid, never accepted as a free-form path from the caller ──
+let _ageOk = false;
 async function rpcSetOwnPlayer(data) {
   requireNotBanned();
   const uid = requireUid();
+  if (!_ageOk) {   // neuer Account: Erstellzeit (Serverzeit) einmalig stempeln - die Rules erlauben players/{uid} nur mit Stempel; Rekorde erst nach 24 h
+    const [a, p] = await Promise.all([get(ref(db, "accountAge/" + uid)), get(ref(db, "players/" + uid))]);
+    if (!a.exists() && !p.exists()) await set(ref(db, "accountAge/" + uid), serverTimestamp());
+    _ageOk = true;
+  }
   return set(ref(db, "players/" + uid), data);
 }
 async function rpcUpdateOwnPlayer(data) {
@@ -1806,6 +1815,29 @@ async function rpcModBanDevice(uid) {
   await Promise.all(ids.map(id => set(ref(db, "bannedDevices/" + id), Date.now())));
   return ids.length;
 }
+async function rpcModBanLinked(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) return [];
+  const all = (await get(ref(db, "deviceIds"))).val() || {};
+  const group = new Set([uid]), devs = new Set(Object.keys(all[uid] || {}));
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [u, d] of Object.entries(all)) {
+      if (u === MOD_ADMIN_UID_RPC || group.has(u)) continue;
+      const ids = Object.keys(d || {});
+      if (ids.some(x => devs.has(x))) { group.add(u); ids.forEach(x => devs.add(x)); grew = true; }
+    }
+  }
+  group.delete(uid);
+  const alts = [...group], now = Date.now();
+  await Promise.all([...devs].map(id => set(ref(db, "bannedDevices/" + id), now)));
+  for (const u of alts) {
+    const cur = (await get(ref(db, "sanctions/" + u + "/banned"))).val();
+    if (!cur) await update(ref(db, "sanctions/" + u), { banned: true, banReason: "Alt account of a banned player (same device).", bannedAt: now });
+  }
+  return alts;
+}
 async function rpcModUnbanDevice(uid) {
   requireAdmin(); uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return 0;
@@ -1829,7 +1861,7 @@ window._dobRPC = {
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
-  registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modUnbanDevice: rpcModUnbanDevice,
+  registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
   get: rpcGet, on: rpcOn,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
@@ -1972,7 +2004,7 @@ async function onFirebaseAndAuthReady() {
 // Cache fuer grosse Tabellen: verhindert, dass jedes Leaderboard/Profil die komplette Tabelle neu laedt (spart Download-Traffic).
 // Parallele Aufrufe teilen sich denselben Request. TTL 60 s.
 const _DB_CACHE = {};
-const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily"]);
+const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily", "accountAge"]);
 async function dbGet(path) {
   if (!RPC) return null;
   if (!_DB_CACHE_PATHS.has(path)) return RPC.get(path);
@@ -2986,6 +3018,9 @@ async function endSurvival(camped) {
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
 // ── Replay-Aufbewahrung: Survival nur Top 5, Daily nur Top 3 (pro Modus ueber alle Tage + Top 3 von heute) ──
+let _myAccAge = 0;
+const _ageIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_ageIv); RPC.get("accountAge/" + myUid).then(v => { _myAccAge = Number(v) || 0; }).catch(() => {}); } }, 3000);
+function _youngNote() { return (_myAccAge && Date.now() - _myAccAge < 86400000) ? " New accounts can post records after 24 h." : ""; }
 const REPLAY_TOP_SURV = 5, REPLAY_TOP_DAILY = 3;
 function _dEntryIdx(r) { const n = r && r.ch; return (typeof n === "number" && Number.isInteger(n) && n >= 0) ? n : null; }   // null = alter Eintrag ohne Modus
 function survivalKeepUids(sv, pl) {   // gleiche Logik wie die Survival-Rangliste
@@ -3132,8 +3167,8 @@ function renderSurvivalResult(t, camped) {
   }
   const i = _survInfo;
   const dly = i && i.daily;
-  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
-    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
+  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)" + _youngNote())
+    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." + _youngNote() :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
@@ -4567,6 +4602,7 @@ async function loadLeaderboard() {
   if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     const data = await dbGet("players");
+    const _ages = (await dbGet("accountAge").catch(() => null)) || {};   // Accounts juenger als 24 h stehen noch nicht in der Rangliste
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>No players</span></div>'; return; }
     
     // Holt alle Einträge und zeigt absolut jeden Account (inkl. Bot & älterer Accounts),
@@ -4577,7 +4613,7 @@ async function loadLeaderboard() {
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p => {
         const totalGames = (Number(p.wins) || 0) + (Number(p.losses) || 0);
-        return totalGames >= 1;
+        return totalGames >= 1 && (p.uid === myUid || !(Number(_ages[p.uid]) > 0 && Date.now() - Number(_ages[p.uid]) < 86400000));
       })
       .forEach(p => {
         const key = String(p.name || "").toLowerCase();
@@ -8492,7 +8528,7 @@ window.addEventListener("keydown", e => {
 // Zusaetzlich laeuft ein Mitschnitt der letzten ~20 s (eigene Position, Gegner, Baelle); 20 s nach der ersten Meldung wird er als botReplays/{uid} hochgeladen.
 // Der Admin sieht beides oben links im Menue unter "Cheaters" und entscheidet dort per Replay: Bannen oder nicht.
 // BOT_BLOCK_SYNTHETIC = true -> kuenstliche Eingaben werden zusaetzlich ignoriert (Bot steuert nichts mehr, Replay zeigt dann aber kaum Bewegung).
-const BOT_BLOCK_SYNTHETIC = false;
+const BOT_BLOCK_SYNTHETIC = true;
 const _flagBuf = [];
 setInterval(() => {
   try {
@@ -9495,6 +9531,14 @@ async function _modDeleteRecordsAct(uid, p) {
   if (r && r.failed && r.failed.length) alert("Could not delete " + r.failed.length + " entries (Database Rules must allow the admin to delete them):\n" + r.failed.slice(0, 12).join("\n"));
   else alert("Records of " + p.name + " deleted.");
 }
+async function _banLinkedAlts(uid) {   // alle Accounts mit gleicher Geraete-ID: Ban + Daten loeschen
+  try {
+    const R = _modRPC(), alts = await R.modBanLinked(uid);
+    for (const a of alts) { try { const pl = await R.get("players/" + a); await _modPurge(a, pl && pl.name); } catch (e) {} }
+    if (alts.length) console.warn("banned " + alts.length + " linked alt account(s)");
+    return alts.length;
+  } catch (e) { console.warn("linked ban failed", e); return 0; }
+}
 async function _modPurge(uid, name) {
   try { await _modRPC().modBanEloRefund(uid); } catch (e) { console.warn("ELO refund failed", e); alert("ELO of the opponents could not be corrected (Database Rules for eloGames / players / sanctions?):\n" + (e && e.message)); }
   const r = await _modRPC().modPurgeUser(uid, name);
@@ -9517,6 +9561,7 @@ async function _modBan(uid, s, p) {
   } catch (e) { console.warn("backup failed", e); }
   await _modRPC().modSetSanction(uid, { banned: true, banReason: reason.trim(), bannedAt: Date.now() });
   try { const nDev = await _modRPC().modBanDevice(uid); if (!nDev) alert("Warning: no device ID is known for this player (deviceIds/" + uid + " is empty), so NO device was banned. He can create a new account."); } catch (e) { console.warn("device ban failed", e); }
+  await _banLinkedAlts(uid);
   await _modPurge(uid, nm);
   await new Promise(r => setTimeout(r, 4000));        // sein Client bekommt den Ban und stoppt Schreibzugriffe; Restschreibungen werden noch einmal weggeraeumt
   await _modPurge(uid, nm);
@@ -9576,15 +9621,30 @@ async function _cheatBanOne(uid, name, why) {
   await R.modSetSanction(uid, { backup: { player: pl || null, survival: sv || null, streak: sk || null }, autoBan: { why: why, ts: Date.now() } });
   await R.modSetSanction(uid, { banned: true, banReason: "Cheating detected (automatic).", bannedAt: Date.now() });
   try { const nDev = await R.modBanDevice(uid); if (!nDev) console.warn("auto-ban: no device ID known for " + uid + " - device NOT banned"); } catch (e) { console.warn("device ban failed", e); }
+  await _banLinkedAlts(uid);
   await _modPurge(uid, name);
   await new Promise(r => setTimeout(r, 4000));
   await _modPurge(uid, name);
+}
+const BOT_AUTOBAN_N = 60;   // so viele kuenstliche Eingaben (isTrusted=false) -> automatischer Ban (laeuft, solange du als Admin das Spiel offen hast)
+async function _autoBanScripters() {
+  try {
+    const R = _modRPC(), fl = (await R.get("botFlags")) || {};
+    for (const [uid, f] of Object.entries(fl)) {
+      if (!f || f.banned || uid === MOD_ADMIN_UID || (Number(f.n) || 0) < BOT_AUTOBAN_N || _cheatIgnoreGet()[uid] !== undefined) continue;
+      if (await R.get("sanctions/" + uid + "/banned")) continue;
+      const nm = f.name || uid, why = "scripted input x" + f.n + " (automatic)";
+      await R.modFlagCheater(uid, nm, why, true, null);
+      await _cheatBanOne(uid, nm, why);
+    }
+  } catch (e) { console.warn("script autoban failed", e); }
 }
 async function _cheatScan(manual) {
   if (!_modIsAdmin() || !_modRPC() || _cheatScanning) return null;
   _cheatScanning = true;
   const report = { banned: [], flagged: [], pending: [], clean: true };
   try {
+    await _autoBanScripters();
     const found = await _cheatCollect(), now = Date.now();
     for (const uid of Object.keys(_cheatPending)) if (!found[uid]) delete _cheatPending[uid];   // Befund verschwunden -> kein Verdacht mehr
     for (const [uid, f] of Object.entries(found)) {
