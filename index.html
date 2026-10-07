@@ -2916,8 +2916,21 @@ async function endSurvival(camped) {
 async function dailyCleanup() {   // eigene Replays vergangener Tage loeschen
   if (!fbReady || !myUid || !RPC) return;
   try {
+    // Pro Modus bleibt nur das Replay der eigenen BESTEN Zeit erhalten (Mode-Bestenlisten im Daily-Tab); das heutige Replay bleibt immer
     const all = await dbGet("dailyReplays/" + myUid), today = dailyKeyNow();
-    if (all) for (const d of Object.keys(all)) if (d < today) await RPC.removeDailyReplay(d);
+    if (!all) return;
+    if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+    if (!_dailyPicksLoaded) return;   // Modus-Zuordnung unsicher -> lieber nichts loeschen
+    const best = new Map(), runs = {};   // best: Modus -> { day, time, ts }
+    for (const d of Object.keys(all)) {
+      const e = await dbGet("daily/" + d + "/" + myUid);
+      runs[d] = e ? { time: Number(e.time) || 0, ts: Number(e.ts) || 0 } : null;
+      if (!runs[d] || runs[d].time <= 0) continue;
+      const c = dailyChallengeFor(d), cur = best.get(c);
+      if (!cur || runs[d].time > cur.time || (runs[d].time === cur.time && runs[d].ts < cur.ts)) best.set(c, { day: d, time: runs[d].time, ts: runs[d].ts });
+    }
+    const keep = new Set([today]); best.forEach(v => keep.add(v.day));
+    for (const d of Object.keys(all)) if (!keep.has(d)) await RPC.removeDailyReplay(d);
   } catch (e) { console.warn("daily cleanup failed", e); }
 }
 async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ich Erster? -> Sieg eintragen
@@ -3100,22 +3113,49 @@ async function modDeleteAllDaily() {
   try { await RPC.modDeleteAllDaily(); try { localStorage.removeItem("dobDaily"); } catch (e) {} alert("All daily runs deleted."); loadDailyBoard(); }
   catch (e) { alert("Delete failed: " + (e && e.message || e)); }
 }
-async function loadDailyBoard() {
+function _dailyTabsHtml(sel) {
+  const btn = (act, label, on) => '<button style="margin:2px;padding:5px 10px;font-size:12px;' + (on ? 'border-color:#00ff88;' : '') + '" onclick="loadDailyBoard(' + act + ')">' + label + '</button>';
+  return '<div class="lb-row" style="display:block;text-align:center;">' + btn("'today'", '📅 Today', sel === "today")
+    + DAILY_CHALLENGES.map((c, i) => btn(i, c.icon + ' ' + escapeHtml(c.name), sel === i)).join("") + '</div>';
+}
+async function loadDailyBoard(sel) {
+  if (sel === undefined || sel === null) sel = "today";
   const t = document.getElementById("lbTable"), key = dailyKeyNow(), ch = dailyChallengeFor(key);
-  t.innerHTML = '<div class="lb-row"><span style="margin:0 auto;">📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key + '</span></div>'
+  const isToday = sel === "today", mch = isToday ? ch : DAILY_CHALLENGES[sel];
+  t.innerHTML = _dailyTabsHtml(sel)
+    + '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? '📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key : mch.icon + ' ' + escapeHtml(mch.name) + ' · best times of all days') + '</span></div>'
     + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
   if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button></div>');
   if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
-    const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
-    const rows = Object.entries(dl || {})
-      .filter(([uid]) => !pl || pl[uid])
-      .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
-      .filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
-    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No runs yet today – be the first!</span></div>'; return; }
+    let rows;
+    if (isToday) {
+      const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
+      rows = Object.entries(dl || {})
+        .filter(([uid]) => !pl || pl[uid])
+        .map(([uid, r]) => ({ uid, day: key, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }));
+    } else {
+      if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+      const [all, pl] = await Promise.all([dbGet("daily"), dbGet("players")]);
+      const best = {};   // pro Spieler die beste Zeit in diesem Modus (ueber alle Tage)
+      Object.entries(all || {}).forEach(([day, users]) => {
+        let c; try { c = dailyChallengeFor(day); } catch (e) { return; }
+        if (c !== mch) return;
+        Object.entries(users || {}).forEach(([uid, r]) => {
+          if (pl && !pl[uid]) return;
+          const time = Number(r && r.time) || 0, ts = Number(r && r.ts) || 0;
+          if (time <= 0) return;
+          const cur = best[uid];
+          if (!cur || time > cur.time || (time === cur.time && ts < cur.ts)) best[uid] = { uid, day, time, ts, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" };
+        });
+      });
+      rows = Object.values(best);
+    }
+    rows = rows.filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? 'No runs yet today – be the first!' : 'No runs in this mode yet') + '</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
-      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span>
-      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${key}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}${isToday ? "" : '<br><small style="opacity:.6;">' + r.day + '</small>'}</span><span>${survFmt(r.time)}</span>
+      <span><button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${r.day}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadDailyWinsBoard() {
