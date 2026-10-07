@@ -1239,7 +1239,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
    ═══════════════════════════════════════════════════════════════════ */
 import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { query, limitToLast, orderByKey, endBefore, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { query, limitToLast, orderByKey, endBefore, orderByChild, equalTo, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
@@ -1354,6 +1354,12 @@ function rpcOnMatch(matchId, cb) {
   return onValueRobust(ref(db, "onlineMatches/" + matchId), cb);
 }
 async function rpcGetMatch(matchId) { return rpcGet("onlineMatches/" + matchId); }
+// Atomar: nur EIN Client darf pro Runde ein Match per Aufgabe beenden (verhindert, dass bei gleichzeitigem Timeout beide als Sieger gewertet werden)
+async function rpcClaimMatchEnd(matchId, round) {
+  const uid = requireUid();
+  const r = await runTransaction(ref(db, "onlineMatches/" + matchId + "/endClaim_" + (Number(round) || 0)), cur => cur ? undefined : { by: uid, ts: Date.now() });
+  return !!(r && r.committed);
+}
 
 // ── head-to-head: namespaced by sorted uid pair, writable by either
 //    participant ──
@@ -1485,9 +1491,12 @@ async function rpcModSetDailyPick(day, idx) {
   return set(ref(db, "dailyPick/" + day), idx);
 }
 // Admin: loest bei ALLEN geoeffneten Seiten das Pop-up "Bitte Seite neu laden" aus (Knoten updateNotice/ts)
-async function rpcModBroadcastReload() {
+async function rpcModBroadcastReload(text) {
   requireAdmin();
-  return set(ref(db, "updateNotice"), { ts: Date.now(), by: MOD_ADMIN_UID_RPC });
+  const rec = { ts: Date.now(), by: MOD_ADMIN_UID_RPC };
+  const t = String(text || "").trim().slice(0, 1000);
+  if (t) rec.text = t;   // optional: was wurde geaendert (wird im Pop-up angezeigt)
+  return set(ref(db, "updateNotice"), rec);
 }
 async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
@@ -1792,7 +1801,7 @@ window._dobRPC = {
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
   sendInvite: rpcSendInvite, removeOwnInvite: rpcRemoveOwnInvite,
   createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, setMatchPath: rpcSetMatchPath,
-  removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch,
+  removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch, claimMatchEnd: rpcClaimMatchEnd,
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
@@ -3310,6 +3319,11 @@ async function forfeitOpponent() {
     if (!cur || cur.status === "abandoned" || cur.status === "done") return;
   } catch (e) {}
   if (onlineResultHandled || onlineMatchId !== id) return;
+  // Race-Schutz: bei gleichzeitigem Timeout beider Spieler (Lag, Tab im Hintergrund) darf nur EINER den Sieg bekommen.
+  // Wer den Anspruch nicht bekommt (oder ihn nicht sicher pruefen kann), wertet nichts selbst: das Ergebnis kommt dann vom Match-Listener.
+  let _claimed = false;
+  try { _claimed = await Promise.race([RPC.claimMatchEnd(id, onlineRound), new Promise(r => setTimeout(() => r(false), 5000))]); } catch (e) { _claimed = false; }
+  if (!_claimed || onlineResultHandled || onlineMatchId !== id) return;
   disarmOnlineDisconnect();
   const change = forfeitChange(true);
   RPC.updateMatch(id, { status: "abandoned", forfeitBy: (onlineOpponent && onlineOpponent.uid) || null, eloChange: change }).catch(() => {});
@@ -9618,7 +9632,7 @@ async function modDeleteChatMsg(key) {
   try { if (typeof DICT !== "undefined" && DICT.de) Object.assign(DICT.de, {
     "New update available": "Neues Update verfügbar",
     "A new update has been made. To continue playing, please reload the page.": "Es gibt ein neues Update. Um weiterzuspielen, lade bitte die Seite neu.",
-    "Reload now": "Jetzt neu laden", "Later": "Später"
+    "Reload now": "Jetzt neu laden", "Later": "Später", "What's new": "Was ist neu"
   }); } catch (e) {}
   function inMatch() {   // laufendes 1v1, Survival/Daily oder Streak-Run: Pop-up zurueckhalten (Reload wuerde den Lauf verlieren)
     try {
@@ -9628,6 +9642,7 @@ async function modDeleteChatMsg(key) {
     } catch (e) {}
     return false;
   }
+  let _noteText = "";   // zuletzt gesendeter "Was wurde geaendert"-Text
   function show() {
     if (document.getElementById("updatePopup")) return;
     const ov = document.createElement("div");
@@ -9637,9 +9652,11 @@ async function modDeleteChatMsg(key) {
       + '<div style="font-size:46px;line-height:1;margin-bottom:8px;">🔄</div>'
       + '<div class="upT" style="font-family:var(--font-display,sans-serif);font-weight:800;font-size:26px;letter-spacing:.5px;color:#00ff88;margin-bottom:10px;"></div>'
       + '<div class="upM" style="font-size:15px;line-height:1.5;color:#cfd6e4;margin-bottom:20px;"></div>'
+      + '<div class="upC" style="display:none;text-align:left;font-size:14px;line-height:1.45;color:#eaf2fb;background:rgba(0,255,136,.07);border:1px solid rgba(0,255,136,.25);border-radius:12px;padding:10px 14px;margin:-8px 0 20px;max-height:34vh;overflow:auto;white-space:pre-wrap;word-break:break-word;"></div>'
       + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;"><button class="upR" style="margin:0;"></button></div></div>';
     ov.querySelector(".upT").textContent = T("New update available");
     ov.querySelector(".upM").textContent = T("A new update has been made. To continue playing, please reload the page.");
+    if (_noteText) { const c = ov.querySelector(".upC"); c.style.display = "block"; c.textContent = "✨ " + T("What's new") + ":\n" + _noteText; }
     ov.querySelector(".upR").textContent = "🔄 " + T("Reload now");
     ov.querySelector(".upR").onclick = () => location.reload();
     document.body.appendChild(ov);
@@ -9656,17 +9673,33 @@ async function modDeleteChatMsg(key) {
       window._dobRPC.on("updateNotice", d => {
         const ts = d && Number(d.ts) || 0;
         if (!_got) { _got = true; _base = ts; return; }
-        if (ts && ts !== _base) { _base = ts; tryShow(); }   // auch der Admin bekommt das Pop-up
+        if (ts && ts !== _base) { _base = ts; _noteText = String(d.text || "").slice(0, 1000); tryShow(); }   // auch der Admin bekommt das Pop-up
       });
     } catch (e) { _sub = false; }
   }
   setInterval(subscribe, 2000); subscribe();
   // Admin-Button
-  window.modBroadcastReload = async function () {
-    if (!isAdmin()) return;
-    if (!confirm("Pop-up \"Bitte Seite neu laden\" jetzt bei ALLEN Spielern anzeigen?")) return;
-    try { await window._dobRPC.modBroadcastReload(); alert("Gesendet."); }
-    catch (e) { alert("Fehlgeschlagen: " + (e && e.message) + " (Database Rules fuer updateNotice gesetzt?)"); }
+  window.modBroadcastReload = function () {
+    if (!isAdmin() || document.getElementById("updNoteOv")) return;
+    const ov = document.createElement("div"); ov.id = "updNoteOv";
+    ov.style.cssText = "position:fixed;inset:0;z-index:20001;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,0.78);padding:16px;box-sizing:border-box;";
+    ov.innerHTML = '<div style="width:min(460px,94vw);background:#16161f;border:1px solid rgba(0,255,136,.35);border-radius:16px;padding:20px;color:#eaf2fb;font-family:var(--font-body,sans-serif);">'
+      + '<div style="font-size:18px;font-weight:700;margin-bottom:6px;">🔄 Update-Popup an ALLE senden</div>'
+      + '<div style="font-size:13px;color:#aab2c5;margin-bottom:8px;">Was wurde geändert? (optional, wird im Popup angezeigt)</div>'
+      + '<textarea class="unT" maxlength="1000" rows="6" style="width:100%;box-sizing:border-box;resize:vertical;background:#0d0d14;color:#eaf2fb;border:1px solid #333;border-radius:10px;padding:10px;font:14px/1.4 var(--font-body,sans-serif);" placeholder="z.B. - Daily: alle Modi im Leaderboard\n- Online TV reagiert sofort\n- Fix: Gegner verlässt → beide bekamen Punkte"></textarea>'
+      + '<div class="unN" style="font-size:12px;color:#aab2c5;text-align:right;margin:2px 0 10px;">0 / 1000</div>'
+      + '<div style="display:flex;gap:10px;justify-content:flex-end;"><button class="unC" style="margin:0;">Abbrechen</button><button class="unS" style="margin:0;">Senden</button></div></div>';
+    document.body.appendChild(ov);
+    const ta = ov.querySelector(".unT"), cnt = ov.querySelector(".unN");
+    ta.oninput = () => { cnt.textContent = ta.value.length + " / 1000"; };
+    ov.querySelector(".unC").onclick = () => ov.remove();
+    ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+    ov.querySelector(".unS").onclick = async () => {
+      const btn = ov.querySelector(".unS"); btn.disabled = true;
+      try { await window._dobRPC.modBroadcastReload(ta.value); ov.remove(); alert("Gesendet."); }
+      catch (e) { btn.disabled = false; alert("Fehlgeschlagen: " + (e && e.message) + " (Database Rules fuer updateNotice gesetzt?)"); }
+    };
+    setTimeout(() => ta.focus(), 50);
   };
   function adminBtn() {
     const ex = document.getElementById("updBcBtn");
