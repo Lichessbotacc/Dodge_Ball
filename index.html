@@ -3133,8 +3133,10 @@ async function _endDaily(t, camped, rec) {
         return;
       }
       const old = await dbGet("daily/" + key + "/" + myUid);
-      best = (old && Number(old.time)) || 0;   // Datenbank ist massgeblich: wurden die Zeiten geloescht, zaehlt die alte lokale Bestzeit nicht mehr
-      if (!old) { try { localStorage.removeItem("dobDaily"); } catch (e) {} }
+      // Eintrag von einem ANDEREN Modus (Daily wurde im Lauf des Tages geaendert) zaehlt nicht mehr -> Daily-Runs sind zurueckgesetzt, neuer Lauf ueberschreibt ihn
+      const oldValid = old && (_dEntryIdx(old) === null || _dEntryIdx(old) === _dailyRunIdx);
+      best = (oldValid && Number(old.time)) || 0;   // Datenbank ist massgeblich: wurden die Zeiten geloescht, zaehlt die alte lokale Bestzeit nicht mehr
+      if (!oldValid) { try { localStorage.removeItem("dobDaily"); } catch (e) {} }
       if (t > best && t >= 1) {
         await RPC.saveDaily(key, t, onlineAccount.name, _dailyRunIdx); isRecord = true; best = t;
         try {   // Replay nur speichern, wenn der Lauf zu den Top 3 gehoert
