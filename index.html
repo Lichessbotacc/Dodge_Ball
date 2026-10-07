@@ -5873,6 +5873,7 @@ async function dbSetBotPlayer(data) {
 
 // ── Bot-Chat nach dem Match (lokal, nicht gespeichert) ──
 let botChatToken = 0, botUserTyped = false, botUsed = new Set();
+let botAwaitAnswer = false;   // true, solange die letzte Bot-Nachricht eine Rematch-Frage ist: nur die ERSTE Antwort darauf zaehlt als Zusage
 const BOT_CHAT = {
   won: {   // Bot hat gewonnen
     short: ["that was quick 😅", "over already? gg", "speedrun, gg", "blink and it's over lol", "that was fast, gg"],
@@ -5903,17 +5904,18 @@ function postChatAddLocal(name, text, mine) {
   tx.textContent = text; tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
   row.append(nm, tx); box.appendChild(row); box.scrollTop = box.scrollHeight;
 }
-function botSay(text, delay, onlyIfQuiet) {
+function botSay(text, delay, onlyIfQuiet, isAsk) {
   const tk = botChatToken;
   setTimeout(() => {
     const wo = document.getElementById("winnerOverlay");
     if (tk !== botChatToken || !onlineVsBot || !wo || wo.style.display === "none") return;
     if (onlyIfQuiet && botUserTyped) return;
     postChatAddLocal("Online Bot", text, false);
+    if (isAsk) botAwaitAnswer = true;   // Bot hat gerade nach einem Rematch gefragt -> naechste Spielernachricht ist die Antwort
   }, delay);
 }
 function botPostChatStart(botWon, secs) {
-  botUserTyped = false; botUsed = new Set();
+  botUserTyped = false; botUsed = new Set(); botAwaitAnswer = false;
   const set = botWon ? BOT_CHAT.won : BOT_CHAT.lost;
   const s = Number(secs) || 0;
   const len = s < 12 ? "short" : (s < 35 ? "mid" : "long");
@@ -5932,16 +5934,21 @@ function botPostChatStart(botWon, secs) {
   } catch (e) {}
   let t = 2600 + Math.random() * 600;
   if (extra) { botSay(extra, t); t += 1500 + Math.random() * 500; }
-  botSay(botPick(set.ask), t);
+  botSay(botPick(set.ask), t, false, true);
   // Wenn man nichts schreibt: spaeter freundlich nachhaken
-  botSay(botPick(BOT_CHAT.nudge), 15000 + Math.random() * 3000, true);
-  botSay(botPick(BOT_CHAT.nudge), 32000 + Math.random() * 4000, true);
+  botSay(botPick(BOT_CHAT.nudge), 15000 + Math.random() * 3000, true, true);
+  botSay(botPick(BOT_CHAT.nudge), 32000 + Math.random() * 4000, true, true);
 }
 function botPostChatReply(userText) {
   const tk = botChatToken, t = userText.toLowerCase();
   const lost = (window._botChatBotWon === false), R = (re) => re.test(t);
   botUserTyped = true;
-  if (R(/\b(rematch|revanche|revenge|again|yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet|one more|run it)\b/)) {
+  // Ein blosses "ja/ok/sure..." zaehlt nur direkt als Antwort auf die Rematch-Frage des Bots. Spaeter im Chat startet das KEIN Rematch.
+  // Ein ausdruecklicher Wunsch ("rematch", "revanche", "one more"...) funktioniert weiterhin jederzeit.
+  const awaiting = botAwaitAnswer; botAwaitAnswer = false;
+  const explicitRematch = R(/\b(rematch|revanche|revenge|again|one more|run it)\b/);
+  const plainYes = awaiting && R(/\b(yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet)\b/);
+  if (explicitRematch || plainYes) {
     botSay(botPick(["let's go 🔥", "bet, starting!", "alright, get ready", "here we go"]), 700);
     setTimeout(() => {
       const wo = document.getElementById("winnerOverlay");
@@ -5958,7 +5965,7 @@ function botPostChatReply(userText) {
   else if (R(/\b(hi|hey|hello|hallo|yo|sup)\b/)) botSay(botPick(["hey 👋", "yo", "hi there"]), 800);
   else if (R(/\b(gg|wp|nice|good|well|great)\b/)) botSay(botPick(["gg 🤝", "thanks, you too", "gg wp"]), 800);
   else if (R(/(lol|haha|lmao|xd|😂|🤣)/)) botSay(botPick(["😄", "haha", "lmao"]), 800);
-  else botSay(botPick(["haha", "fair enough", "rematch?", "😄", "true", "hmm 🤔"]), 900 + Math.random() * 700);
+  else { const _f = botPick(["haha", "fair enough", "rematch?", "😄", "true", "hmm 🤔"]); botSay(_f, 900 + Math.random() * 700, false, /rematch|revanche/.test(_f)); }
 }
 
 function showWinnerOverlay(winnerName, eloChange, eloRows) {
