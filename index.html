@@ -1284,15 +1284,9 @@ function rpcOn(path, cb)           { return onValueRobust(ref(db, path), cb); }
 
 // ── identity-gated writes: target is ALWAYS derived from the caller's
 //    own uid, never accepted as a free-form path from the caller ──
-let _ageOk = false;
 async function rpcSetOwnPlayer(data) {
   requireNotBanned();
   const uid = requireUid();
-  if (!_ageOk) {   // neuer Account: Erstellzeit (Serverzeit) einmalig stempeln - die Rules erlauben players/{uid} nur mit Stempel; Rekorde erst nach 24 h
-    const [a, p] = await Promise.all([get(ref(db, "accountAge/" + uid)), get(ref(db, "players/" + uid))]);
-    if (!a.exists() && !p.exists()) await set(ref(db, "accountAge/" + uid), serverTimestamp());
-    _ageOk = true;
-  }
   return set(ref(db, "players/" + uid), data);
 }
 async function rpcUpdateOwnPlayer(data) {
@@ -2004,7 +1998,7 @@ async function onFirebaseAndAuthReady() {
 // Cache fuer grosse Tabellen: verhindert, dass jedes Leaderboard/Profil die komplette Tabelle neu laedt (spart Download-Traffic).
 // Parallele Aufrufe teilen sich denselben Request. TTL 60 s.
 const _DB_CACHE = {};
-const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily", "accountAge"]);
+const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily"]);
 async function dbGet(path) {
   if (!RPC) return null;
   if (!_DB_CACHE_PATHS.has(path)) return RPC.get(path);
@@ -3018,9 +3012,6 @@ async function endSurvival(camped) {
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
 // ── Replay-Aufbewahrung: Survival nur Top 5, Daily nur Top 3 (pro Modus ueber alle Tage + Top 3 von heute) ──
-let _myAccAge = 0;
-const _ageIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_ageIv); RPC.get("accountAge/" + myUid).then(v => { _myAccAge = Number(v) || 0; }).catch(() => {}); } }, 3000);
-function _youngNote() { return (_myAccAge && Date.now() - _myAccAge < 86400000) ? " New accounts can post records after 24 h." : ""; }
 const REPLAY_TOP_SURV = 5, REPLAY_TOP_DAILY = 3;
 function _dEntryIdx(r) { const n = r && r.ch; return (typeof n === "number" && Number.isInteger(n) && n >= 0) ? n : null; }   // null = alter Eintrag ohne Modus
 function survivalKeepUids(sv, pl) {   // gleiche Logik wie die Survival-Rangliste
@@ -3167,8 +3158,8 @@ function renderSurvivalResult(t, camped) {
   }
   const i = _survInfo;
   const dly = i && i.daily;
-  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)" + _youngNote())
-    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." + _youngNote() :
+  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
+    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
@@ -4602,7 +4593,6 @@ async function loadLeaderboard() {
   if (!fbReady) { lbTable.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     const data = await dbGet("players");
-    const _ages = (await dbGet("accountAge").catch(() => null)) || {};   // Accounts juenger als 24 h stehen noch nicht in der Rangliste
     if (!data) { lbTable.innerHTML += '<div class="lb-row"><span>No players</span></div>'; return; }
     
     // Holt alle Einträge und zeigt absolut jeden Account (inkl. Bot & älterer Accounts),
@@ -4613,7 +4603,7 @@ async function loadLeaderboard() {
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p => {
         const totalGames = (Number(p.wins) || 0) + (Number(p.losses) || 0);
-        return totalGames >= 1 && (p.uid === myUid || !(Number(_ages[p.uid]) > 0 && Date.now() - Number(_ages[p.uid]) < 86400000));
+        return totalGames >= 1;
       })
       .forEach(p => {
         const key = String(p.name || "").toLowerCase();
