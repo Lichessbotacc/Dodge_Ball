@@ -7753,7 +7753,7 @@ function tvEloPanel(host, rows, mount) {   // host: Overlay (Konfetti), mount: Z
 // getrennt durch eine Zeile "⋮ N players".
 function tvBuildBoard(rows) {
   try {
-    const pd = window._lastPlayersData; if (!pd || !rows || rows.length < 1) return null;
+    const pd = window._lastPlayersData; if (!pd || !rows || rows.length < 1) { console.warn("TV board: no player data", !!pd, rows && rows.length); return null; }
     const ov = {}; rows.forEach(r => { if (r.uid) ov[r.uid] = r; });
     const byName = new Map();
     Object.entries(pd).forEach(([uid, pl]) => {
@@ -7765,7 +7765,7 @@ function tvBuildBoard(rows) {
     });
     const list = [...byName.values()];
     const uids = rows.map(r => r.uid).filter(u => u && list.find(x => x.uid === u));   // Bot-Gegner steht nicht in der Liste
-    if (!uids.length) return null;
+    if (!uids.length) { console.warn("TV board: players not found in list", rows.map(r => r.uid)); return null; }
     const cmp = (f) => (a, b) => (b[f] - a[f]) || a.name.localeCompare(b.name);
     const B = [...list].sort(cmp("before")), A = [...list].sort(cmp("after"));
     // pro Spieler ein Bereich (alter bis neuer Platz, je +-1 Nachbar), ueberlappende/angrenzende Bereiche werden verbunden
@@ -7778,7 +7778,24 @@ function tvBuildBoard(rows) {
       const last = merged[merged.length - 1];
       if (cl[i][0] <= last[1] + 1) last[1] = Math.max(last[1], cl[i][1]); else merged.push(cl[i]);
     }
-    if (merged.some(c => c[1] - c[0] > 7)) return null;
+    if (merged.some(c => c[1] - c[0] > 7)) {
+      // Platz hat sich um viele Raenge geaendert (z.B. viele Spieler mit aehnlicher ELO): statt gar nichts zu zeigen,
+      // kompakte Zeile pro Spieler mit altem -> neuem Platz
+      const box2 = document.createElement("div");
+      box2.style.cssText = "margin:16px auto 0;width:min(340px,80vw);text-align:left;font-size:14px;animation:tvRise .5s ease .5s both;";
+      uids.forEach(u => {
+        const e = list.find(x => x.uid === u); if (!e) return;
+        const rb = B.findIndex(x => x.uid === u) + 1, ra = A.findIndex(x => x.uid === u) + 1, dr = rb - ra, ch = e.ch;
+        const r = document.createElement("div"); r.setAttribute("translate", "no");
+        r.style.cssText = "display:flex;align-items:center;gap:10px;padding:5px 10px;margin-top:4px;border-radius:8px;background:" + (ch > 0 ? "rgba(0,255,136,.14)" : ch < 0 ? "rgba(255,85,102,.14)" : "rgba(255,255,255,.05)") + ";";
+        const rk = document.createElement("span"); rk.style.cssText = "min-width:92px;opacity:.8;font-size:12px;"; rk.textContent = "#" + rb + " → #" + ra;
+        const nm = document.createElement("span"); nm.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;"; nm.textContent = e.name;
+        const el = document.createElement("span"); el.style.cssText = "min-width:44px;text-align:right;font-weight:700;color:" + (ch > 0 ? "#00ff88" : ch < 0 ? "#ff5566" : "#cfd6e4") + ";"; el.textContent = e.after;
+        const bd = document.createElement("span"); bd.style.cssText = "width:40px;text-align:right;font-size:12px;font-weight:700;color:" + (dr > 0 ? "#00ff88" : dr < 0 ? "#ff5566" : "#9aa0aa") + ";"; bd.textContent = dr > 0 ? "▲" + dr : dr < 0 ? "▼" + (-dr) : "＝";
+        r.append(rk, nm, el, bd); box2.append(r);
+      });
+      return box2;
+    }
     const RH = 30, SEP = 24;
     const box = document.createElement("div");
     box.style.cssText = "position:relative;margin:16px auto 0;width:min(340px,80vw);text-align:left;font-size:14px;animation:tvRise .5s ease .5s both;";
@@ -7825,7 +7842,7 @@ function tvBuildBoard(rows) {
       });
     }, 1300);
     return box;
-  } catch (err) { return null; }
+  } catch (err) { console.warn("TV board failed", err); return null; }
 }
 function watchPlayerTV(uid) {
   if (!uid || !fbReady) return;
