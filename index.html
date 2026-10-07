@@ -8167,13 +8167,24 @@ async function startOnlineTV(targetUid) {
     onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
   };
 
+  // Leerlauf: ist gerade nichts zu sehen, sofort beim ersten Datenpaket eines neuen Spiels/Runs umschalten (nicht erst im 1,5s-Intervall).
+  // Laeuft schon etwas, kostet der Aufruf nichts (pickMatch kehrt sofort zurueck). Kurz gedrosselt, weil der Listener sehr oft feuert.
+  let _idlePickAt = 0, _idlePickTimer = null;
+  const pickNow = () => {
+    if (mode !== "online_tv" || !running || onlineTvCurrentMatchId || Date.now() < holdUntil) return;
+    const gap = Date.now() - _idlePickAt;
+    if (gap < 150) { if (!_idlePickTimer) _idlePickTimer = setTimeout(() => { _idlePickTimer = null; pickNow(); }, 160 - gap); return; }
+    _idlePickAt = Date.now();
+    pickMatch();
+  };
+  onlineUnsubscribes.push(() => { clearTimeout(_idlePickTimer); _idlePickTimer = null; });
   onlineTvUnsubscribe = dbOn("onlineMatches", (d) => {
     const first = lastMatchesData === null;
     lastMatchesData = d || {};
-    if (first) pickMatch();
+    if (first) pickMatch(); else pickNow();
   });
   onlineUnsubscribes.push(onlineTvUnsubscribe);
-  const survUnsub = dbOn("survivalLive", (d) => { lastSurvData = d || {}; if (lastMatchesData === null) { lastMatchesData = {}; } });
+  const survUnsub = dbOn("survivalLive", (d) => { lastSurvData = d || {}; if (lastMatchesData === null) { lastMatchesData = {}; } else pickNow(); });
   onlineUnsubscribes.push(survUnsub);
   setTimeout(() => { if (mode !== "online_tv" || !running) return; if (lastMatchesData === null) lastMatchesData = {}; pickMatch(); }, 1200);
 
