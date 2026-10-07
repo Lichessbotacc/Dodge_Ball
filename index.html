@@ -2047,8 +2047,14 @@ function renderPresence(playersData) {
     }
 
     let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
+    // Geraet immer anzeigen: fehlt es im gewaehlten Eintrag (z.B. alte Seite schreibt Status ohne Geraet), das Geraet eines anderen
+    // Eintrags mit gleichem Namen nehmen; ist wirklich nichts bekannt, ein neutrales Icon zeigen
+    const _devByName = {};
+    Object.values(playersData).forEach(q => { if (q && q.device && q.name && (!_devByName[String(q.name).toLowerCase()] || (q.lastActive || 0) > _devByName[String(q.name).toLowerCase()].at)) _devByName[String(q.name).toLowerCase()] = { d: q.device, at: q.lastActive || 0 }; });
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
+      const _dvEntry = _devByName[String(p.name || "").toLowerCase()];
+      const _dv = isMe ? (p.device || detectDeviceType()) : (p.device || (_dvEntry && _dvEntry.d) || "");
       const _busy = statusInMatch(p.status);
       const _pend = challengeOut.has(p.uid), _other = challengeOut.size > 0 && !_pend;
       const _tvBtn = (!isMe && fbReady && _busy)
@@ -2063,7 +2069,7 @@ function renderPresence(playersData) {
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
              class="pr-row"
              onclick="openOnlineProfile('${escapeHtml(p.uid)}')" title="View profile">
-          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}${p.device ? ' <span title="' + escapeHtml(p.device) + '" style="font-size:12px;opacity:.85;">' + deviceIcon(p.device) + '</span>' : ''}</span>
+          <span style="color: ${isMe ? '#00ff88' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">${escapeHtml(dn(p.name))}${isMe ? ' (You)' : ''}${' <span title="' + escapeHtml(deviceIcon(_dv) ? _dv : "desktop") + '" style="font-size:12px;opacity:.85;">' + deviceIcon(deviceIcon(_dv) ? _dv : "desktop") + '</span>'}</span>
           <span style="display:flex;align-items:center;"><span style="color: #ffd700; font-style: italic;">${escapeHtml(p.status)}</span>${_tvBtn}${_chBtn}</span>
         </div>
       `;
