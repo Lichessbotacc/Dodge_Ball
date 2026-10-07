@@ -1534,6 +1534,11 @@ async function rpcModBroadcastReload(text) {
     if (ks.length > 30) { const rm = {}; ks.slice(0, ks.length - 30).forEach(k => { rm["log/" + k] = null; }); await update(ref(db, "updateNotice"), rm); }
   } catch (e) {}
 }
+async function rpcModDeleteDailyRun(day, uid) {
+  requireAdmin(); day = String(day); uid = String(uid);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad input.");
+  return update(ref(db), { ["daily/" + day + "/" + uid]: null, ["dailyReplays/" + uid + "/" + day]: null, ["dailyWins/" + uid + "/" + day]: null });
+}
 async function rpcModDeleteAllDaily() { requireAdmin(); return update(ref(db), { daily: null, dailyReplays: null }); }
 // TV-Zuschauer: nur der eigene Eintrag tvViewers/{target}/{uid}, wird bei Verbindungsabbruch automatisch entfernt
 function _tvKey(k) { if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(k))) throw new Error("Bad viewer key."); return String(k); }
@@ -1849,7 +1854,7 @@ async function rpcSendAppeal(name, text) {
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
@@ -3028,7 +3033,7 @@ function dailyKeepSet(daily, pl, today) {   // Menge "uid|day" der Daily-Replays
       if (!r || (pl && !pl[uid])) return;
       const time = Number(r.time) || 0, ts = Number(r.ts) || 0; if (time <= 0) return;
       const ci = _dEntryIdx(r), idx = ci !== null ? ci : dailyIdxFor(day);
-      if (day === today && ci === todayIdx) todayRows.push({ uid, day, time, ts });
+      if (day === today && (ci === null || ci === todayIdx)) todayRows.push({ uid, day, time, ts });
       const m = perMode[idx] || (perMode[idx] = {}), cur = m[uid];
       if (!cur || time > cur.time || (time === cur.time && ts < cur.ts)) m[uid] = { uid, day, time, ts };
     });
@@ -3144,7 +3149,7 @@ async function _endDaily(t, camped, rec) {
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
-    if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) !== null && _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
+    if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) === null || _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
   } catch (e) {}
   _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
@@ -3270,6 +3275,11 @@ async function loadStreakBoard() {
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.level}</span><span></span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
+async function modDeleteDailyRun(day, uid) {
+  if (!confirm("Delete this single daily run (" + day + ") and its replay?")) return;
+  try { await RPC.modDeleteDailyRun(day, uid); try { delete _DB_CACHE["daily"]; delete _DB_CACHE["dailyWins"]; } catch (e) {} loadDailyBoard(); }
+  catch (e) { alert("Delete failed: " + (e && e.message || e)); }
+}
 async function modDeleteAllDaily() {
   if (!confirm("Delete ALL daily runs and replays of ALL players? This cannot be undone.")) return;
   try { await RPC.modDeleteAllDaily(); try { localStorage.removeItem("dobDaily"); } catch (e) {} alert("All daily runs deleted."); loadDailyBoard(); }
@@ -3294,7 +3304,7 @@ async function loadDailyBoard(sel) {
     if (isToday) {
       const [dl, pl] = await Promise.all([dbGet("daily/" + key), dbGet("players")]);
       rows = Object.entries(dl || {})
-        .filter(([uid, r]) => (!pl || pl[uid]) && _dEntryIdx(r) !== null && _dEntryIdx(r) === dailyIdxFor(key))   // nur Laeufe im Modus von heute
+        .filter(([uid, r]) => (!pl || pl[uid]) && (_dEntryIdx(r) === null || _dEntryIdx(r) === dailyIdxFor(key)))   // nur Laeufe im Modus von heute
         .map(([uid, r]) => ({ uid, day: key, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }));
     } else {
       if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
@@ -3318,7 +3328,7 @@ async function loadDailyBoard(sel) {
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? 'No runs yet today – be the first!' : 'No runs in this mode yet') + '</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}${isToday ? "" : '<br><small style="opacity:.6;">' + r.day + '</small>'}</span><span>${survFmt(r.time)}</span>
-      <span>${i < REPLAY_TOP_DAILY ? `<button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${r.day}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button>` : ""}</span></div>`).join("");
+      <span>${i < REPLAY_TOP_DAILY ? `<button style="margin:0;padding:4px 12px;font-size:13px;" onclick="event.stopPropagation();watchDailyReplay('${r.day}','${escapeHtml(r.uid)}','${escapeHtml(dn(r.name)).replace(/'/g, "")}')">▶</button>` : ""}${_modIsAdminSafe() ? `<button style="margin:0 0 0 4px;padding:4px 8px;font-size:13px;" onclick="event.stopPropagation();modDeleteDailyRun('${r.day}','${escapeHtml(r.uid)}')">🗑</button>` : ""}</span></div>`).join("");
   } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
 }
 async function loadDailyWinsBoard() {
