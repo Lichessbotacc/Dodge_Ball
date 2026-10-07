@@ -2705,12 +2705,12 @@ let _dailyKey = null;
 // Verfolger laufen wie im Streak-Modus ab (9 s = 540 Ticks) und spawnen alle 1,5 s (90 Ticks) nach.
 // online=true: Baelle spawnen exakt wie im normalen Online-/Survival-Modus (makeOnlineBall: Groesse 15-35, Tempo (5-11)*0.5, 220 px Abstand, 1 pro Sekunde, keiner verschwindet).
 // field={type}: Feld-Modi mit Hindernissen, die reine Funktion von Tick + Bildgroesse + Tages-Seed sind (live und im Replay identisch):
-//   "laser" = rotierender Laser aus der Mitte (wird schneller), "shrink" = Waende ruecken zusammen, "portal" = Baelle fliegen durch die Waende, "flap" = Saeulen mit Luecken.
+//   "laser" = rotierender Laser aus der Mitte (konstantes Tempo), "shrink" = Waende ruecken zusammen, "portal" = Baelle fliegen durch die Waende, "flap" = Saeulen mit Luecken.
 const _onlGroup = () => ({ n: 0, cap: 99999, respawn: 60, online: true });
 const DAILY_CHALLENGES = [
   { icon: "🔦", name: "Laser + Balls",      field: { type: "laser" }, groups: [_onlGroup()] },
   { icon: "🪨", name: "Giants",             groups: [{ n: 0, cap: 99999, respawn: 120, v: 3.2, r: [55, 70] }] },   // startet leer, alle 2 s (120 Ticks) kommt ein Riese dazu, keiner verschwindet
-  { icon: "🧱", name: "Shrinking Arena",    field: { type: "shrink" }, groups: [_onlGroup()] },
+  { icon: "🧱", name: "Shrinking Arena",    field: { type: "shrink" }, groups: [Object.assign(_onlGroup(), { cap: 10 })] },   // cap 10: nach 10 Baellen (die nie verschwinden) spawnt nichts mehr
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
   { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
   // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
@@ -2780,12 +2780,12 @@ function dailyLightFx(c, L, px, py, tick, Wd, Hd) {   // Lichtschein um den Ball
   }
 }
 // ── Feld-Modi: alles ist eine reine Funktion von Tick T, Bildgroesse und Tages-Seed -> live und im Replay identisch ──
-const FLD = { laserArm: 90, laserW: 0.014, laserRamp: 1500, shrinkTicks: 2700, shrinkX: 0.30, shrinkY: 0.28,
-  flapPw: 0.05, flapGap0: 0.5, flapGapMin: 0.2, flapI0: 100, flapIMin: 36, flapIStep: 2.5, flapGapStep: 0.012 };
+const FLD = { laserArm: 90, laserW: 0.014, shrinkTicks: 2700, shrinkX: 0.30, shrinkY: 0.28,
+  flapPw: 0.05, flapGap0: 0.5, flapGapMin: 0.2, flapI0: 110, flapIMin: 72, flapIStep: 1.2, flapGapStep: 0.012 };
 function _fh(seed, i) { let h = (seed ^ Math.imul(i + 1, 2654435761)) >>> 0; h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function _segD(x, y, x1, y1, x2, y2) { const dx = x2 - x1, dy = y2 - y1; let u = ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy); u = Math.max(0, Math.min(1, u)); return Math.hypot(x - x1 - u * dx, y - y1 - u * dy); }
 function fieldMargin(T, Wd, Hd) { const f = Math.min(1, T / FLD.shrinkTicks); return [f * FLD.shrinkX * Wd, f * FLD.shrinkY * Hd]; }   // Shrink: Wandabstand links/rechts bzw. oben/unten
-function laserAngle(T, seed) { return _fh(seed, 0) * Math.PI * 2 + FLD.laserW * (T + T * T / (2 * FLD.laserRamp)); }   // Drehgeschwindigkeit waechst linear mit der Zeit
+function laserAngle(T, seed) { return _fh(seed, 0) * Math.PI * 2 + FLD.laserW * T; }   // konstante Drehgeschwindigkeit (laserW rad/Tick)
 const laserHalf = (Hd) => Math.max(3, Hd * 0.006);
 // Flappy: Spawnzeit und Luecke der i-ten Saeule sind deterministisch (Seed). Abstand schrumpft bis flapIMin, Luecke bis flapGapMin.
 const _flC = { key: null, t: [], gy: [] };
