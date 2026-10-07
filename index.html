@@ -1512,10 +1512,12 @@ async function rpcSetTvViewing(key) { const uid = requireUid(); const r = ref(db
 async function rpcClearTvViewing(key) { const uid = requireUid(); return remove(ref(db, "tvViewers/" + _tvKey(key) + "/" + uid)); }
 // Survival LIVE (fuer Online TV): nur der eigene Knoten survivalLive/{uid}
 async function rpcSetSurvivalLive(data) { requireNotBanned(); const uid = requireUid(); return set(ref(db, "survivalLive/" + uid), data); }
-function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
-async function rpcModRemoveLive(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); return remove(ref(db, "survivalLive/" + uid)); }
+function rpcArmSurvivalLiveDisconnect() { const uid = requireUid(); try { onDisconnect(ref(db, "liveBeat/" + uid)).remove(); } catch (e) {} return onDisconnect(ref(db, "survivalLive/" + uid)).remove(); }
+// Winziger Herzschlag (nur eine Zahl) statt den ganzen survivalLive-Knoten (mit Ball-Daten) an alle Clients zu schicken
+async function rpcSetLiveBeat(n) { requireNotBanned(); const uid = requireUid(); return set(ref(db, "liveBeat/" + uid), Number(n) || Date.now()); }
+async function rpcModRemoveLive(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); try { remove(ref(db, "liveBeat/" + uid)).catch(() => {}); } catch (e) {} return remove(ref(db, "survivalLive/" + uid)); }
 async function rpcModSetIdle(uid) { requireAdmin(); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid"); return update(ref(db, "players/" + uid), { status: "Idle in Menu" }); }
-async function rpcRemoveSurvivalLive() { const uid = requireUid(); return remove(ref(db, "survivalLive/" + uid)); }
+async function rpcRemoveSurvivalLive() { const uid = requireUid(); try { remove(ref(db, "liveBeat/" + uid)).catch(() => {}); } catch (e) {} return remove(ref(db, "survivalLive/" + uid)); }
 // Weekly league cleanup: removes ONLY the own entry of an old week (path contains own uid)
 async function rpcRemoveLeagueMember(week, tier, group) {
   const uid = requireUid();
@@ -1795,7 +1797,7 @@ async function rpcSendAppeal(name, text) {
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
-  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
+  saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
@@ -2014,11 +2016,11 @@ function _liveAlive(uid) {
 }
 function _startLiveTrack() {
   if (_liveTrackUnsub || !fbReady || !RPC) return;
-  _liveTrackUnsub = dbOn("survivalLive", (d) => {
+  _liveTrackUnsub = dbOn("liveBeat", (d) => {
     d = d || {}; const now = Date.now();
     if (!window._liveReady) window._liveReady = now;
     for (const [uid, v] of Object.entries(d)) {
-      const sig = String(v && v.x) + ":" + String(v && v.y) + ":" + String(v && v.bx) + ":" + String(v && v.by) + ":" + String(v && v.b);
+      const sig = String(v);   // liveBeat/{uid} = Zeitstempel, aendert sich alle ~5 s solange der Run laeuft
       const o = _liveTrack[uid];
       if (!o) _liveTrack[uid] = { sig, at: now };
       else if (o.sig !== sig) _liveTrack[uid] = { sig, at: now };
@@ -2576,7 +2578,7 @@ function viewerBadge(n) {
 function stopViewerCount() {
   if (_viewUnsub) { try { _viewUnsub(); } catch (e) {} _viewUnsub = null; }
   if (_viewKey && _viewWrite && fbReady && myUid) { try { RPC.clearTvViewing(_viewKey).catch(() => {}); } catch (e) {} }
-  _viewKey = null; _viewWrite = false; viewerBadge(null);
+  _viewKey = null; _viewWrite = false; window._tvViewKey = null; window._tvViewN = null; viewerBadge(null);
 }
 function watchViewerCount(key, imViewer) {
   stopViewerCount();
@@ -2584,7 +2586,8 @@ function watchViewerCount(key, imViewer) {
   _viewKey = String(key); _viewWrite = !!imViewer;
   if (_viewWrite && myUid) { try { RPC.setTvViewing(_viewKey).catch(e => console.warn("tvViewers: Eintragen fehlgeschlagen (Firebase Rules mit tvViewers veroeffentlicht?)", e)); } catch (e) {} }
   viewerBadge(0);
-  _viewUnsub = dbOn("tvViewers/" + _viewKey, (d) => { viewerBadge(d ? Object.keys(d).length : 0); });
+  window._tvViewKey = _viewKey; window._tvViewN = null;
+  _viewUnsub = dbOn("tvViewers/" + _viewKey, (d) => { const n = d ? Object.keys(d).length : 0; window._tvViewN = n; viewerBadge(n); });
 }
 
 // ═══ GAST-LIMIT: ohne Account darf jeder Modus 3x gespielt werden, danach kommt das Account-Popup ═══
@@ -2859,11 +2862,15 @@ function dobConnectionLost() {
   if (mode === "streak" && streak && streak.phase !== "over" && document.body.classList.contains("ingame")) streakEnd("disconnect");
 }
 let _survLiveAt = 0;
+// Schreibtakt: nur schnell (200 ms), wenn jemand per Online TV zuschaut (oder unbekannt); sonst alle 3 s
+function _liveGap() { try { return (window._tvViewKey === "surv_" + myUid && window._tvViewN === 0) ? 3000 : 200; } catch (e) { return 200; } }
+let _beatAt = 0;
+function _liveBeat() { const n = Date.now(); if (n - _beatAt < 5000) return; _beatAt = n; try { RPC.setLiveBeat(n).catch(() => {}); } catch (e) {} }
 function survPushLive(done, finalTime) {
   if (!fbReady || !myUid || !onlineAccount) return;
   const now = Date.now();
-  if (!done && now - _survLiveAt < 120) return;
-  _survLiveAt = now;
+  if (!done && now - _survLiveAt < _liveGap()) return;
+  _survLiveAt = now; _liveBeat();
   const me = players[0]; if (!me) return;
   const d = { name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius, x: Math.round(me.x), y: Math.round(me.y), t: survTick, done: !!done };
   if (_dailyKey) d.k = "daily";
@@ -6408,8 +6415,8 @@ let _skLiveAt = 0, _skTick = 0, _skLiveOn = false;
 function streakPushLive(done) {
   if (!fbReady || !myUid || !onlineAccount || !streak) return;
   const now = Date.now();
-  if (!done && now - _skLiveAt < 120) return;
-  _skLiveAt = now; _skTick++;
+  if (!done && now - _skLiveAt < _liveGap()) return;
+  _skLiveAt = now; _skTick++; _liveBeat();
   const me = players.find(p => p.name === "Player"), bot = players.find(p => p.name === "Bot");
   if (!me) return;
   const d = { k: "streak", name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius,
@@ -9740,7 +9747,7 @@ async function liveAdminCleanup() {
     for (const uid of Object.keys(_liveSeen)) if (!d[uid]) delete _liveSeen[uid];
   } catch (e) { console.warn("live cleanup failed", e); }
 }
-setInterval(liveAdminCleanup, 10000);   // Start unabhaengig vom Auth-Event; prueft intern, ob Admin
+setInterval(liveAdminCleanup, 30000);   // Start unabhaengig vom Auth-Event; prueft intern, ob Admin
 async function modDeleteChatMsg(key) {
   if (!confirm("Delete this chat message?")) return;
   try { await _modRPC().modDeleteChat(key); delete chatAll[key]; renderChat(true); }
