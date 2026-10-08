@@ -10456,7 +10456,11 @@ async function modDeleteChatMsg(key) {
       ov.querySelector(".upR").onclick = () => { setSeen(_base); ov.remove(); };
     } else {
       ov.querySelector(".upR").textContent = "🔄 " + T("Reload now");
-      ov.querySelector(".upR").onclick = () => { setSeen(_base); location.reload(); };
+      ov.querySelector(".upR").onclick = () => {
+        setSeen(_base);
+        if (window._dobStaleBuild) location.href = location.pathname + "?v=" + window._dobStaleBuild + location.hash;   // neue URL umgeht den alten Cache
+        else location.reload();
+      };
     }
     document.body.appendChild(ov);
   }
@@ -10485,6 +10489,46 @@ async function modDeleteChatMsg(key) {
     } catch (e) { _sub = false; }
   }
   setInterval(subscribe, 2000); subscribe();
+
+  // ═══ AUTOMATISCH: erkennt neue Versionen der Seite selbst - kein Build-Nummer-Pflegen, kein Admin-Klick noetig ═══
+  // 1) Beim Oeffnen: kam die Seite aus dem Browser-Cache (kein Netz-Transfer), wird sie mit der Server-Version verglichen. Weicht sie ab -> Pop-up.
+  // 2) Danach alle AUTO_UPDATE_POLL_MS: kleine HEAD-Anfrage (ETag/Last-Modified). Aenderung -> Pop-up (waehrend eines Matches zurueckgehalten).
+  const AUTO_UPDATE_POLL_MS = 5 * 60 * 1000;   // 0 = nur beim Oeffnen pruefen, nie waehrend des Spielens
+  function _h(str) { let a = 0xdeadbeef, b = 0x41c6ce57; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); a = Math.imul(a ^ c, 2654435761); b = Math.imul(b ^ c, 1597334677); } a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909); b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909); return (b >>> 0).toString(36) + (a >>> 0).toString(36); }
+  const _selfUrl = () => location.origin + location.pathname + location.search;
+  let _srvSig = null;
+  function _promptReload(tag) { if (document.getElementById("updatePopup")) return; window._dobStaleBuild = tag; tryShow(); }
+  async function _headSig() {
+    const r = await fetch(_selfUrl(), { method: "HEAD", cache: "no-store" });
+    return r.ok ? (r.headers.get("etag") || r.headers.get("last-modified") || null) : null;
+  }
+  async function autoUpdateStart() {
+    try {
+      if (location.protocol !== "http:" && location.protocol !== "https:") return;   // lokal (file://) gibt es nichts zu pruefen
+      let nav = null; try { nav = performance.getEntriesByType("navigation")[0]; } catch (e) {}
+      const fromCache = !nav || typeof nav.transferSize !== "number" || nav.transferSize === 0;   // 0 = aus dem Cache geladen; >0 = frisch oder per 304 bestaetigt
+      if (fromCache) {
+        const [fresh, loaded] = await Promise.all([fetch(_selfUrl(), { cache: "no-store" }), fetch(_selfUrl(), { cache: "force-cache" })]);
+        if (fresh.ok && loaded.ok) {
+          const [ta, tb] = await Promise.all([fresh.text(), loaded.text()]), ha = _h(ta);
+          if (ha !== _h(tb)) {
+            let tried = ""; try { tried = sessionStorage.getItem("dobAutoTried") || ""; } catch (e) {}
+            if (tried !== ha) {   // nur einmal pro Tab und Version -> keine Reload-Schleife
+              try { sessionStorage.setItem("dobAutoTried", ha); } catch (e) {}
+              _srvSig = fresh.headers.get("etag") || fresh.headers.get("last-modified") || null;
+              _promptReload(ha); return;
+            }
+          }
+        }
+      }
+      _srvSig = await _headSig();
+      if (_srvSig && AUTO_UPDATE_POLL_MS > 0) setInterval(async () => {
+        try { const sg = await _headSig(); if (sg && sg !== _srvSig) { _srvSig = sg; _promptReload(sg); } } catch (e) {}
+      }, AUTO_UPDATE_POLL_MS);
+    } catch (e) {}
+  }
+  setTimeout(autoUpdateStart, 3000);
+
   // Admin-Button
   window.modBroadcastReload = function () {
     if (!isAdmin() || document.getElementById("updNoteOv")) return;
