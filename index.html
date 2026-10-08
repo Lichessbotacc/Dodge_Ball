@@ -1957,6 +1957,14 @@ window.dispatchEvent(new Event("dobRPCReady"));
     if (!window._dobRPC || !window.dobIsReady || !window.dobIsReady()) return;
     clearInterval(iv);
     try { window._dobRPC.on(".info/connected", v => set(v === true)); } catch (e) {}
+    try {
+      window._dobRPC.on(".info/connected", v => {   // onDisconnect feuert nur EINMAL auf dem Server -> nach jedem Verbindungsabbruch neu setzen, sonst bleibt man "offline"/unsichtbar
+        if (v !== true || typeof onlineAccount === "undefined" || !onlineAccount || !fbReady) return;
+        try { RPC.onDisconnectSetOwnStatus({ status: "offline" }); } catch (e) {}
+        setTimeout(() => { try { syncPresence(true); } catch (e) {} }, 1500);
+        setTimeout(() => { try { syncPresence(true); } catch (e) {} }, 8000);   // falls der alte onDisconnect erst spaeter feuert
+      });
+    } catch (e) {}
   }, 500);
 })();
 
@@ -2159,6 +2167,7 @@ function renderPresence(playersData) {
         p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000 || _legacyOnline(p))
       )
       .forEach(p => {
+        if (p.uid !== myUid && Date.now() - (p.lastActive || 0) >= 120000) { p.status = "Online"; p._ghost = true; }   // kein Lebenszeichen mehr (alte Version / Tab abgewuergt): echter Status unbekannt -> nichts Falsches anzeigen
         if ((p.status === "Survival" || p.status === "Daily" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) { p.status = "Idle in Menu"; p._ghost = true; }   // Geist: Stream tot
         const key = String(p.name || "").toLowerCase();
         const prev = _seen.get(key);
