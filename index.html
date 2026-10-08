@@ -3032,6 +3032,18 @@ function survPushLive(done, finalTime) {
   const d = { name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius, x: Math.round(me.x), y: Math.round(me.y), t: survTick, done: !!done };
   if (_dailyKey) d.k = "daily";
   if (done) d.time = finalTime;
+  if (_dailyKey) {   // Daily: kompaktes Format inkl. Sondereigenschaften, damit der Zuschauer die Baelle exakt gleich bewegen kann
+    d.dk = _dailyKey; d.ci = (_dailyRunIdx !== null && _dailyRunIdx !== undefined) ? _dailyRunIdx : dailyIdxFor(_dailyKey);
+    const r5 = v => v ? +(+v).toFixed(5) : 0;
+    d.b = JSON.stringify(balls.map(b => {
+      if (b.id === undefined) b.id = ++_skBallId;
+      const a = [b.id, Math.round(b.x * 10) / 10, Math.round(b.y * 10) / 10, +b.vx.toFixed(3), +b.vy.toFixed(3), Math.round(b.radius * 10) / 10,
+        b.exp ? Math.max(1, b.exp - survTick) : 0, r5(b.rot), r5(b.acc), r5(b.accMax), r5(b.grav), r5(b.grow), r5(b.rMax), b.col || 0];
+      while (a.length > 6 && !a[a.length - 1]) a.pop();
+      return a;
+    }));
+    if (d.b.length > 19500) d.b = JSON.stringify(balls.slice(0, 400).map(b => [b.id, Math.round(b.x), Math.round(b.y), +b.vx.toFixed(2), +b.vy.toFixed(2), Math.round(b.radius)]));
+  } else
   d.b = JSON.stringify(balls.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius })));
   RPC.setSurvivalLive(d).catch(() => {});
 }
@@ -3169,7 +3181,7 @@ async function dailyCleanup(force) {   // eigene Replays aufraeumen: Survival nu
 }
 function dailyEffIdx(day, entries) {
   const pk = _dailyPicks[day];
-  if (Number.isInteger(pk)) return pk;
+  if (Number.isInteger(pk) && Object.values(entries || {}).some(v => _dEntryIdx(v) === pk)) return pk;   // nur wenn es Laeufe in diesem Modus gibt
   let best = null;
   Object.values(entries || {}).forEach(v => {
     const c = _dEntryIdx(v), ts = Number(v && v.ts) || 0;
@@ -5837,6 +5849,28 @@ function makeOnlineBall() {
 // corrections stay gentle, while a correction after a longer gap pulls
 // harder so we don't drift indefinitely out of sync.
 let tvFreezeBalls = false;
+let tvDaily = null;   // Online TV schaut gerade einen Daily-Run: { ch, key, T } -> Baelle laufen mit derselben Bewegung wie beim Spieler
+// Daily-TV: Baelle per ID abgleichen (kompakte Arrays), Sondereigenschaften uebernehmen, Zeit nachziehen
+function applyDailyTvBalls(arr, tick) {
+  const td = tvDaily; if (!td) return;
+  if (Number.isFinite(tick)) { if (Math.abs(td.T - tick) > 20) td.T = tick; else td.T += (tick - td.T) * 0.3; }
+  const old = new Map();
+  for (const b of balls) if (b.id !== undefined) old.set(b.id, b);
+  const out = [];
+  for (const a of arr) {
+    if (!Array.isArray(a)) continue;
+    const [id, x, y, vx, vy, r, ex, rot, acc, accMax, grav, grow, rMax, col] = a;
+    let b = old.get(id);
+    if (b) { b.x += (x - b.x) * 0.25; b.y += (y - b.y) * 0.25; }
+    else b = { id, x, y };
+    b.vx = vx; b.vy = vy; b.radius = r;
+    b.exp = ex ? td.T + ex : 0;
+    b.rot = rot || 0; b.acc = acc || 0; b.accMax = accMax || 0; b.grav = grav || 0; b.grow = grow || 0; b.rMax = rMax || 0;
+    if (col) b.col = col; else delete b.col;
+    out.push(b);
+  }
+  balls = out;
+}
 // Streak-TV: Baelle per ID abgleichen (Verfolger laufen ab / neue kommen dazu, Indizes verschieben sich sonst)
 function applyStreakTvBalls(arr) {
   if (!arr.length || arr[0].i === undefined) { applyBallCorrection(arr, 0.35); return; }
@@ -5845,10 +5879,10 @@ function applyStreakTvBalls(arr) {
   const out = [];
   for (const a of arr) {
     let b = old.get(a.i);
-    if (b) { const pull = b.chase ? 0.6 : 0.35; b.x += (a.x - b.x) * pull; b.y += (a.y - b.y) * pull; }
+    if (b) { const pull = (b.chase && !b.cspd) ? 0.6 : 0.25; b.x += (a.x - b.x) * pull; b.y += (a.y - b.y) * pull; }
     else b = { id: a.i, x: a.x, y: a.y };
     b.vx = a.vx; b.vy = a.vy; b.radius = a.radius;
-    if (a.ch !== undefined) { b.chase = true; b.born = Date.now() - a.ch; } else delete b.chase;
+    if (a.ch !== undefined) { b.chase = true; b.born = Date.now() - a.ch; if (a.cs) { b.cspd = a.cs; b.turn = a.tn || 0.03; } } else delete b.chase;
     out.push(b);
   }
   balls = out;
@@ -6661,7 +6695,7 @@ function streakPushLive(done) {
     bx: bot ? Math.round(bot.x) : 0, by: bot ? Math.round(bot.y) : 0, ba: bot ? !!bot.alive : false,
     t: _skTick, w: streak.wins, L: streakLevel(), rd: streak.rd || 0, ph: streak.phase, done: !!done };
   if (done) d.time = streak.wins;
-  d.b = JSON.stringify(balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) o.ch = Math.max(0, now - b.born); return o; }));
+  d.b = JSON.stringify(balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) { o.ch = Math.max(0, now - b.born); o.tn = +(b.turn || 0).toFixed(4); o.cs = +(b.cspd || 0).toFixed(2); } return o; }));
   RPC.setSurvivalLive(d).catch(() => {});
 }
 let _skBallId = 0;
@@ -7144,12 +7178,35 @@ function update() {
       p.x += (p.tx - p.x) * a;
       p.y += (p.ty - p.y) * a;
     }
-    if (!tvFreezeBalls) for (const b of balls) {
-      b.x += b.vx; b.y += b.vy;
-      if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
-      if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
-      if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
-      if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+    if (!tvFreezeBalls && tvDaily) {
+      const td = tvDaily, kind = (td.ch && td.ch.field) ? td.ch.field.type : null;
+      td.T += 1; survTick = Math.round(td.T);
+      for (let i = balls.length - 1; i >= 0; i--) {
+        const b = balls[i];
+        if (b.exp && b.exp <= td.T) { balls.splice(i, 1); continue; }
+        dailyAdv(b); dailyMoveBall(b, W(), H(), td.T, kind);
+      }
+    } else if (!tvFreezeBalls) {
+      const tme = players[0];
+      for (let i = balls.length - 1; i >= 0; i--) {
+        const b = balls[i];
+        if (b.chase && b.cspd) {   // Streak-Verfolger: genauso lenken wie beim Spieler
+          if (b.born && tvNow - b.born > STREAK_CFG.chaserLifeMs) { balls.splice(i, 1); continue; }
+          if (tme && tme.alive !== false) {
+            const want = Math.atan2(tme.y - b.y, tme.x - b.x), cur = Math.atan2(b.vy, b.vx);
+            let dd = want - cur;
+            while (dd > Math.PI) dd -= Math.PI * 2;
+            while (dd < -Math.PI) dd += Math.PI * 2;
+            const na = cur + Math.max(-b.turn, Math.min(b.turn, dd));
+            b.vx = Math.cos(na) * b.cspd; b.vy = Math.sin(na) * b.cspd;
+          }
+        }
+        b.x += b.vx; b.y += b.vy;
+        if (b.x - b.radius < 0)   { b.vx =  Math.abs(b.vx); b.x = b.radius; }
+        if (b.x + b.radius > W()) { b.vx = -Math.abs(b.vx); b.x = W()-b.radius; }
+        if (b.y - b.radius < 0)   { b.vy =  Math.abs(b.vy); b.y = b.radius; }
+        if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H()-b.radius; }
+      }
     }
     return;
   }
@@ -7895,8 +7952,9 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 
   const _lme = (_dailyLight && _dailyKey && survivalActive) ? players[0] : null, _lOn = !!(_lme && _lme.alive);
   if (_lOn) dailyLightFx(ctx, _dailyLight, _lme.x, _lme.y, survTick, W(), H());
-  const _fdd = (_dailyKey && survivalActive) ? (dailyActiveCh().field || null) : null;
-  if (_fdd) dailyFieldDraw(ctx, _fdd.type, survTick, W(), H(), dailySeed(_dailyKey));
+  const _tvd = (mode === "online_tv" && tvDaily) ? tvDaily : null;
+  const _fdd = (_dailyKey && survivalActive) ? (dailyActiveCh().field || null) : (_tvd ? (_tvd.ch.field || null) : null);
+  if (_fdd) dailyFieldDraw(ctx, _fdd.type, _tvd ? _tvd.T : survTick, W(), H(), dailySeed(_dailyKey || _tvd.key));
   if (_fdd && _fdd.type === "portal") dailyPortalGhosts(ctx, balls, W(), H());
   for (const b of balls) {
     const _lv = _lOn ? dailyVis(_dailyLight, b, _lme.x, _lme.y, survTick) : 1; if (_lv <= 0) continue;
@@ -8338,7 +8396,7 @@ async function startOnlineTV(targetUid) {
   const stopInner = () => {
     setStall(false);
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null; tvFreezeBalls = false;
+    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null; tvFreezeBalls = false; tvDaily = null;
     { const u = document.getElementById("ui"); if (u && mode === "online_tv") u.innerHTML = tvUiDefault; }
     stopViewerCount();
     players = []; balls = [];
@@ -8455,6 +8513,14 @@ async function startOnlineTV(targetUid) {
         feedNetPlayer(sp, { x: d.x, y: d.y, alive: true }, 250);
         setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
         tvClock = { base: (d.t || 0) / 60, at: Date.now() };
+        if (isDl) {
+          if (!tvDaily) {
+            const key = d.dk || dailyKeyNow(), ci = Number.isInteger(d.ci) ? d.ci : dailyIdxFor(key);
+            tvDaily = { ch: DAILY_CHALLENGES[ci] || DAILY_CHALLENGES[0], key, T: d.t || 0 };
+          }
+          if (d.b) { try { applyDailyTvBalls(JSON.parse(d.b), d.t || 0); } catch(e) {} }
+          return;
+        }
         if (d.b) { try { applyBallCorrection(JSON.parse(d.b), 0.35); } catch(e) {} }
       });
       onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
