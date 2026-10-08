@@ -1746,6 +1746,13 @@ async function rpcModDeleteRecords(uid, what) {
   try { await update(ref(db, "sanctions/" + uid), { recordsWiped: { ts: Date.now(), survival: !!what.survival, streak: !!what.streak, daily: !!what.daily, winstreak: !!what.winstreak } }); } catch (e) { failed.push("sanctions/" + uid + "/recordsWiped"); }
   return { total: list.length, failed };
 }
+// Admin: Daily-Sieg manuell vergeben (on=true) oder entfernen (on=false) - fuer beliebige uid/Tag
+async function rpcModSetDailyWin(uid, day, on) {
+  requireAdmin(); uid = String(uid || ""); day = String(day || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("Bad day.");
+  return update(ref(db), { ["dailyWins/" + uid + "/" + day]: on ? true : null });
+}
 async function rpcModApplyDailyWins(updates) {
   requireAdmin();
   const keys = Object.keys(updates || {});
@@ -1862,7 +1869,7 @@ async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || "")
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -3216,24 +3223,29 @@ function dailyEffIdx(day, entries) {
   });
   return best ? best.c : dailyIdxFor(day);
 }
+let _dcRetry = 0;
 async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ich Erster? -> Sieg eintragen
   if (!fbReady || !myUid || !RPC) return;
   try {
     if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
-    if (!_dailyPicksLoaded) return;
+    if (!_dailyPicksLoaded) { if (_dcRetry++ < 10) setTimeout(dailyClaimWins, 15000); return; }   // frueher: stilles Aufgeben bis zum naechsten Reload
     const mine = (await dbGet("dailyWins/" + myUid)) || {}, base = Date.parse(dailyKeyNow() + "T12:00:00Z");
+    let failed = false;
     for (let i = 1; i <= 14; i++) {
       const day = new Date(base - i * 86400000).toISOString().slice(0, 10);
       if (mine[day]) continue;
-      const me = await dbGet("daily/" + day + "/" + myUid);
-      if (!me) continue;
-      const all = await dbGet("daily/" + day);
-      const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
-      const eff = dailyEffIdx(day, all);
-      const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
-      if (arr.length && arr[0].u === myUid) { await RPC.claimDailyWin(day); try { delete _DB_CACHE["dailyWins"]; } catch (e) {} }
+      try {   // ein Fehler bei einem Tag darf die anderen Tage nicht mehr blockieren
+        const me = await dbGet("daily/" + day + "/" + myUid);
+        if (!me) continue;
+        const all = await RPC.get("daily/" + day);   // frisch lesen, nicht aus dem Cache
+        const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
+        const eff = dailyEffIdx(day, all);
+        const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+        if (arr.length && arr[0].u === myUid) { await RPC.claimDailyWin(day); try { delete _DB_CACHE["dailyWins"]; } catch (e) {} }
+      } catch (e) { failed = true; console.warn("daily win claim failed for", day, e && e.message); }
     }
-  } catch (e) { console.warn("daily wins check failed", e); }
+    if (failed && _dcRetry++ < 10) setTimeout(dailyClaimWins, 30000);
+  } catch (e) { console.warn("daily wins check failed", e); if (_dcRetry++ < 10) setTimeout(dailyClaimWins, 30000); }
 }
 const _dcIv = setInterval(() => { if (typeof fbReady !== "undefined" && fbReady && myUid && RPC) { clearInterval(_dcIv); dailyCleanup(); dailyClaimWins();
   try { if (_modIsAdminSafe() && localStorage.getItem("dobAdminRepClean") !== dailyKeyNow()) setTimeout(() => modCleanupReplays(true).then(ok => { if (ok) { try { localStorage.setItem("dobAdminRepClean", dailyKeyNow()); } catch (e) {} } }), 20000); } catch (e) {} } }, 4000);
@@ -3407,6 +3419,56 @@ async function modDeleteDailyRun(day, uid) {
   try { await RPC.modDeleteDailyRun(day, uid); try { delete _DB_CACHE["daily"]; delete _DB_CACHE["dailyWins"]; } catch (e) {} loadDailyBoard(); }
   catch (e) { alert("Delete failed: " + (e && e.message || e)); }
 }
+
+// ═══ MOD: Daily-Siege manuell vergeben / entfernen ═══
+function modDwPrevDay() { return new Date(Date.parse(dailyKeyNow() + "T12:00:00Z") - 86400000).toISOString().slice(0, 10); }
+async function modDailyWinsDialog(day) {
+  if (!_modIsAdminSafe()) return;
+  day = /^\d{4}-\d{2}-\d{2}$/.test(String(day || "")) ? day : modDwPrevDay();
+  let ov = document.getElementById("modDwOverlay");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "modDwOverlay";
+    ov.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;";
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = '<div style="background:#14161e;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:16px;width:min(560px,100%);max-height:90vh;overflow-y:auto;color:#fff;font-family:var(--font-body);text-align:left;">Loading…</div>';
+  const box = ov.firstChild;
+  try {
+    const R = _modRPC();
+    if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+    const [users, pl, wins] = await Promise.all([R.get("daily/" + day), R.get("players"), R.get("dailyWins")]);
+    const eff = _dailyPicksLoaded ? dailyEffIdx(day, users || {}) : null;
+    const rows = Object.entries(users || {}).map(([u, v]) => ({
+      u, time: Number(v && v.time) || 0, ts: Number(v && v.ts) || 0, ci: _dEntryIdx(v),
+      name: (pl && pl[u] && pl[u].name) || (v && v.name) || "?", exists: !!(pl && pl[u]),
+      won: !!(wins && wins[u] && wins[u][day])
+    })).filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts);
+    const auto = rows.find(r => r.exists && (r.ci === null || r.ci === eff));
+    const wonRows = Object.entries(wins || {}).filter(([u, d]) => d && d[day]).map(([u]) => (pl && pl[u] && pl[u].name) || u);
+    const modeLbl = (ci) => ci === null ? "–" : (DAILY_CHALLENGES[ci] ? DAILY_CHALLENGES[ci].icon : "?");
+    let h = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b style="font-size:16px;">👑 Daily wins (Mod)</b><button style="margin:0;padding:4px 10px;font-size:13px;" onclick="document.getElementById(\'modDwOverlay\').remove()">✕</button></div>'
+      + '<div style="margin-bottom:8px;font-size:13px;">Day: <input type="date" id="modDwDay" value="' + day + '" style="font-size:13px;padding:3px;" onchange="modDailyWinsDialog(this.value)"></div>'
+      + '<div style="font-size:12px;opacity:.75;margin-bottom:8px;">Credited for this day: ' + (wonRows.length ? wonRows.map(n => escapeHtml(dn(n))).join(", ") : "nobody") + (auto ? ' · Auto would pick: <b>' + escapeHtml(dn(auto.name)) + '</b>' : '') + '</div>';
+    if (!rows.length) h += '<div style="padding:12px;text-align:center;opacity:.7;">No runs on this day.</div>';
+    h += rows.map((r, i) => {
+      const note = !r.exists ? " <small style='color:#ff8844'>(account missing – ignored by auto)</small>" : (eff !== null && r.ci !== null && r.ci !== eff ? " <small style='color:#ff8844'>(other mode – ignored by auto)</small>" : "");
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-top:1px solid rgba(255,255,255,.08);font-size:13px;">'
+        + '<span style="width:28px;">#' + (i + 1) + '</span><span style="flex:1;">' + escapeHtml(dn(r.name)) + ' ' + modeLbl(r.ci) + note + '</span><span style="width:70px;text-align:right;">' + survFmt(r.time) + '</span>'
+        + (r.won ? '<button style="margin:0;padding:4px 8px;font-size:12px;border-color:#ff6666;" onclick="modDwSet(\'' + escapeHtml(r.u) + '\',\'' + day + '\',false)">✖ Remove 👑</button>'
+                 : '<button style="margin:0;padding:4px 8px;font-size:12px;border-color:#00ff88;" onclick="modDwSet(\'' + escapeHtml(r.u) + '\',\'' + day + '\',true)">👑 Give win</button>')
+        + '</div>';
+    }).join("");
+    box.innerHTML = h;
+  } catch (e) { box.innerHTML = '<div style="padding:12px;">Error while loading: ' + escapeHtml(String(e && e.message || e)) + '</div><button onclick="document.getElementById(\'modDwOverlay\').remove()">Close</button>'; }
+}
+async function modDwSet(uid, day, on) {
+  try {
+    await _modRPC().modSetDailyWin(uid, day, on);
+    try { delete _DB_CACHE["dailyWins"]; } catch (e) {}
+    modDailyWinsDialog(day);
+  } catch (e) { alert("Failed: " + (e && e.message || e)); }
+}
 async function modDeleteAllDaily() {
   if (!confirm("Delete ALL daily runs and replays of ALL players? This cannot be undone.")) return;
   try { await RPC.modDeleteAllDaily(); try { localStorage.removeItem("dobDaily"); } catch (e) {} alert("All daily runs deleted."); loadDailyBoard(); }
@@ -3424,7 +3486,7 @@ async function loadDailyBoard(sel) {
   t.innerHTML = _dailyTabsHtml(sel)
     + '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? '📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key : mch.icon + ' ' + escapeHtml(mch.name) + ' · best times of all days') + '</span></div>'
     + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
-  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modCleanupReplays()">🧹 Clean replays</button></div>');
+  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modCleanupReplays()">🧹 Clean replays</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDailyWinsDialog()">👑 Manage wins</button></div>');
   if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
     let rows;
