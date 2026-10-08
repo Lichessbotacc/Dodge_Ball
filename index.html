@@ -2117,8 +2117,24 @@ function _startLiveTrack() {
     if (window._lastPlayersData) renderPresence(window._lastPlayersData);
   });
 }
+// ═══ Alte Versionen: duerfen wegen der clientVer-Regel nichts mehr schreiben -> lastActive bleibt stehen ═══
+// Wer eine alte Version (clientVer fehlt / < 2, siehe CLIENT_VER im Modul-Script) nutzt und nicht "offline" ist (das setzt onDisconnect beim Schliessen),
+// gilt weiter als online. Sicherheitsnetz: nach 3 h ohne Lebenszeichen faellt er raus (z.B. wenn onDisconnect nie ankam).
+let _clientVerData = null, _clientVerUnsub = null;
+function _startClientVerTrack() {
+  if (_clientVerUnsub || !fbReady || !RPC) return;
+  try { _clientVerUnsub = dbOn("clientVer", (d) => { _clientVerData = d || {}; if (window._lastPlayersData) renderPresence(window._lastPlayersData); }); } catch (e) {}
+}
+function _legacyOnline(p) {
+  if (!p || !p.uid || p.uid === myUid) return false;
+  const v = _clientVerData ? Number(_clientVerData[p.uid]) : NaN;
+  if (_clientVerData && v >= 2) return false;           // aktuelle Version: normale lastActive-Pruefung
+  // clientVer nicht lesbar oder alt/fehlend -> als Alt-Version behandeln
+  return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;
+}
 function renderPresence(playersData) {
   _startLiveTrack();
+  _startClientVerTrack();
   {
     const panel = document.getElementById("onlinePlayersPanel");
     if (!panel) return;
@@ -2133,7 +2149,7 @@ function renderPresence(playersData) {
     Object.entries(playersData)
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p =>
-        p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000)
+        p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000 || _legacyOnline(p))
       )
       .forEach(p => {
         if ((p.status === "Survival" || p.status === "Daily" || p.status === "Playing Streaks") && p.uid !== myUid && !_liveAlive(p.uid)) { p.status = "Idle in Menu"; p._ghost = true; }   // Geist: Stream tot
