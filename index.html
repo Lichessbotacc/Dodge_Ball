@@ -1634,7 +1634,7 @@ async function rpcModPurgeUser(uid, name) {
   uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
   const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
-    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyReplays/" + uid]);
+    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid]);
   const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
   const [un, wl, ch, h2h, chat, dly] = await Promise.all([
     safe(async () => (await get(ref(db, "usernames"))).val()),
@@ -1730,7 +1730,7 @@ async function rpcModDeleteRecords(uid, what) {
   if (what.streak)   { paths.add("streakBoard/" + uid); }
   if (what.survival || what.streak || what.daily) paths.add("survivalLive/" + uid);
   if (what.daily) {
-    paths.add("dailyWins/" + uid); paths.add("dailyReplays/" + uid);
+    paths.add("dailyWins/" + uid); paths.add("dailyBonusWins/" + uid); paths.add("dailyReplays/" + uid);
     try { const dly = (await get(ref(db, "daily"))).val() || {}; Object.entries(dly).forEach(([day, users]) => { if (users && users[uid]) paths.add("daily/" + day + "/" + uid); }); } catch (e) {}
   }
   const list = [...paths];
@@ -1752,6 +1752,13 @@ async function rpcModSetDailyWin(uid, day, on) {
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("Bad day.");
   return update(ref(db), { ["dailyWins/" + uid + "/" + day]: on ? true : null });
+}
+// Admin: Bonus-Siege (unabhaengig von jedem Tag): dailyBonusWins/{uid} = Anzahl, wird in allen Daily-Wins-Zaehlungen addiert
+async function rpcModSetBonusWins(uid, n) {
+  requireAdmin(); uid = String(uid || ""); n = Number(n);
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  if (!Number.isInteger(n) || n < 0 || n > 10000) throw new Error("Bad number (0-10000).");
+  return set(ref(db, "dailyBonusWins/" + uid), n > 0 ? n : null);
 }
 async function rpcModApplyDailyWins(updates) {
   requireAdmin();
@@ -1869,7 +1876,7 @@ async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || "")
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -3443,7 +3450,8 @@ async function modDailyWinsDialog(day) {
   try {
     const R = _modRPC();
     if (!_dailyPicksLoaded) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
-    const [users, pl, wins] = await Promise.all([R.get("daily/" + day), R.get("players"), R.get("dailyWins")]);
+    const [users, pl, wins, bw] = await Promise.all([R.get("daily/" + day), R.get("players"), R.get("dailyWins"), R.get("dailyBonusWins").catch(() => null)]);
+    window._modBw = { pl: pl || {}, wins: wins || {}, bw: bw || {} };
     const eff = _dailyPicksLoaded ? dailyEffIdx(day, users || {}) : null;
     const rows = Object.entries(users || {}).map(([u, v]) => ({
       u, time: Number(v && v.time) || 0, ts: Number(v && v.ts) || 0, ci: _dEntryIdx(v),
@@ -3456,6 +3464,10 @@ async function modDailyWinsDialog(day) {
     let h = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b style="font-size:16px;">👑 Daily wins (Mod)</b><button style="margin:0;padding:4px 10px;font-size:13px;" onclick="document.getElementById(\'modDwOverlay\').remove()">✕</button></div>'
       + '<div style="margin-bottom:8px;font-size:13px;">Day: <input type="date" id="modDwDay" value="' + day + '" style="font-size:13px;padding:3px;" onchange="modDailyWinsDialog(this.value)"></div>'
       + '<div style="font-size:12px;opacity:.75;margin-bottom:8px;">Credited for this day: ' + (wonRows.length ? wonRows.map(n => escapeHtml(dn(n))).join(", ") : "nobody") + (auto ? ' · Auto would pick: <b>' + escapeHtml(dn(auto.name)) + '</b>' : '') + '</div>';
+    h += '<div style="margin:10px 0;padding:8px;border:1px solid rgba(255,215,0,.35);border-radius:8px;"><b style="font-size:13px;">➕ Bonus wins (no date)</b>'
+      + '<div style="font-size:11px;opacity:.7;margin:2px 0 6px;">Counted in Daily wins, independent of any day.</div>'
+      + '<input id="modBwQ" placeholder="Search player… (empty = show players with bonus)" oninput="modBwList()" style="width:100%;box-sizing:border-box;font-size:13px;padding:5px;"><div id="modBwList" style="margin-top:6px;"></div></div>'
+      + '<div style="font-size:12px;opacity:.75;margin:4px 0;">Runs on the selected day:</div>';
     if (!rows.length) h += '<div style="padding:12px;text-align:center;opacity:.7;">No runs on this day.</div>';
     h += rows.map((r, i) => {
       const note = !r.exists ? " <small style='color:#ff8844'>(account missing – ignored by auto)</small>" : (eff !== null && r.ci !== null && r.ci !== eff ? " <small style='color:#ff8844'>(other mode – ignored by auto)</small>" : "");
@@ -3465,8 +3477,32 @@ async function modDailyWinsDialog(day) {
                  : '<button style="margin:0;padding:4px 8px;font-size:12px;border-color:#00ff88;" onclick="modDwSet(\'' + escapeHtml(r.u) + '\',\'' + day + '\',true)">👑 Give win</button>')
         + '</div>';
     }).join("");
-    box.innerHTML = h;
+    box.innerHTML = h; modBwList();
   } catch (e) { box.innerHTML = '<div style="padding:12px;">Error while loading: ' + escapeHtml(String(e && e.message || e)) + '</div><button onclick="document.getElementById(\'modDwOverlay\').remove()">Close</button>'; }
+}
+function modBwList() {
+  const d = window._modBw, el = document.getElementById("modBwList"); if (!d || !el) return;
+  const q = String((document.getElementById("modBwQ") || {}).value || "").trim().toLowerCase();
+  const list = Object.entries(d.pl).filter(([u, p]) => p && p.name && (q ? String(p.name).toLowerCase().indexOf(q) !== -1 : Number(d.bw[u]) > 0))
+    .sort((a, b) => String(a[1].name).localeCompare(String(b[1].name))).slice(0, 8);
+  if (!list.length) { el.innerHTML = '<div style="font-size:12px;opacity:.6;">' + (q ? "No player found." : "Type a name to give bonus wins.") + '</div>'; return; }
+  el.innerHTML = list.map(([u, p]) => {
+    const base = Object.keys(d.wins[u] || {}).length, bn = Number(d.bw[u]) || 0, id = escapeHtml(u);
+    return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13px;flex-wrap:wrap;">'
+      + '<span style="flex:1;min-width:110px;">' + escapeHtml(dn(p.name)) + ' <small style="opacity:.7">(' + base + ' + <b>' + bn + '</b> = ' + (base + bn) + ')</small></span>'
+      + '<button style="margin:0;padding:3px 9px;font-size:13px;" onclick="modBwSet(\'' + id + '\',' + Math.max(0, bn - 1) + ')">−1</button>'
+      + '<button style="margin:0;padding:3px 9px;font-size:13px;border-color:#00ff88;" onclick="modBwSet(\'' + id + '\',' + (bn + 1) + ')">+1</button>'
+      + '<input id="modBwN_' + id + '" type="number" min="0" max="10000" value="' + bn + '" style="width:60px;font-size:13px;padding:3px;">'
+      + '<button style="margin:0;padding:3px 9px;font-size:13px;" onclick="modBwSet(\'' + id + '\',document.getElementById(\'modBwN_' + id + '\').value)">Set</button></div>';
+  }).join("");
+}
+async function modBwSet(uid, n) {
+  try {
+    n = Math.round(Number(n)); if (!isFinite(n) || n < 0) throw new Error("Enter a number >= 0.");
+    await _modRPC().modSetBonusWins(uid, n);
+    const d = window._modBw; if (d) { if (n > 0) d.bw[uid] = n; else delete d.bw[uid]; }
+    modBwList();
+  } catch (e) { alert("Failed: " + (e && e.message || e) + "\n(Are the new Database Rules for dailyBonusWins published?)"); }
 }
 async function modDwSet(uid, day, on) {
   try {
@@ -3531,10 +3567,13 @@ async function loadDailyWinsBoard() {
   t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>👑 Wins</span><span></span></div>';
   if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
   try {
-    const [dw, pl] = await Promise.all([dbGet("dailyWins"), dbGet("players")]);
-    const rows = Object.entries(dw || {})
+    const [dw, pl, bw] = await Promise.all([dbGet("dailyWins"), dbGet("players"), dbGet("dailyBonusWins").catch(() => null)]);
+    const tot = {};   // Tages-Siege + Bonus-Siege (Mod, ohne Datum)
+    Object.entries(dw || {}).forEach(([u, d]) => { tot[u] = Object.keys(d || {}).length; });
+    Object.entries(bw || {}).forEach(([u, n]) => { tot[u] = (tot[u] || 0) + (Number(n) || 0); });
+    const rows = Object.entries(tot)
       .filter(([uid]) => pl && pl[uid])
-      .map(([uid, days]) => ({ uid, wins: Object.keys(days || {}).length, name: pl[uid].name || "?" }))
+      .map(([uid, wins]) => ({ uid, wins, name: pl[uid].name || "?" }))
       .filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No daily wins yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
@@ -4848,7 +4887,7 @@ async function profileRanks(uid) {
   const out = { elo: "", surv: "", streak: "", dw: "" };
   const tag = i => i >= 0 ? ' <span style="color:#ffd700;font-size:.85em;">#' + (i + 1) + '</span>' : "";
   try {
-    const [pl, sv, sb, dw] = await Promise.all([dbGet("players"), dbGet("survival").catch(() => null), dbGet("streakBoard").catch(() => null), dbGet("dailyWins").catch(() => null)]);
+    const [pl, sv, sb, dw, bw] = await Promise.all([dbGet("players"), dbGet("survival").catch(() => null), dbGet("streakBoard").catch(() => null), dbGet("dailyWins").catch(() => null), dbGet("dailyBonusWins").catch(() => null)]);
     if (!pl) return out;
     const nk = n => String(dn(n)).trim().toLowerCase();
     // Elo (gleiche Regeln wie Elo-Rangliste: min. 1 Partie, ein Eintrag pro Name)
@@ -4867,7 +4906,8 @@ async function profileRanks(uid) {
       .filter(r => r.level > 0).sort((a, b) => b.level - a.level || a.ts - b.ts);
     out.streak = tag(kr.findIndex(r => r.uid === uid));
     // Daily Wins
-    const wr = Object.entries(dw || {}).filter(([u]) => pl[u]).map(([u, d]) => ({ uid: u, wins: Object.keys(d || {}).length })).filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins);
+    const wt = {}; Object.entries(dw || {}).forEach(([u, d]) => { wt[u] = Object.keys(d || {}).length; }); Object.entries(bw || {}).forEach(([u, n]) => { wt[u] = (wt[u] || 0) + (Number(n) || 0); });
+    const wr = Object.entries(wt).filter(([u]) => pl[u]).map(([u, w]) => ({ uid: u, wins: w })).filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins);
     out.dw = tag(wr.findIndex(r => r.uid === uid));
   } catch (e) { console.warn("profile ranks failed", e); }
   return out;
@@ -4896,6 +4936,7 @@ async function openOnlineProfile(uid) {
     try { chatBannedP = !!(await dbGet("chatBans/" + uid)); } catch (e) {}
     let dailyWinsN = 0;
     try { const dw = await dbGet("dailyWins/" + uid); dailyWinsN = dw ? Object.keys(dw).length : 0; } catch (e) {}
+    try { dailyWinsN += Number(await dbGet("dailyBonusWins/" + uid)) || 0; } catch (e) {}
     const wins = p.wins ?? 0;
     const losses = p.losses ?? 0;
     const totalGames = wins + losses;
