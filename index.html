@@ -1276,7 +1276,7 @@ function onValueRobust(r, cb) {
   const unsub = onValue(r, snap => { got = true; stopPoll(); cb(snap.val()); }, err => console.warn("listener error", err && err.code, err && err.message));
   const t = setTimeout(() => {
     if (got || stopped) return;
-    iv = setInterval(async () => { if (stopped) return; try { const sn = await get(r); if (!stopped) cb(sn.val()); } catch (e) {} }, _slowPoll ? 20000 : 3000);
+    iv = setInterval(async () => { if (stopped) return; try { const sn = await get(r); if (!stopped) cb(sn.val()); } catch (e) {} }, _slowPoll ? 60000 : 3000);
   }, 6000);
   return () => { stopped = true; clearTimeout(t); stopPoll(); try { unsub(); } catch (e) {} };
 }
@@ -3317,11 +3317,9 @@ function renderSurvivalResult(t, camped) {
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
     + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + (k < REPLAY_TOP_DAILY ? ' ▶' : '') + '</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
-    + (i && i.best ? '<button id="survWatch" style="margin:4px 6px;">▶ My record replay</button>' : '')
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
   ov.querySelector("#survRetry").onclick = () => { if (_dailyKey && _dailyTest) startSurvival(true, DAILY_CHALLENGES.indexOf(_dailyTest)); else if (_dailyKey) startDaily(); else startSurvival(false); };
   ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
-  const w = ov.querySelector("#survWatch"); if (w) w.onclick = () => (_survInfo && _survInfo.daily) ? watchDailyReplay(_survInfo.key, myUid, "My best today") : watchSurvivalReplay(myUid, "My record");
 }
 async function watchSurvivalReplay(uid, label) {
   if (!fbReady) return;
@@ -9943,7 +9941,7 @@ async function _cheatScanTwice() {
 function _cheatStartAuto() {
   if (_cheatIv || !_modIsAdmin()) return;
   setTimeout(() => _cheatScan(false), 20000);
-  _cheatIv = setInterval(() => _cheatScan(false), 5 * 60 * 1000);
+  _cheatIv = setInterval(() => _cheatScan(false), 15 * 60 * 1000);
 }
 window.addEventListener("dobAuthReady", () => setTimeout(_cheatStartAuto, 1500));
 window.addEventListener("dobRPCReady", () => setTimeout(_cheatStartAuto, 1500));
@@ -10288,7 +10286,7 @@ async function leagueAdminResolveAll() {
   _lgAdminBusy = false;
   return applied;
 }
-setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 60000); }, 25000);
+setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 15 * 60000); }, 25000);
 let _dwAdminBusy = false;
 async function dailyAdminClaimAll() {
   if (!_modIsAdmin() || !_modRPC() || _dwAdminBusy) return;
@@ -10319,7 +10317,7 @@ async function dailyAdminClaimAll() {
   } catch (e) { console.warn("daily wins admin failed", e); }
   _dwAdminBusy = false;
 }
-setTimeout(() => { dailyAdminClaimAll(); setInterval(dailyAdminClaimAll, 5 * 60 * 1000); }, 30000);
+setTimeout(() => { dailyAdminClaimAll(); setInterval(dailyAdminClaimAll, 30 * 60 * 1000); }, 30000);
 // Geister-Streams (Streak/Survival-Eintraege, die nicht mehr aktualisiert werden, z.B. Tab im Hintergrund/Handy gesperrt) loeschen
 const _liveSeen = {};
 async function liveAdminCleanup() {
