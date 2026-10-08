@@ -3528,11 +3528,13 @@ const ELO_K = 10;
 function eloExpected(ra, rb) { return 1 / (1 + Math.pow(10, (rb - ra) / 400)); }
 // Aenderung fuer 'me' (Sieg: +K*(1-E), Niederlage: -K*E), auf ganze Punkte gerundet, mindestens +-1
 function glickoResult(me, opp, won) {
-  const E = eloExpected(Number(me.elo) || 1500, Number(opp.elo) || 1500);
-  const raw = Math.round((won ? ELO_K * (1 - E) : -ELO_K * E) * 1e6) / 1e6;   // 6 Stellen -> beide Clients rechnen identisch
-  let d = Math.round(raw);
-  if (d === 0) d = won ? 1 : -1;
-  return { delta: clampEloChange(d), rd: G2.DEF_RD, vol: G2.DEF_VOL };
+  // Feste Stufen statt Kurve: Basis +5 bei gleicher Elo, Underdog-Sieg +1 pro 100 Abstand extra, Favoriten-Sieg -1 pro 100 Abstand (min. +1).
+  // Der Verlierer verliert genau so viel, wie der Sieger bekommt (max. 10, passt zu den Database-Rules).
+  const em = Number(me.elo) || 1500, eo = Number(opp.elo) || 1500;
+  const wElo = won ? em : eo, lElo = won ? eo : em;          // Elo des Siegers / Verlierers
+  const step = Math.floor(Math.abs(lElo - wElo) / 100);
+  const gain = Math.max(1, Math.min(10, lElo > wElo ? 5 + step : 5 - step));
+  return { delta: clampEloChange(won ? gain : -gain), rd: G2.DEF_RD, vol: G2.DEF_VOL };
 }
 function normalEloChange(winnerElo, loserElo) {   // Fallback ohne Account-Objekte
   const w = { elo: Number(winnerElo) || 1500 }, l = { elo: Number(loserElo) || 1500 };
