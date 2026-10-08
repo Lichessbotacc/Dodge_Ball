@@ -2142,10 +2142,9 @@ function _startClientVerTrack() {
 }
 function _legacyOnline(p) {
   if (!p || !p.uid || p.uid === myUid) return false;
-  const v = _clientVerData ? Number(_clientVerData[p.uid]) : NaN;
-  if (_clientVerData && v >= 2) return false;           // aktuelle Version: normale lastActive-Pruefung
-  // clientVer nicht lesbar oder alt/fehlend -> als Alt-Version behandeln
-  return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;
+  if (!_clientVerData) return false;                     // clientVer nicht lesbar (Rules) -> nichts raten, sonst gelten ALLE als "Alt-Version" und es entstehen Geister
+  if (Number(_clientVerData[p.uid]) >= 2) return false;  // aktuelle Version: normale lastActive-Pruefung
+  return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;   // clientVer fehlt/alt -> Alt-Version
 }
 function renderPresence(playersData) {
   _startLiveTrack();
