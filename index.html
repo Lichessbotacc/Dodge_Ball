@@ -2018,6 +2018,7 @@ async function dbGet(path) {
   if (c && Date.now() - c.t < 60000) return c.p;
   const p = RPC.get(path);
   _DB_CACHE[path] = { t: Date.now(), p };
+  p.then(v => { if (v == null && _DB_CACHE[path] && _DB_CACHE[path].p === p) delete _DB_CACHE[path]; }).catch(() => {});   // leere Antwort (z.B. kurzer Aussetzer) nicht cachen
   p.catch(() => { if (_DB_CACHE[path] && _DB_CACHE[path].p === p) delete _DB_CACHE[path]; });
   return p;
 }
@@ -2074,15 +2075,24 @@ function startMenuPresenceListener() {
   if (!window._presenceTick) window._presenceTick = setInterval(() => { if (window._lastPlayersData) renderPresence(window._lastPlayersData); }, 15000);
   menuPresenceUnsubscribe = dbOn("players", (playersData) => { window._lastPlayersData = playersData; renderPresence(playersData); recolorChatNames(); });
 }
-// Haengt die Spielerliste >10 s bei "Connecting…", den Grund anzeigen statt ewig zu warten
-setTimeout(async () => {
+// Haengt die Spielerliste >10 s bei "Connecting…": direkt per get() nachladen, Listener neu starten, mehrfach wiederholen
+async function _presenceRescue(n) {
   const panel = document.getElementById("onlinePlayersPanel");
   if (!panel || window._lastPlayersData) return;
   let why;
   if (!fbReady) why = "No connection to the server (sign-in not completed).";
-  else { try { await RPC.get("players/" + myUid); why = "Connected, but the player list does not arrive."; } catch (e) { why = "Server error: " + (e.code || e.message); } }
-  if (!window._lastPlayersData) panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#ff8844;font-size:12px;'>⚠ " + why + " Reload the page.</span>";
-}, 10000);
+  else {
+    try {
+      const pd = await RPC.get("players");
+      if (pd) { window._lastPlayersData = pd; renderPresence(pd); try { startMenuPresenceListener(); } catch (e) {} return; }
+      why = "Connected, but the player list does not arrive.";
+    } catch (e) { why = "Server error: " + (e.code || e.message); }
+  }
+  if (!window._lastPlayersData) panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#ff8844;font-size:12px;'>⚠ " + why + " Retrying…</span>";
+  if (n < 6) setTimeout(() => _presenceRescue(n + 1), 8000);
+  else if (panel && !window._lastPlayersData) panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#ff8844;font-size:12px;'>⚠ " + why + " Reload the page.</span>";
+}
+setTimeout(() => _presenceRescue(0), 10000);
 const _liveTrack = {};   // uid -> { sig, at, absent }
 let _liveTrackUnsub = null;
 function _liveAlive(uid) {
@@ -3049,6 +3059,7 @@ function survPushLive(done, finalTime) {
 }
 function survivalTick() {
   survTick++;
+  if (survTick % 6 === 0) { const _h = document.getElementById("survivalHUD"); if (_h) _h.textContent = survFmt(survTick / 60); }
   survPushLive(false);
   if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
 }
@@ -3204,7 +3215,7 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
       const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
       const eff = dailyEffIdx(day, all);
       const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
-      if (arr.length && arr[0].u === myUid) await RPC.claimDailyWin(day);
+      if (arr.length && arr[0].u === myUid) { await RPC.claimDailyWin(day); try { delete _DB_CACHE["dailyWins"]; } catch (e) {} }
     }
   } catch (e) { console.warn("daily wins check failed", e); }
 }
@@ -5609,11 +5620,13 @@ function showVSScreen(n1, e1, n2, e2, callback) {
   });
 
   let cd = 3;
+  window._vsCdActive = true;
   document.getElementById("vsCountdown").textContent = "Starting in " + cd + "…";
   const iv = setInterval(() => {
     cd--;
     if (cd <= 0) {
       clearInterval(iv);
+      window._vsCdActive = false;
       document.getElementById("vsScreen").style.display = "none";
       callback();
     } else {
@@ -6286,8 +6299,9 @@ function botPostChatReply(userText) {
   // Ein blosses "ja/ok/sure..." zaehlt nur direkt als Antwort auf die Rematch-Frage des Bots. Spaeter im Chat startet das KEIN Rematch.
   // Ein ausdruecklicher Wunsch ("rematch", "revanche", "one more"...) funktioniert weiterhin jederzeit.
   const awaiting = botAwaitAnswer; botAwaitAnswer = false;
-  const explicitRematch = R(/\b(rematch|revanche|revenge|again|one more|run it)\b/);
-  const plainYes = awaiting && R(/\b(yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet)\b/);
+  const negated = R(/\b(no|nope|nah|not|never|dont|don't|do not|nein|kein|keine|nicht|stop|later|bye|gtg|cya)\b/);   // "no rematch", "not again" ... = Absage
+  const explicitRematch = !negated && R(/\b(rematch|revanche|revenge|again|one more|run it)\b/);
+  const plainYes = !negated && awaiting && R(/\b(yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet)\b/);
   if (explicitRematch || plainYes) {
     botSay(botPick(["let's go 🔥", "bet, starting!", "alright, get ready", "here we go"]), 700);
     setTimeout(() => {
@@ -6295,7 +6309,7 @@ function botPostChatReply(userText) {
       if (tk === botChatToken && onlineVsBot && wo && wo.style.display !== "none") requestRematch();
     }, 1800);
   }
-  else if (R(/\b(no|nope|nah|later|bye|gtg|cya)\b/)) botSay(botPick(["ok, see you 👋", "alright, gg", "fair enough", "aww, ok 😢"]), 800);
+  else if (negated) botSay(botPick(["ok, see you 👋", "alright, gg", "fair enough", "aww, ok 😢"]), 800);
   else if (R(/\b(noob|bad|trash|garbage|sucks?|bot)\b/)) botSay(botPick(["ouch 😅", "say that after a rematch", "rude 😤", "bold words 😏"]), 900);
   else if (R(/\b(ez|easy|lol ez)\b/)) botSay(lost ? botPick(["lucky 😤", "wait for the rematch"]) : botPick(["lol okay", "easy for who? 😏"]), 900);
   else if (R(/\b(lag|laggy|ping)\b/)) botSay(botPick(["sure, blame the lag 😏", "lag, huh? 😂", "classic excuse"]), 900);
@@ -10269,6 +10283,8 @@ async function modDeleteChatMsg(key) {
   }); } catch (e) {}
   function inMatch() {   // laufendes 1v1, Survival/Daily oder Streak-Run: Pop-up zurueckhalten (Reload wuerde den Lauf verlieren)
     try {
+      if (window._vsCdActive) return true;   // VS-Screen/Countdown vor dem Match
+      if (mode === "online" && onlineMatchId && !onlineResultHandled && !onlineVsBot) return true;   // Match laeuft (auch kurz vor/nach "running")
       if (running && mode === "online" && !survivalActive && !onlineResultHandled) return true;
       if (survivalActive) return true;
       if (mode === "streak" && document.body.classList.contains("ingame")) return true;
