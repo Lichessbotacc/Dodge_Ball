@@ -2745,6 +2745,7 @@ function showGuestLimit() {
 // Gleiche Baelle/Spawnrate/Steuerung wie im 1v1, aber ohne Gegner. Zeit = Ticks/60.
 // Replay: Spielerposition alle 3 Ticks + Ball-Spawns (Tick, Position, Geschwindigkeit). Die Baelle bewegen
 // sich deterministisch, deshalb reicht das, um den Lauf exakt nachzuspielen (nur der Rekord wird gespeichert).
+let _survHudEl = null;
 let survivalActive = false, survTick = 0, survRec = null, survHudIv = null, _survInfo = null;
 function survFmt(t) {
   const m = Math.floor(t / 60), s = t - m * 60;
@@ -3052,13 +3053,14 @@ function startSurvival(daily, testIdx) {
   _dailyLight = _dailyKey ? (dailyActiveCh().light || null) : null; if (_dailyLight) survRec.lt = _dailyLight;
   if (_dailyKey) { const _f = dailyActiveCh().field; if (_f) { survRec.fd = _f.type; survRec.fs = dailySeed(_dailyKey); } }   // Feld-Modus fuers Replay
   if (_dailyKey) for (const b of balls) dailyRec(b, 1);
+  document.querySelectorAll("#survivalHUD").forEach(x => x.remove());   // FIX: uebriggebliebene alte Stoppuhr (haengt sonst bei 0.0s, weil getElementById die alte findet)
   const hud = document.createElement("div");
   hud.id = "survivalHUD";
   hud.style.cssText = "position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:150;pointer-events:none;padding:6px 18px;border-radius:12px;background:rgba(12,12,18,.85);border:1px solid rgba(0,255,136,.5);color:#00ff88;font:700 22px var(--font-display),system-ui,sans-serif;";
   hud.textContent = "0.0s";
-  document.body.appendChild(hud);
+  document.body.appendChild(hud); _survHudEl = hud;
   if (survHudIv) clearInterval(survHudIv);
-  survHudIv = setInterval(() => { const h = document.getElementById("survivalHUD"); if (h) h.textContent = survFmt(survTick / 60); }, 100);
+  survHudIv = setInterval(() => { const h = _survHudEl; if (h) h.textContent = survFmt(survTick / 60); }, 100);
   syncPresence(true);
 }
 // Verbindung weg = sofort verloren (wie im 1v1): laufender Survival-/Daily-/Streaks-Run endet, der Run wird NICHT gewertet/gespeichert.
@@ -3097,7 +3099,7 @@ function survPushLive(done, finalTime) {
 }
 function survivalTick() {
   survTick++;
-  if (survTick % 6 === 0) { const _h = document.getElementById("survivalHUD"); if (_h) _h.textContent = survFmt(survTick / 60); }
+  if (survTick % 6 === 0) { const _h = _survHudEl; if (_h) _h.textContent = survFmt(survTick / 60); }
   survPushLive(false);
   if (survTick % 3 === 0) { const me = players[0]; if (me) survRec.p.push(Math.round(me.x), Math.round(me.y)); }
 }
@@ -3125,7 +3127,7 @@ async function endSurvival(camped) {
   survivalActive = false; running = false;
   clearAllTimers(); campWarn(false);
   if (survHudIv) { clearInterval(survHudIv); survHudIv = null; }
-  const hud = document.getElementById("survivalHUD"); if (hud) hud.remove();
+  document.querySelectorAll("#survivalHUD").forEach(x => x.remove()); _survHudEl = null;
   const me = players[0], rec = survRec; survRec = null;
   rec.n = survTick; rec.e = me ? [Math.round(me.x), Math.round(me.y)] : [0, 0];
   const t = Math.round(survTick / 60 * 100) / 100;
@@ -5915,7 +5917,7 @@ function startOnlineGame(matchData) {
     if (!onlineIsHost && data.ballState) {
       try {
         const bs = JSON.parse(data.ballState);
-        applyBallCorrection(bs);
+        applyBallCorrection(bs, 0, Math.min(250, onlineRttMs / 2 + 30));
       } catch(e) {}
     }
 
@@ -5951,6 +5953,7 @@ function startOnlineGame(matchData) {
       if (pingHistory.length > 3) pingHistory.shift();
       const sorted = [...pingHistory].sort((a,b)=>a-b);
       const median = sorted[Math.floor(sorted.length/2)];
+      onlineRttMs = median;
       document.getElementById("pingDisplay").textContent = "📶 " + median + " ms";
     } catch(e) {}
   }, 1000);
@@ -6028,7 +6031,26 @@ function applyStreakTvBalls(arr) {
   balls = out;
 }
 let lastBallCorrectionAt = 0;
-function applyBallCorrection(authoritative, minPull) {
+let onlineRttMs = 0;   // zuletzt gemessene Ping-Zeit (Median), fuer die Latenz-Vorhaltung der Gast-Baelle
+// FIX (Bug-Report "Host hat Vorteil, Gast stirbt ohne Ball zu beruehren"): Der Gast sieht die Host-Baelle um die
+// Paketlaufzeit verspaetet und kollidiert lokal mit diesen alten Positionen. Deshalb werden die Host-Daten vor dem
+// Abgleich um die geschaetzte Laufzeit nach vorn gerechnet (inkl. Wand-Abprall).
+function advanceBallsByMs(arr, ms) {
+  const n = Math.max(0, Math.min(18, Math.round(ms / (1000 / 60))));
+  if (!n) return arr;
+  const w = W(), hh = H();
+  return arr.map(a => {
+    let x = a.x, y = a.y, vx = a.vx, vy = a.vy; const r = a.radius;
+    for (let i = 0; i < n; i++) {
+      x += vx; y += vy;
+      if (x - r < 0) { vx = Math.abs(vx); x = r; } else if (x + r > w) { vx = -Math.abs(vx); x = w - r; }
+      if (y - r < 0) { vy = Math.abs(vy); y = r; } else if (y + r > hh) { vy = -Math.abs(vy); y = hh - r; }
+    }
+    return { x, y, vx, vy, radius: r };
+  });
+}
+function applyBallCorrection(authoritative, minPull, leadMs) {
+  if (leadMs) authoritative = advanceBallsByMs(authoritative, leadMs);
   const now = Date.now();
   const gap = lastBallCorrectionAt ? Math.min(NET_SMOOTH.MAX_INTERVAL, now - lastBallCorrectionAt) : 120;
   lastBallCorrectionAt = now;
@@ -6476,7 +6498,7 @@ function botReplyFor(chat, pick, userText, ctx) {
   if (re(/\b(gg|wp|nice|good|well|great|gut|nett)\b/)) return { text: P(R.gg) };
   if (re(/(lol|haha|lmao|xd|😂|🤣)/)) return { text: P(R.laugh) };
   const f = P(R.fallback);
-  return { text: f, ask: /rematch|revanche/.test(f) };
+  return { text: f, ask: /rematch|revanche/.test(f), fallback: true };
 }
 
 
@@ -6542,7 +6564,27 @@ function botPostChatReply(userText) {
       const wo = document.getElementById("winnerOverlay");
       if (tk === botChatToken && onlineVsBot && wo && wo.style.display !== "none") requestRematch();
     }, 1800);
+  } else if (BOT_AI_URL && r.fallback) {
+    // KI-Antwort (Proxy hält den API-Key); bei Fehler/Timeout -> normaler Spruch
+    botAiReply(userText).then(t => botSay(t || r.text, 300, false, /rematch|revanche/i.test(t || r.text)));
   } else botSay(r.text, 800 + Math.random() * 700, false, !!r.ask);
+}
+// ── KI-Anbindung (optional): hier die URL deines Workers eintragen, leer = aus ──
+const BOT_AI_URL = "";
+const botAiHist = [];
+async function botAiReply(userText) {
+  try {
+    botAiHist.push({ role: "user", content: String(userText).slice(0, 300) });
+    if (botAiHist.length > 8) botAiHist.splice(0, botAiHist.length - 8);
+    const ctrl = new AbortController(), to = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(BOT_AI_URL, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+      body: JSON.stringify({ messages: botAiHist, botWon: window._botChatBotWon }) });
+    clearTimeout(to);
+    if (!res.ok) return null;
+    const t = String((await res.json()).text || "").trim().slice(0, 200);
+    if (t) botAiHist.push({ role: "assistant", content: t });
+    return t || null;
+  } catch (e) { return null; }
 }
 
 function showWinnerOverlay(winnerName, eloChange, eloRows) {
