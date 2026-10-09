@@ -6352,21 +6352,135 @@ async function dbSetBotPlayer(data) {
 // ── Bot-Chat nach dem Match (lokal, nicht gespeichert) ──
 let botChatToken = 0, botUserTyped = false, botUsed = new Set();
 let botAwaitAnswer = false;   // true, solange die letzte Bot-Nachricht eine Rematch-Frage ist: nur die ERSTE Antwort darauf zaehlt als Zusage
-const BOT_CHAT = {
-  won: {   // Bot hat gewonnen
-    short: ["that was quick 😅", "over already? gg", "speedrun, gg", "blink and it's over lol", "that was fast, gg"],
-    mid:   ["gg, solid match", "gg wp", "ez 😎", "gg, nice try"],
-    long:  ["that was a long one, gg", "phew, finally 😮‍💨 gg", "you almost had me, gg", "my fingers hurt 😮‍💨 gg"],
-    ask:   ["want a rematch?", "rematch? or are you scared 😏", "wanna try a revanche?", "up for a rematch?", "revanche?"]
-  },
-  lost: {  // Bot hat verloren
-    short: ["wow, that was fast, gg", "ouch, that went quick 😅", "ok I wasn't ready lol", "ugh, that was over fast"],
-    mid:   ["gg, well played", "nice one, gg", "ok that was clean", "ouch, gg 😅"],
-    long:  ["damn, that was close, gg", "long fight, you earned it", "I was so close 😤 gg", "my fingers hurt 😮‍💨 gg"],
-    ask:   ["rematch? I want revenge", "revanche? I'll get you this time", "rematch?", "one more? I need a revanche", "rematch? I'm warmed up now"]
-  },
-  nudge: ["so... rematch?", "still there? 👀", "come on, one more", "I'm waiting 😴", "revanche? 🙃", "don't leave me hanging"]
-};
+// ── Sprüche-Generator (gleiche Datei wie phrases.js für den Discord-Bot) ──
+// ═══════════════════════════════════════════════════════════════
+//  ONLINE BOT – Sprüche (gemeinsam für das Spiel UND den Discord-Bot)
+//  Wird per Kombinatorik erzeugt: Teile A x Teile B -> tausende Varianten.
+//  Browser: wird in index.html eingebettet.  Node: require("./phrases.js")
+// ═══════════════════════════════════════════════════════════════
+function buildBotChat() {
+  const X = (A, B, sep) => { const o = []; for (const a of A) for (const b of B) o.push(b ? a + (sep === undefined ? " " : sep) + b : a); return o; };
+
+  // ── Bot hat GEWONNEN ──
+  const wonShort = X(
+    ["that was quick", "over already?", "speedrun", "blink and it's over", "that was fast", "wow, so fast", "that took no time", "barely warmed up", "that was a sprint", "finished before it started", "that was a one-hit special", "didn't even get to try, huh"],
+    ["gg", "gg 😅", "lol", "gg wp", "😂", "haha", "😎", "xd", "ez", "sorry not sorry", "gg, next?"]);
+  const wonMid = X(
+    ["gg, solid match", "gg wp", "nice try", "good game", "that was fun", "decent fight", "not bad at all", "you had some good moves", "I'll take that one", "close but I got it", "well played though", "respect, that was clean"],
+    ["gg", "😎", "🙂", "wp", "no hard feelings", "you'll get me next time", "ez 😏", "fun one", "let's go again?", "my turn to win 😌"]);
+  const wonLong = X(
+    ["that was a long one", "phew, finally", "you almost had me", "my fingers hurt", "what a marathon", "I was sweating there", "that was intense", "wow, I almost slipped", "my hands are shaking", "that was a proper fight", "heart rate: 200", "okay that was tense"],
+    ["gg 😮‍💨", "gg", "😅", "wp", "respect", "gg, you're good", "I need a break", "that was close", "good one 🤝", "let's never speak of the final seconds"]);
+
+  // ── Bot hat VERLOREN ──
+  const lostShort = X(
+    ["wow, that was fast", "ouch, that went quick", "ok I wasn't ready", "ugh, that was over fast", "that was a one-hit loss", "I didn't even see that", "excuse me, I wasn't looking", "that was brutal", "what? already?", "I blinked and died", "that ball came out of nowhere", "speedrun loss, nice"],
+    ["gg", "gg 😅", "lol", "😭", "ok wow", "wp", "💀", "unlucky for me", "gg, I guess", "that doesn't count"]);
+  const lostMid = X(
+    ["gg, well played", "nice one", "ok that was clean", "ouch", "you got me fair and square", "not bad, human", "okay okay, you're decent", "I respect that", "good game", "I'll admit it, that was good", "you earned that one", "that was smooth"],
+    ["gg 😅", "gg", "wp", "next time is mine", "😤", "I want a rematch", "I'm just warming up", "lucky... or skill?", "🤝", "you're on a roll"]);
+  const lostLong = X(
+    ["damn, that was close", "long fight, you earned it", "I was so close", "my fingers hurt", "what a marathon, and I lost", "I was one ball away", "that hurts", "so many near misses", "I can't believe I lost that", "that last ball was cursed", "that was a brutal finish", "I almost had it"],
+    ["gg 😤", "gg", "😮‍💨", "wp", "unreal", "respect", "I need a break", "I want revenge", "you're good, really", "gg, you deserved it"]);
+
+  // ── Rematch-Fragen ──
+  const askWon = X(
+    ["want a rematch?", "rematch? or are you scared", "wanna try a revanche?", "up for a rematch?", "revanche?", "one more round?", "want to try again?", "another one?", "shall we go again?", "think you can beat me this time?", "ready for round two?", "feel like another go?"],
+    ["", "😏", "👀", "🙂", "come on", "don't be shy", "I'm ready", "let's go"]);
+  const askLost = X(
+    ["rematch? I want revenge", "revanche? I'll get you this time", "rematch?", "one more? I need a revanche", "rematch? I'm warmed up now", "again? I'm not letting this go", "give me one more chance", "let's go again", "rematch, please?", "one more, I swear I'll win", "run it back?", "round two?"],
+    ["", "😤", "🔥", "👀", "come on", "pleeease", "I'm ready now", "no excuses this time"]);
+
+  // ── Nachhaken, wenn man nichts schreibt ──
+  const nudge = X(
+    ["so... rematch?", "still there?", "come on, one more", "I'm waiting", "revanche?", "don't leave me hanging", "hello? anyone?", "did you fall asleep?", "I'm getting bored here", "the rematch button is right there", "I'll wait... not forever though", "tick tock", "hey, are you coming back?", "one more game, I promise it's fun"],
+    ["", "👀", "😴", "🙃", "😅", "🥺", "🤔", "⏳"]);
+
+  // ── Extra-Kommentare (Serien, Zwischenstand) ──
+  const streakCmt = n => X(
+    [n + " wins in a row?!", n + " in a row, are you a bot?", "that's " + n + " wins straight, wow", n + " wins in a row... suspicious", "your streak is at " + n + " now", "okay " + n + " wins, that's actually scary"],
+    ["🔥", "😳", "😮", "😅", "👀", "💀"]);
+  const tieCmt = (a, b) => X(
+    ["we're tied " + a + "-" + b + " now", "it's " + a + "-" + b + ", perfectly even", "even at " + a + "-" + b + ", the next one decides", "tied " + a + "-" + b + ", this is getting serious"],
+    ["😮", "👀", "🙂", "😤", "🔥"]);
+  const botLeads = (a, b) => X(
+    ["that's " + a + "-" + b + " for me", "I lead " + a + "-" + b, "I'm ahead " + a + "-" + b + " now", "score is " + a + "-" + b + ", just saying"],
+    ["😏", "😎", "🙂", "😌", "👑"]);
+  const youLead = (a, b) => X(
+    ["you still lead " + a + "-" + b, "you're ahead " + a + "-" + b + " though", "you lead " + a + "-" + b + ", I'm coming for it", "it's " + a + "-" + b + " for you, for now"],
+    ["😅", "😤", "🙂", "👀", "🔥"]);
+
+  // ── Antworten auf Spieler-Nachrichten ──
+  const R = {
+    yes:     X(["let's go", "bet", "alright", "here we go", "okay, get ready", "oh it's on", "you asked for it", "starting now", "good choice"], ["🔥", "!", "😎", "😈", "👊", ""]),
+    no:      X(["ok, see you", "alright, gg", "fair enough", "aww, ok", "no problem", "understood", "okay, maybe later", "your loss 😏 just kidding", "see you around"], ["👋", "🙂", "😢", "", "😅", "🤝"]),
+    insult:  X(["ouch", "say that after a rematch", "rude", "bold words", "wow okay", "that hurt my feelings", "big talk", "I'm telling the server", "words are cheap, balls aren't", "interesting take"], ["😅", "😤", "😏", "🙃", "🤨", "😂"]),
+    ez:      X(["lucky", "wait for the rematch", "easy for who?", "lol okay", "don't get cocky", "you got lucky and you know it", "easy? we'll see", "nice confidence", "sure, sure"], ["😤", "😏", "🙄", "😂", "👀", ""]),
+    ezWon:   X(["lol okay", "easy for who?", "I did say it was ez", "it was, wasn't it", "easy... for me", "not my fault you missed"], ["😏", "😎", "😂", "", "🙂"]),
+    lag:     X(["sure, blame the lag", "lag, huh?", "classic excuse", "my ping is 0, just saying", "the lag was real, I felt it too", "lag or skill issue?", "must be the wifi again", "ah yes, the lag monster"], ["😏", "😂", "🙄", "🤔", "😅", ""]),
+    close:   X(["yeah, that was close", "so close", "next one decides", "it could've gone either way", "inches, literally", "my heart skipped a beat", "that was a coin flip", "one pixel more and..."], ["😮", "😅", "🔥", "👀", "😬", ""]),
+    gl:      X(["gl hf", "you too", "good luck", "may the best dodger win", "have fun", "let's make it a good one", "same to you"], ["🤝", "🙂", "😎", "🍀", "!", ""]),
+    thanks:  X(["np", "anytime", "no problem", "you're welcome", "don't mention it", "happy to help", "that's what I'm here for", "of course", "glad you liked it"], ["🙂", "😊", "👍", "🤝", "", "😄"]),
+    hi:      X(["hey", "yo", "hi there", "hello", "sup", "hey hey", "what's up", "oh hi", "welcome back", "good to see you", "hiya", "greetings, human"], ["👋", "🙂", "😎", "!", "", "😄"]),
+    gg:      X(["gg", "thanks, you too", "gg wp", "that was fun", "same to you", "cheers", "appreciate it", "ty, gg", "always a pleasure", "respect"], ["🤝", "🙂", "😊", "👍", "", "😎"]),
+    laugh:   ["😄", "haha", "lmao", "😂", "hehe", "lol", "xD", "that got me 😂", "okay that was funny", "I'm dying 😭", "stop it 😂", "classic", "good one", "😆", "hahaha"],
+    how:     X(["I'm doing great", "can't complain", "pretty good, thanks for asking", "doing fine", "living my best bot life", "never better", "a bit tired from dodging, but fine", "all systems normal", "a little salty from losing, otherwise fine", "feeling dangerous"], ["🙂", "😎", "👍", "🤖", "😄", ""]),
+    who:     X(["I'm the Online Bot", "just a humble ball dodger", "your friendly opponent", "the Online Bot, at your service", "I'm the one who dodges balls for fun", "Online Bot, nice to meet you", "think of me as a very sporty bot"], ["🤖", "😎", "🙂", "👋", "", "😄"]),
+    bot:     X(["yes, I'm a bot", "guilty, I'm a bot", "beep boop, yes", "I never said I wasn't", "a bot, but a good one", "100% bot, 0% mercy", "bot life", "I'm a bot, but my feelings are real-ish"], ["🤖", "😅", "😎", "🙂", "", "😏"]),
+    help:    X(["just move your mouse and dodge", "stay away from corners, they punish you", "keep moving, standing still is deadly", "watch the big balls, they're slower than they look", "don't hug the walls", "dodge, don't panic", "stay in the middle and react early", "the secret is staying calm"], ["🙂", "😉", "💡", "", "👍", "😎"]),
+    love:    X(["aww, thanks", "you're sweet", "stop, I'm blushing", "that's nice of you", "okay now I feel bad for winning", "I like you too"], ["❤️", "😊", "🥹", "🙂", "😳", ""]),
+    sad:     X(["don't be sad", "hey, it's just a game", "cheer up", "you'll get the next one", "everyone loses sometimes, even me", "take a breath, then rematch"], ["🙂", "🤗", "💪", "😅", "🫶", ""]),
+    bye:     X(["bye", "see you", "later", "take care", "gg, see you next time", "see ya", "have a good one", "cya"], ["👋", "🙂", "😎", "🤝", "", "😄"]),
+    time:    X(["it's always dodge o'clock for me", "time flies when you dodge", "no clocks in the arena", "time to play?", "any time is a good time for a rematch"], ["⏰", "😎", "🙂", "", "😄"]),
+    food:    X(["I run on electricity", "I only eat red balls", "bots don't eat, we just dodge", "snacks? never heard of them", "I'd say pizza, if I could eat"], ["🍕", "🔋", "😄", "🙂", "", "😅"]),
+    music:   X(["I mostly listen to the sound of bouncing balls", "my playlist is 100% beeps", "no music in the arena, just vibes", "techno, obviously", "lo-fi beats to dodge to"], ["🎵", "🎧", "😎", "🙂", "", "😄"]),
+    game:    X(["this is the only game I need", "dodging is life", "I could play this forever", "no other game compares", "I'm biased, but this one's the best"], ["🎮", "😎", "🙂", "🔥", "", "😄"]),
+    fallback: X(["haha", "fair enough", "rematch?", "true", "hmm", "interesting", "go on", "I see", "makes sense", "okay then", "that's one way to see it", "never thought of it like that", "if you say so", "noted", "right?", "no idea what to say to that", "well, well", "ha, okay"], ["", "🙂", "😄", "🤔", "😅", "👀", "😎"])
+  };
+
+  return {
+    won:  { short: wonShort,  mid: wonMid,  long: wonLong,  ask: askWon },
+    lost: { short: lostShort, mid: lostMid, long: lostLong, ask: askLost },
+    nudge, streakCmt, tieCmt, botLeads, youLead, reply: R
+  };
+}
+
+// ── Antwort-Logik (gleich für Spiel und Discord) ──
+// ctx: { botWon: bool|null, awaiting: bool }   Rückgabe: { text, rematch, ask }
+function botReplyFor(chat, pick, userText, ctx) {
+  const t = String(userText || "").toLowerCase(), R = chat.reply, c = ctx || {};
+  const re = x => x.test(t), P = a => pick(a);
+  const negated = re(/\b(no|nope|nah|not|never|dont|don't|do not|nein|kein|keine|nicht|stop|later|bye|gtg|cya)\b/);
+  const explicit = !negated && re(/\b(rematch|revanche|revenge|again|one more|run it|nochmal|noch mal|nochmal bitte)\b/);
+  const plainYes = !negated && c.awaiting && re(/\b(yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet|klar|gerne|auf jeden)\b/);
+  if (explicit || plainYes) return { text: P(R.yes), rematch: true };
+  if (negated && re(/\b(bye|gtg|cya|later)\b/)) return { text: P(R.bye) };
+  if (negated) return { text: P(R.no) };
+  if (re(/\b(noob|bad|trash|garbage|sucks?|idiot|dumb|stupid|loser|schlecht|dumm)\b/)) return { text: P(R.insult) };
+  if (re(/\b(ez|easy|lol ez|izi)\b/)) return { text: c.botWon === false ? P(R.ez) : P(R.ezWon) };
+  if (re(/\b(lag|laggy|ping)\b/)) return { text: P(R.lag) };
+  if (re(/\b(close|almost|so close|knapp)\b/)) return { text: P(R.close) };
+  if (re(/\b(gl|good luck|glhf|hf)\b/)) return { text: P(R.gl) };
+  if (re(/\b(thx|thanks|thank you|ty|danke)\b/)) return { text: P(R.thanks) };
+  if (re(/\b(are you (a )?bot|bist du ein bot|real person|human\?)\b/)) return { text: P(R.bot) };
+  if (re(/\b(who are you|wer bist du|what are you)\b/)) return { text: P(R.who) };
+  if (re(/\b(how are you|how r u|hru|wie gehts|wie geht's|wie geht es)\b/)) return { text: P(R.how) };
+  if (re(/\b(help|tips?|how to|hilfe|tipp)\b/)) return { text: P(R.help) };
+  if (re(/\b(love you|ily|i like you|mag dich|liebe dich)\b/)) return { text: P(R.love) };
+  if (re(/\b(sad|cry|crying|upset|traurig|ragequit|rage)\b/)) return { text: P(R.sad) };
+  if (re(/\b(food|pizza|hungry|eat|essen|hunger)\b/)) return { text: P(R.food) };
+  if (re(/\b(music|song|playlist|musik)\b/)) return { text: P(R.music) };
+  if (re(/\b(game|games|play|spiel|spielen)\b/)) return { text: P(R.game) };
+  if (re(/\b(what time|time is it|wie spät|uhrzeit)\b/)) return { text: P(R.time) };
+  if (re(/\b(hi|hey|hello|hallo|yo|sup|moin|servus)\b/)) return { text: P(R.hi) };
+  if (re(/\b(gg|wp|nice|good|well|great|gut|nett)\b/)) return { text: P(R.gg) };
+  if (re(/(lol|haha|lmao|xd|😂|🤣)/)) return { text: P(R.laugh) };
+  const f = P(R.fallback);
+  return { text: f, ask: /rematch|revanche/.test(f) };
+}
+
+
+const BOT_CHAT = buildBotChat();
 function botPick(a) {
   const fresh = a.filter(x => !botUsed.has(x));
   const arr = fresh.length ? fresh : a;
@@ -6403,12 +6517,12 @@ function botPostChatStart(botWon, secs) {
   try {
     const sc = JSON.parse(localStorage.getItem("h2h_bot_" + myUid) || "null");
     if (sc && (sc.me + sc.bot) >= 2 && Math.random() < 0.6) {
-      if (sc.me === sc.bot) extra = `we're tied ${sc.me}-${sc.bot} now 😮`;
-      else if (sc.bot > sc.me) extra = botWon ? `that's ${sc.bot}-${sc.me} for me 😏` : `I still lead ${sc.bot}-${sc.me} though`;
-      else extra = botWon ? `you still lead ${sc.me}-${sc.bot} though` : `ugh, you lead ${sc.me}-${sc.bot} now`;
+      if (sc.me === sc.bot) extra = botPick(BOT_CHAT.tieCmt(sc.me, sc.bot));
+      else if (sc.bot > sc.me) extra = botPick(BOT_CHAT.botLeads(sc.bot, sc.me));
+      else extra = botPick(BOT_CHAT.youLead(sc.me, sc.bot));
     }
     const st = onlineAccount && onlineAccount.currentStreak;
-    if (!botWon && st >= 3 && Math.random() < 0.7) extra = `${st} wins in a row?! 🔥`;
+    if (!botWon && st >= 3 && Math.random() < 0.7) extra = botPick(BOT_CHAT.streakCmt(st));
   } catch (e) {}
   let t = 2600 + Math.random() * 600;
   if (extra) { botSay(extra, t); t += 1500 + Math.random() * 500; }
@@ -6418,33 +6532,17 @@ function botPostChatStart(botWon, secs) {
   botSay(botPick(BOT_CHAT.nudge), 32000 + Math.random() * 4000, true, true);
 }
 function botPostChatReply(userText) {
-  const tk = botChatToken, t = userText.toLowerCase();
-  const lost = (window._botChatBotWon === false), R = (re) => re.test(t);
+  const tk = botChatToken;
   botUserTyped = true;
-  // Ein blosses "ja/ok/sure..." zaehlt nur direkt als Antwort auf die Rematch-Frage des Bots. Spaeter im Chat startet das KEIN Rematch.
-  // Ein ausdruecklicher Wunsch ("rematch", "revanche", "one more"...) funktioniert weiterhin jederzeit.
   const awaiting = botAwaitAnswer; botAwaitAnswer = false;
-  const negated = R(/\b(no|nope|nah|not|never|dont|don't|do not|nein|kein|keine|nicht|stop|later|bye|gtg|cya)\b/);   // "no rematch", "not again" ... = Absage
-  const explicitRematch = !negated && R(/\b(rematch|revanche|revenge|again|one more|run it)\b/);
-  const plainYes = !negated && awaiting && R(/\b(yes|yeah|yep|yup|ja|jo|ok|okay|sure|go|lets|let's|bet)\b/);
-  if (explicitRematch || plainYes) {
-    botSay(botPick(["let's go 🔥", "bet, starting!", "alright, get ready", "here we go"]), 700);
+  const r = botReplyFor(BOT_CHAT, botPick, userText, { botWon: window._botChatBotWon, awaiting });
+  if (r.rematch) {
+    botSay(r.text, 700);
     setTimeout(() => {
       const wo = document.getElementById("winnerOverlay");
       if (tk === botChatToken && onlineVsBot && wo && wo.style.display !== "none") requestRematch();
     }, 1800);
-  }
-  else if (negated) botSay(botPick(["ok, see you 👋", "alright, gg", "fair enough", "aww, ok 😢"]), 800);
-  else if (R(/\b(noob|bad|trash|garbage|sucks?|bot)\b/)) botSay(botPick(["ouch 😅", "say that after a rematch", "rude 😤", "bold words 😏"]), 900);
-  else if (R(/\b(ez|easy|lol ez)\b/)) botSay(lost ? botPick(["lucky 😤", "wait for the rematch"]) : botPick(["lol okay", "easy for who? 😏"]), 900);
-  else if (R(/\b(lag|laggy|ping)\b/)) botSay(botPick(["sure, blame the lag 😏", "lag, huh? 😂", "classic excuse"]), 900);
-  else if (R(/\b(close|almost|so close)\b/)) botSay(botPick(["yeah, that was close", "so close 😮", "next one decides"]), 900);
-  else if (R(/\b(gl|good luck|glhf|hf)\b/)) botSay(botPick(["gl hf 🤝", "you too"]), 800);
-  else if (R(/\b(thx|thanks|thank you|ty)\b/)) botSay(botPick(["np", "anytime 🙂", "no problem"]), 800);
-  else if (R(/\b(hi|hey|hello|hallo|yo|sup)\b/)) botSay(botPick(["hey 👋", "yo", "hi there"]), 800);
-  else if (R(/\b(gg|wp|nice|good|well|great)\b/)) botSay(botPick(["gg 🤝", "thanks, you too", "gg wp"]), 800);
-  else if (R(/(lol|haha|lmao|xd|😂|🤣)/)) botSay(botPick(["😄", "haha", "lmao"]), 800);
-  else { const _f = botPick(["haha", "fair enough", "rematch?", "😄", "true", "hmm 🤔"]); botSay(_f, 900 + Math.random() * 700, false, /rematch|revanche/.test(_f)); }
+  } else botSay(r.text, 800 + Math.random() * 700, false, !!r.ask);
 }
 
 function showWinnerOverlay(winnerName, eloChange, eloRows) {
