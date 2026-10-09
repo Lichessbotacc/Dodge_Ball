@@ -5795,6 +5795,8 @@ function startOnlineGame(matchData) {
   onlineRng            = makeLCG(matchData.seed || 42);
   onlineShared = !onlineVsBot && fbReady && !!onlineMatchId;
   onlineStartAt = 0; onlineStartSent = false; onlineBallTick = 0; onlinePending = []; onlineSpawnLog = []; onlineSeenSpawn = new Set();
+  onlineGotSpawn = false; onlineSpawnSeq = 0; onlineNextSpawn = Date.now() + 750;   // erster Ball erscheint 1 s nach Spielstart (750 ms + 250 ms Vorlauf)
+  if (onlineShared && onlineIsHost) RPC.setMatchPath(onlineMatchId, "spawns", null).catch(() => {});
   if (onlineShared) ensureSrvOffset();
   onlineBallSpawnTimer = Date.now();
 
@@ -5903,11 +5905,10 @@ function startOnlineGame(matchData) {
     const wdNow = String(data["ping_" + wdOppRole]) + "|" + String(data[wdOppRole + "Ready"]) + "|" + JSON.stringify(data[wdOppRole + "State"] || null) + "|" + (!onlineIsHost ? data.ballState : "");
     if (wdNow !== wdSig) { wdSig = wdNow; wdLastBeat = Date.now(); }
 
-    if (onlineShared && !onlineStartAt && data.status === "playing" && Number(data.startAt) > 0 && srvNow() - Number(data.startAt) < 4000) onlineStartAt = Number(data.startAt);
     if (onlineShared && !onlineIsHost && data.spawns) { try { JSON.parse(data.spawns).forEach(applySpawn); } catch (e) {} }
     if (onlineIsHost && !onlineStartSent && data.status === "waiting" && data.p1Ready && data.p2Ready) {
       onlineStartSent = true;
-      RPC.updateMatch(onlineMatchId, { status: "playing", startAt: srvNow() + 1500 }).catch(() => { onlineStartSent = false; });
+      RPC.updateMatch(onlineMatchId, { status: "playing" }).catch(() => { onlineStartSent = false; });
     }
 
     const oppRole = onlineRole === "p1" ? "p2" : "p1";
@@ -6041,18 +6042,18 @@ let lastBallCorrectionAt = 0;
 // Beide Spieler berechnen die Baelle selbst, aus demselben Seed und derselben Serverzeit (Tick = Zeit seit startAt).
 // Dadurch sind die Baelle auf beiden Bildschirmen identisch, egal wie hoch der Ping ist. Es wird nichts mehr "nachgezogen".
 // Neue Baelle erscheinen zuerst als Geisterball (SHARED_WARM_TICKS) und sind erst danach toedlich -> man stirbt nie an etwas, das man nicht sehen konnte.
-let onlineShared = false, onlineStartAt = 0, onlineStartSent = false, onlineBallTick = 0, _srvOff = 0, _srvOffOn = false;
+let onlineShared = false, onlineStartAt = 0, onlineStartSent = false, onlineBallTick = 0, _srvOff = 0, _srvOffOn = false, _srvOffKnown = false, onlineNextSpawn = 0, onlineGotSpawn = false, onlineSpawnSeq = 0;
 const SHARED_SPAWN_TICKS = 60, SHARED_WARM_TICKS = 0;
 function srvNow() { return Date.now() + _srvOff; }
 function ensureSrvOffset() {
   if (_srvOffOn || !fbReady) return;
   _srvOffOn = true;
-  dbOn(".info/serverTimeOffset", v => { _srvOff = Number(v) || 0; });
+  dbOn(".info/serverTimeOffset", v => { _srvOff = Number(v) || 0; _srvOffKnown = true; });
 }
-const SHARED_LEAD_TICKS = 15;   // Spawn wird 0,25 s vorher angekuendigt, damit er bei beiden im selben Tick erscheint
-let onlinePending = [], onlineSpawnLog = [], onlineSeenSpawn = new Set();
-// Wie frueher: 220 px Mindestabstand zu den Spielern. Nur der HOST waehlt den Spawn, der Gast bekommt ihn exakt uebermittelt.
-function makeHostSpawn(t) {
+const SHARED_LEAD_MS = 250;   // Spawn wird 0,25 s vorher angekuendigt, damit er bei beiden zur selben Serverzeit erscheint
+let onlinePending = [], onlineSeenSpawn = new Set(), onlineSpawnLog = [];
+// Wie frueher: 220 px Mindestabstand zu den Spielern, alle 1000 ms ein Ball. Nur der HOST waehlt den Spawn, der Gast bekommt ihn exakt uebermittelt.
+function makeHostSpawn() {
   const rng = onlineRng, q = v => Math.round(v * 1000) / 1000;
   const r = q(15 + rng() * 20); let x = 0, y = 0, ok = false, n = 0;
   while (!ok && n++ < 100) {
@@ -6060,7 +6061,7 @@ function makeHostSpawn(t) {
     for (const p of players) { if (!p.alive) continue; if (Math.hypot(p.x - x, p.y - y) < p.radius + r + 220) { ok = false; break; } }
   }
   const spd = 5 + rng() * 6, ang = rng() * Math.PI * 2;
-  return { id: t / SHARED_SPAWN_TICKS, act: t + SHARED_LEAD_TICKS, x, y, r, vx: q(Math.cos(ang) * spd * ONLINE_BALL_SPEED), vy: q(Math.sin(ang) * spd * ONLINE_BALL_SPEED) };
+  return { id: onlineRound * 100000 + (++onlineSpawnSeq), act: Math.round(srvNow() + SHARED_LEAD_MS), x, y, r, vx: q(Math.cos(ang) * spd * ONLINE_BALL_SPEED), vy: q(Math.sin(ang) * spd * ONLINE_BALL_SPEED) };
 }
 function moveSharedBall(b) {
   b.x += b.vx; b.y += b.vy;
@@ -6069,32 +6070,29 @@ function moveSharedBall(b) {
   if (b.y - b.radius < 0) { b.vy =  Math.abs(b.vy); b.y = b.radius; }
   if (b.y + b.radius > H()) { b.vy = -Math.abs(b.vy); b.y = H() - b.radius; }
 }
-function applySpawn(rec) {   // Gast: Spawn des Hosts uebernehmen (kam er zu spaet, wird der Ball exakt nachgerechnet)
-  if (!onlineStartAt || !rec || onlineSeenSpawn.has(rec.id)) return;
-  onlineSeenSpawn.add(rec.id);
-  if (rec.act > onlineBallTick) { onlinePending.push(rec); return; }
-  const b = { x: rec.x, y: rec.y, radius: rec.r, vx: rec.vx, vy: rec.vy };
-  for (let k = rec.act; k <= onlineBallTick; k++) moveSharedBall(b);
-  balls.push(b);
+function ballFromRec(r) { return { x: r.x, y: r.y, radius: r.r, vx: r.vx, vy: r.vy, born: r.act, age: 0 }; }
+function applySpawn(rec) {   // Gast: Spawn des Hosts uebernehmen
+  if (!rec || !_srvOffKnown || onlineSeenSpawn.has(rec.id) || rec.act < srvNow() - 4000) return;   // alte Eintraege (frueherer Durchgang) ignorieren
+  onlineSeenSpawn.add(rec.id); onlineGotSpawn = true;
+  if (rec.act > srvNow()) onlinePending.push(rec); else balls.push(ballFromRec(rec));
 }
-function stepSharedBallsOnce() {
-  const t = ++onlineBallTick;
-  if (onlineIsHost && t % SHARED_SPAWN_TICKS === 0) {
-    const rec = makeHostSpawn(t); onlinePending.push(rec); onlineSeenSpawn.add(rec.id);
+// Jeder Ball bewegt sich als reine Funktion der Serverzeit seit seinem Spawn (Alter in Ticks) -> bei beiden exakt gleich, egal wann das Paket ankam.
+function sharedBallStep() {
+  if (onlineResultHandled) return;
+  if (!onlineIsHost && !onlineGotSpawn && Date.now() > onlineNextSpawn + 2750) { onlineShared = false; return; }   // Notbremse: kommt nichts vom Host, laeuft der Gast wie frueher (ballState)
+  if (!_srvOffKnown && Date.now() < onlineNextSpawn + 2250) return;
+  const now = srvNow();
+  if (onlineIsHost && Date.now() >= onlineNextSpawn) {
+    onlineNextSpawn = (Date.now() - onlineNextSpawn > 2000) ? Date.now() + 1000 : onlineNextSpawn + 1000;
+    const rec = makeHostSpawn(); onlinePending.push(rec); onlineSeenSpawn.add(rec.id);
     onlineSpawnLog.push(rec); if (onlineSpawnLog.length > 8) onlineSpawnLog.shift();
     RPC.setMatchPath(onlineMatchId, "spawns", JSON.stringify(onlineSpawnLog)).catch(() => {});
   }
-  for (let i = onlinePending.length - 1; i >= 0; i--) {
-    const r = onlinePending[i];
-    if (r.act <= t) { balls.push({ x: r.x, y: r.y, radius: r.r, vx: r.vx, vy: r.vy }); onlinePending.splice(i, 1); }
+  for (let i = onlinePending.length - 1; i >= 0; i--) if (onlinePending[i].act <= now) { balls.push(ballFromRec(onlinePending[i])); onlinePending.splice(i, 1); }
+  for (const b of balls) {
+    const target = Math.floor((now - b.born) / timestep);
+    let g = 0; while (b.age < target && g++ < 1200) { moveSharedBall(b); b.age++; }
   }
-  for (const b of balls) moveSharedBall(b);
-}
-function sharedBallStep() {
-  if (!onlineStartAt || onlineResultHandled) return;
-  const target = Math.floor((srvNow() - onlineStartAt) / timestep);
-  let g = 0;
-  while (onlineBallTick < target && g++ < 900) stepSharedBallsOnce();
 }
 let onlineRttMs = 0;   // zuletzt gemessene Ping-Zeit (Median), fuer die Latenz-Vorhaltung der Gast-Baelle
 // FIX (Bug-Report "Host hat Vorteil, Gast stirbt ohne Ball zu beruehren"): Der Gast sieht die Host-Baelle um die
