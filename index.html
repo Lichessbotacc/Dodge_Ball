@@ -1458,7 +1458,7 @@ async function rpcSaveSurvival(time, replayStr, name) {
   const uid = requireUid();
   return update(ref(db), {
     ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
-    ["survivalReplays/" + uid]: (replayStr && String(replayStr).length <= 880000) ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
+    ["survivalReplays/" + uid]: (replayStr && String(replayStr).length <= 3900000) ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
   });
 }
 // Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
@@ -1474,7 +1474,7 @@ async function rpcSaveDailyReplay(day, str) {
   requireNotBanned();
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
-  if (String(str).length > 880000) return;   // zu gross fuer die Rules (900000) -> Zeit bleibt gespeichert, nur ohne Replay
+  if (String(str).length > 3900000) return;   // zu gross fuer die Rules (900000) -> Zeit bleibt gespeichert, nur ohne Replay
   return set(ref(db, "dailyReplays/" + uid + "/" + day), String(str));
 }
 async function rpcRemoveDailyReplay(day) {
