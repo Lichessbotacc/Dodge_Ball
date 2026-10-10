@@ -722,6 +722,20 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
   #menu{padding-bottom:calc(40px + env(safe-area-inset-bottom,0px));}
 }
 
+
+/* ── Handy: Menue-Reihenfolge (Buttons, Modi, Chat, Spieler), runde Arena mit sichtbarem Rand ── */
+#game{box-shadow:0 0 0 1px rgba(255,255,255,.16),0 0 60px rgba(0,255,136,.06);}
+@media (max-width:720px){
+  #menu{align-items:center;}
+  #accountBtn,#newsBtn,#bugBtn{position:static!important;order:-3;margin:0;padding:7px 10px;font-size:11px;letter-spacing:.5px;}
+  #menu > div:has(> #menuMain){order:-1;}
+  #menu > div:has(> #chatPanel){order:2;}
+  #menu > div:has(> #onlinePlayersPanel){order:3;}
+  #chatPanel,#onlinePlayersPanel{width:min(380px,92vw)!important;}
+  h1{font-size:34px;margin-bottom:14px;}
+}
+#rotateHint{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:120;pointer-events:none;opacity:0;transition:opacity .4s;
+  background:rgba(16,18,26,.85);border:1px solid rgba(255,255,255,.15);color:#dfe6f2;font-family:var(--font-display);font-size:12px;padding:7px 14px;border-radius:999px;white-space:nowrap;}
 body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
@@ -976,6 +990,13 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <div id="ballColorRow"></div>
       <br>
 
+      <label>Ball Image 🖼️ <span style="opacity:.6;font-size:12px;">(only you can see it)</span></label>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 18px;">
+        <button type="button" id="ballImgPick" onclick="document.getElementById('ballImgFile').click()" style="margin:0;padding:8px 16px;font-size:13px;">Choose image</button>
+        <button type="button" id="ballImgClear" onclick="clearBallImage()" style="margin:0;padding:8px 16px;font-size:13px;">Remove</button>
+        <input type="file" id="ballImgFile" accept="image/*" style="display:none" onchange="setBallImageFromFile(this.files && this.files[0]); this.value='';">
+      </div>
+
       <label>Ball Trail Effect ✨</label><br>
       <label class="switch">
         <input type="checkbox" id="ballTrailToggle" onchange="setBallTrail(this.checked)">
@@ -1153,6 +1174,15 @@ body.mode-tv #homeBtn:hover{transform:none;}
   </div>
 </div>
 
+<script id="rankHelpers">
+// Einheitliche Sortierung fuer ALLE Ranglisten: gleicher Wert -> immer gleiche Reihenfolge (frueher eingetragen zuerst, dann Name)
+function _nm(x) { return String((x && (x.name || x.n)) || "").toLowerCase(); }
+function _tcmp(a, b) { return (b.time - a.time) || ((a.ts || 1e15) - (b.ts || 1e15)) || (_nm(a) < _nm(b) ? -1 : _nm(a) > _nm(b) ? 1 : 0) || String(a.uid || a.u || "").localeCompare(String(b.uid || b.u || "")); }
+function _ecmp(a, b) { return ((Number(b.elo) || 1500) - (Number(a.elo) || 1500)) || (_nm(a) < _nm(b) ? -1 : _nm(a) > _nm(b) ? 1 : 0) || String(a.uid || "").localeCompare(String(b.uid || "")); }
+</script>
+<script id="rankHelpers2">
+function _tcmpT(a, b) { return (b.t - a.t) || ((a.ts || 1e15) - (b.ts || 1e15)) || String(a.u || "").localeCompare(String(b.u || "")); }
+</script>
 <script id="sfxModule">
 // ═══ Sounds: kurze, saubere Toene live per Web Audio (keine Dateien). Einstellungen: Settings > Sound ═══
 window.SFX = (function () {
@@ -1175,6 +1205,7 @@ window.SFX = (function () {
     win:[{f:C5,t:0,d:.35,g:.2},{f:E5,t:.09,d:.35,g:.2},{f:G5,t:.18,d:.4,g:.2},{f:C6,t:.27,d:.8,g:.22}],
     lose:[{f:G4,t:0,d:.3,g:.2},{f:E4,t:.14,d:.3,g:.2},{f:C4,t:.28,d:.7,g:.22}],
     record:[{f:C5,t:0,d:.2,g:.18},{f:E5,t:.08,d:.2,g:.18},{f:G5,t:.16,d:.2,g:.18},{f:C6,t:.24,d:.25,g:.18},{f:E6,t:.34,d:.9,g:.2},{f:G6,t:.34,d:.9,g:.1}],
+    ping:[{f:A5,t:0,d:.1,g:.16},{f:E6,t:.09,d:.24,g:.18}],
     eloup:[{f:G5,t:0,d:.15,g:.18},{f:C6,t:.1,d:.3,g:.2}], elodown:[{f:E5,t:0,d:.15,g:.18},{f:B4,t:.1,d:.3,g:.18}]
   };
   function init() {
@@ -1264,16 +1295,26 @@ function W() { return V_W; }
 function H() { return V_H; }
 
 function resize() {
+  // Arena immer im Seitenverhaeltnis 16:9 (Baelle bleiben rund, Spielfeld/Gameplay unveraendert), zentriert; Rest ist Rand
   const dpr = window.devicePixelRatio || 1;
+  const vw = window.innerWidth || document.documentElement.clientWidth, vh = window.innerHeight || document.documentElement.clientHeight;
+  const fit = Math.min(vw / V_W, vh / V_H);
+  const cw = Math.max(1, Math.floor(V_W * fit)), ch = Math.max(1, Math.floor(V_H * fit));
   gameWrap.style.width  = "100%";
   gameWrap.style.height = "100%";
-  canvas.style.width    = "100%";
-  canvas.style.height   = "100%";
+  gameWrap.style.display = "flex"; gameWrap.style.alignItems = "center"; gameWrap.style.justifyContent = "center";
+  canvas.style.width    = cw + "px";
+  canvas.style.height   = ch + "px";
+  canvas.style.flex     = "none";
   canvas.width  = Math.round(V_W * dpr);
   canvas.height = Math.round(V_H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+function screenToVirtualClamped(clientX, clientY) {
+  const p = screenToVirtual(clientX, clientY);
+  return { x: Math.max(0, Math.min(V_W, p.x)), y: Math.max(0, Math.min(V_H, p.y)) };
+}
 function screenToVirtual(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -1283,6 +1324,7 @@ function screenToVirtual(clientX, clientY) {
 }
 
 window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 200));
 resize();
 
 // ═══════════════════════════════════════════════
@@ -2284,7 +2326,7 @@ function renderPresence(playersData) {
           || (prev.uid !== myUid && (p.lastActive || 0) > (prev.lastActive || 0));
         if (better) _seen.set(key, p);
       });
-    const activeList = [..._seen.values()].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0));
+    const activeList = [..._seen.values()].sort(_ecmp);
 
     if (activeList.length === 0) {
       panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
@@ -2349,7 +2391,7 @@ function challengeRankOf(uid, name) {
       const games = q => (Number(q.wins) || 0) + (Number(q.losses) || 0);
       if (!prev || p.uid === myUid || (prev.uid !== myUid && games(p) > games(prev))) seen.set(key, p);
     });
-  const sorted = [...seen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
+  const sorted = [...seen.values()].sort(_ecmp);
   let i = sorted.findIndex(p => p.uid === uid);
   if (i < 0 && name) i = sorted.findIndex(p => String(p.name || "").toLowerCase() === String(name).toLowerCase());
   return i >= 0 ? i + 1 : null;
@@ -2521,13 +2563,42 @@ async function acceptChallenge(fromUid) {
 // ═══════════════════════════════════════════════
 // ═══ GLOBAL CHAT (Text wird per textContent gesetzt -> kein XSS) ═══
 let chatUnsub = null, lastChatSent = 0, chatFirst = true, chatSentTimes = [], lastChatText = "";
-// Einfacher Wortfilter (Liste nach Bedarf erweitern) + Links werden entfernt
-const CHAT_BAD_WORDS = ["fuck","shit","bitch","nigg","fotze","hurensohn","wichser","arschloch","schlampe"];
-function chatFilter(t) {
-  t = t.replace(/(https?:\/\/|www\.)\S+/gi, "[link]");
-  for (const w of CHAT_BAD_WORDS) t = t.replace(new RegExp(w, "gi"), m => "*".repeat(m.length));
-  return t;
+// Wortfilter (EN / DE / RU): erkennt Leetspeak (sh1t, f.u.c.k), Wiederholungen (fuuuck), Akzente und auseinandergezogene Buchstaben (f u c k).
+// Starke Woerter werden auch mitten im Wort erkannt, kurze/mehrdeutige nur als ganzes Wort (damit "class" oder "Scunthorpe" nicht getroffen werden).
+const CHAT_BAD_WORDS = ["fuck","shit","bitch","nigg","fotze","hurensohn","wichser","arschloch","schlampe","motherfuck","asshole","faggot","whore","scheiss","missgeburt","kackbratze","wixx","pizd","blyad","blyat","pidor","pidar","хуй","хуе","хуя","пизд","бляд","блят","ебан","ебат","ебал","ебуч","мудак","залуп","пидор","пидар","шлюх","сучк"];
+const CHAT_BAD_WHOLE = ["ass","arse","dick","cock","cunt","pussy","slut","retard","retarded","arsch","fick","ficken","ficker","fickt","hure","nutte","spast","spasti","wichsen","fag","сука","суки","suka","suki","pizda","трахаться","трахать","трахнуть","трахну","трахни","трахаю","трахал","ебаться","ебать","хер"];
+const _CF_LEET = { "0": "o", "1": "i", "!": "i", "|": "i", "3": "e", "4": "a", "@": "a", "5": "s", "$": "s", "7": "t", "+": "t", "8": "b" };
+function _cfNorm(str) {
+  const t = String(str).toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  let o = "";
+  for (const ch of t) {
+    const c = _CF_LEET[ch] || ch;
+    if (/[a-zа-яё]/.test(c) && o[o.length - 1] !== c) o += c;
+  }
+  return o;
 }
+const _CF_STRONG = CHAT_BAD_WORDS.map(_cfNorm), _CF_WHOLE = new Set(CHAT_BAD_WHOLE.map(_cfNorm));
+function _cfBad(n) { return !!n && (_CF_STRONG.some(w => n.includes(w)) || _CF_WHOLE.has(n) || (n.length > 3 && _CF_WHOLE.has(n.replace(/s$/, "")))); }
+function chatFilterEx(t) {
+  let hit = false;
+  t = String(t).replace(/(https?:\/\/|www\.)\S+/gi, "[link]");
+  const toks = [...t.matchAll(/\S+/g)].map(m => ({ i: m.index, len: m[0].length, n: _cfNorm(m[0]) }));
+  const mask = new Array(toks.length).fill(false);
+  toks.forEach((k, j) => { if (_cfBad(k.n)) mask[j] = true; });
+  for (let j = 0; j < toks.length;) {   // auseinandergezogene Woerter: f u c k
+    if (toks[j].n.length === 1) {
+      let e = j; while (e + 1 < toks.length && toks[e + 1].n.length === 1) e++;
+      if (e - j >= 2 && _cfBad(toks.slice(j, e + 1).map(k => k.n).join(""))) for (let q = j; q <= e; q++) mask[q] = true;
+      j = e + 1;
+    } else j++;
+  }
+  let out = "", pos = 0;
+  toks.forEach((k, j) => { out += t.slice(pos, k.i); out += mask[j] ? "*".repeat(k.len) : t.substr(k.i, k.len); pos = k.i + k.len; if (mask[j]) hit = true; });
+  out += t.slice(pos);
+  return { text: out, hit };
+}
+function chatFilter(t) { return chatFilterEx(t).text; }
+function chatFilterNotice() { try { challengeToast("Your message contained inappropriate words and was filtered. Please keep the chat friendly.", "#ffb020"); } catch (e) {} }
 // Verbotene Namen (leicht erweiterbar). Leetspeak (h1tl3r, h!tler …) wird erkannt.
 const NAME_BLOCK = ["hitler","nazi","hakenkreuz","goebbels","himmler","1488","nigg"];
 // Namensregeln (wie lichess.org): 3-20 Zeichen, nur Buchstaben/Zahlen/_/-, muss mit einem Buchstaben beginnen,
@@ -2589,6 +2660,52 @@ function chatStyleName(el, uid) {
 function recolorChatNames() {
   document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
 }
+
+// Rang-Tag im Chat: Top 5 der ELO-Rangliste (gleiche Regeln wie die Rangliste: mind. 1 Partie, ein Eintrag pro Name)
+function chatRankMap() {
+  const d = window._lastPlayersData, m = {};
+  if (!d) return m;
+  const seen = new Map();
+  for (const [u, q] of Object.entries(d)) {
+    if (!q) continue;
+    const g = (Number(q.wins) || 0) + (Number(q.losses) || 0);
+    if (g < 1) continue;
+    const k = String(q.name || "").toLowerCase(), prev = seen.get(k);
+    if (!prev || u === myUid || (prev.uid !== myUid && g > prev.g)) seen.set(k, { uid: u, elo: q.elo, name: q.name, g });
+  }
+  [...seen.values()].sort(_ecmp).slice(0, 5).forEach((r, i) => { m[r.uid] = i + 1; });
+  return m;
+}
+// @Name im Text hervorheben; gibt true zurueck, wenn ich selbst erwaehnt werde
+function chatMentionsMe(text) {
+  const n = onlineAccount && onlineAccount.name; if (!n) return false;
+  return new RegExp("@" + n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9_-])", "i").test(String(text));
+}
+function chatFillText(el, text) {
+  let mine = false, last = 0;
+  const myN = (onlineAccount && onlineAccount.name || "").toLowerCase();
+  String(text).replace(/@([A-Za-z0-9_-]{3,20})/g, (full, nm, idx) => {
+    if (idx > last) el.append(document.createTextNode(text.slice(last, idx)));
+    const sp = document.createElement("span"); sp.textContent = full;
+    const me = nm.toLowerCase() === myN; if (me) mine = true;
+    sp.style.cssText = "font-weight:700;color:" + (me ? "#00e5ff" : "#9fd8ff") + ";" + (me ? "background:rgba(0,229,255,.18);border-radius:4px;padding:0 3px;" : "");
+    el.append(sp); last = idx + full.length; return full;
+  });
+  if (last < text.length) el.append(document.createTextNode(text.slice(last)));
+  return mine;
+}
+let _chatMentionInit = false; const _chatMentionSeen = new Set();
+function chatNotifyMentions(msgs) {
+  for (const [k, m] of Object.entries(msgs || {})) {
+    if (_chatMentionSeen.has(k)) continue;
+    _chatMentionSeen.add(k);
+    if (_chatMentionInit && m && m.uid !== myUid && chatMentionsMe(m.text)) {
+      try { SFX.play("ping"); challengeToast("💬 " + m.name + " mentioned you in the chat", "#00e5ff"); } catch (e) {}
+    }
+  }
+  _chatMentionInit = true;
+}
+
 function _modIsAdminSafe(){ try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch(e){ return false; } }
 function renderChat(keepScroll) {
   const box = document.getElementById("chatMessages");
@@ -2605,6 +2722,7 @@ function renderChat(keepScroll) {
     _frag.appendChild(top);
   }
   let prevSender = null;
+  const _rkMap = chatRankMap();
   for (const [mkey, m] of list) {
     const d = new Date(m.ts || 0);
     const row = document.createElement("div");
@@ -2633,15 +2751,28 @@ function renderChat(keepScroll) {
     }
     const tx = document.createElement("span");
     tx.setAttribute("translate", "no");
-    tx.textContent = m.text;
+    const _mine = chatFillText(tx, chatFilter(m.text));
     tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+    if (_mine && m.uid !== myUid) row.style.cssText += "background:rgba(0,229,255,0.10);border-radius:6px;padding:3px 6px;margin:0 -6px;";
+    const parts = [meta];
     if (m.name === CHAT_DEV_NAME) {
       const tag = document.createElement("b");
       tag.textContent = "[DEV] ";
       tag.title = "Developer";
       tag.style.cssText = "color:#ff4d6d;text-shadow:0 0 8px rgba(255,77,109,0.55);letter-spacing:.5px;";
-      row.append(meta, tag, nm, tx);
-    } else row.append(meta, nm, tx);
+      parts.push(tag);
+    }
+    const _rk = m.uid && _rkMap[m.uid];
+    if (_rk) {
+      const rt = document.createElement("b");
+      rt.textContent = "[#" + _rk + "] ";
+      rt.title = "Top " + _rk + " in the ELO ranking";
+      const C = { 1: ["#ffd700", "rgba(255,215,0,.55)"], 2: ["#d6dfec", "rgba(214,223,236,.45)"], 3: ["#e8935a", "rgba(232,147,90,.45)"], 4: ["#7fd4ff", "none"], 5: ["#7fd4ff", "none"] }[_rk];
+      rt.style.cssText = "color:" + C[0] + ";text-shadow:0 0 8px " + C[1] + ";font-size:12px;";
+      parts.push(rt);
+    }
+    parts.push(nm, tx);
+    row.append(...parts);
     if (typeof _modIsAdmin === "function" && _modIsAdmin()) {
       const mb = document.createElement("button"); mb.textContent = "🛡"; mb.title = "Mod actions for this player";
       mb.style.cssText = "margin:0 0 0 8px;padding:0 5px;font-size:11px;"; mb.onclick = () => openModPanel(m.name);
@@ -2684,6 +2815,7 @@ function startChatListener() {
       for (const k of Object.keys(chatAll)) if (!(k in cur) && k >= minK) delete chatAll[k];
     }
     if (msgs) Object.assign(chatAll, msgs);    // Live-Fenster (letzte 50) in den Gesamtverlauf mischen
+    chatNotifyMentions(msgs);
     renderChat(false);
   });
 }
@@ -2700,7 +2832,7 @@ async function sendChat() {
   let clean = text.replace(/[\u0000-\u001f\u200b-\u200f\u202a-\u202e]/g, "").replace(/\s{3,}/g, "  ").slice(0, 200);
   if (!clean.trim()) return;
   if (clean === lastChatText && now - lastChatSent < 15000) return;                // gleiche Nachricht nicht wiederholen
-  clean = chatFilter(clean);
+  { const _f = chatFilterEx(clean); clean = _f.text; if (_f.hit) chatFilterNotice(); }
   lastChatText = clean; chatSentTimes.push(now);
   lastChatSent = now;
   inp.value = "";
@@ -2872,7 +3004,7 @@ const DAILY_CHALLENGES = [
   { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
   { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
   // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
-  { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 55, from: "echo", delay: 150, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
+  { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 60, from: "echo", delay: 120, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
   { icon: "🌀", name: "Portal",             field: { type: "portal" }, groups: [_onlGroup()] },
   // Fireworks: Spawnabstand wird mit jedem Feuerwerk ganz langsam kuerzer (-0.5 Tick pro Spawn, bis min. 10 Ticks), kein Limit gleichzeitiger Feuerwerke
   { icon: "🎆", name: "Fireworks",          groups: [{ n: 0, cap: 99999, respawn: 90, respawnGrow: -0.5, respawnMin: 10, life: 130, v: 2.8, r: [11, 13], col: "#ffe14d", burst: { n: 9, v: 3.6, r: [8, 10], life: 260, col: "#ff5fa2" } }] }
@@ -3009,8 +3141,28 @@ function dailyMakeBall(g, gi, T, initial) {
   const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10;
   const a = rng() * Math.PI * 2;
   const vx = Math.cos(a) * g.v, vy = Math.sin(a) * g.v;
-  // Position: exakt wie makeOnlineBall - zufaellig in der ganzen Arena, mind. 220 px Abstand zu lebenden Spielern (alle Gruppen, auch Meteor/Echo)
-  let x = r, y = r, tries = 0, valid = false;
+  const me = players[0], cx = me ? me.x : W() / 2, cy = me ? me.y : H() / 2, mr = me ? me.radius : 12;
+  let x = null, y = null, tries = 0;
+  if (g.from === "top") {   // Meteor: faellt von oben ein, zufaellige x-Position (nicht direkt ueber dir)
+    do { x = r + rng() * (W() - 2 * r); } while (Math.abs(x - cx) < mr + r + 140 && tries++ < 40);
+    y = r;
+    return dailyFinish({ x, y, radius: r, vx: (rng() - 0.5) * 2, vy: g.v, gi }, g, rng, T, initial, r);
+  }
+  if (g.from === "echo") {   // Echo Trail: Ball erscheint dort, wo du vor g.delay Ticks warst
+    const P = survRec && survRec.p, k = Math.floor((T - (g.delay || 120)) / 3);
+    if (P && k >= 0 && P[2 * k + 1] !== undefined) { x = P[2 * k]; y = P[2 * k + 1]; }
+    else if (P && P.length >= 2) { x = P[0]; y = P[1]; }
+    if (x !== null) {
+      x = Math.min(W() - r, Math.max(r, x)); y = Math.min(H() - r, Math.max(r, y));
+      return dailyFinish({ x, y, radius: r, vx, vy, gi }, g, rng, T, initial, r);
+    }
+  }
+  if (g.from === "near") {   // direkt in deiner Naehe (130-230 px)
+    do { const an = rng() * Math.PI * 2, d = 130 + rng() * 100; x = Math.min(W() - r, Math.max(r, cx + Math.cos(an) * d)); y = Math.min(H() - r, Math.max(r, cy + Math.sin(an) * d)); } while (Math.hypot(x - cx, y - cy) < 110 && tries++ < 30);
+    return dailyFinish({ x, y, radius: r, vx, vy, gi }, g, rng, T, initial, r);
+  }
+  // alle anderen: Position wie makeOnlineBall - zufaellig in der ganzen Arena, mind. 220 px Abstand zu lebenden Spielern
+  x = r; y = r; tries = 0; let valid = false;
   while (!valid && tries++ < 100) {
     x = r + rng() * (W() - r * 2);
     y = r + rng() * (H() - r * 2);
@@ -3020,7 +3172,9 @@ function dailyMakeBall(g, gi, T, initial) {
       if (Math.hypot(p.x - x, p.y - y) < p.radius + r + 220) { valid = false; break; }
     }
   }
-  const b = { x, y, radius: r, vx, vy, gi };
+  return dailyFinish({ x, y, radius: r, vx, vy, gi }, g, rng, T, initial, r);
+}
+function dailyFinish(b, g, rng, T, initial, r) {
   if (g.h) { b.chase = true; b.dch = { spd: g.v, turn: g.h }; }   // chase: orange Optik wie im Streak-Modus
   if (g.rot) b.rot = g.rot * (g.rotRand && rng() < 0.5 ? -1 : 1);
   if (g.acc) { b.acc = g.acc; b.accMax = g.accMax; }
@@ -3266,7 +3420,7 @@ function _dEntryIdx(r) { const n = r && r.ch; return (typeof n === "number" && N
 function survivalKeepUids(sv, pl) {   // gleiche Logik wie die Survival-Rangliste
   return new Set(Object.entries(sv || {}).filter(([u]) => !pl || pl[u])
     .map(([u, r]) => ({ u, time: Number(r && r.time) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }))
-    .filter(r => r.time > 0).sort((a, b) => b.time - a.time)
+    .filter(r => r.time > 0).sort(_tcmp)
     .filter((r, i, arr) => { const k = String(dn(r.name)).trim().toLowerCase(); return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === k) === i; })
     .slice(0, REPLAY_TOP_SURV).map(r => r.u));
 }
@@ -3282,7 +3436,7 @@ function dailyKeepSet(daily, pl, today) {   // Menge "uid|day" der Daily-Replays
       if (!cur || time > cur.time || (time === cur.time && ts < cur.ts)) m[uid] = { uid, day, time, ts };
     });
   });
-  const cmp = (a, b) => b.time - a.time || a.ts - b.ts;
+  const cmp = _tcmp;
   todayRows.sort(cmp).slice(0, REPLAY_TOP_DAILY).forEach(x => keep.add(x.uid + "|" + x.day));
   Object.values(perMode).forEach(m => Object.values(m).sort(cmp).slice(0, REPLAY_TOP_DAILY).forEach(x => keep.add(x.uid + "|" + x.day)));
   return keep;
@@ -3358,7 +3512,7 @@ async function dailyClaimWins() {   // vergangene Tage (max. 14) pruefen: war ic
         const all = await RPC.get("daily/" + day);   // frisch lesen, nicht aus dem Cache
         const pls = (await dbGet("players")) || {};   // gebannte/geloeschte Spieler zaehlen nicht
         const eff = dailyEffIdx(day, all);
-        const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort((a, b) => b.t - a.t || a.ts - b.ts);
+        const arr = Object.entries(all || {}).filter(([u, v]) => pls[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff)).map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort(_tcmpT);
         if (arr.length && arr[0].u === myUid) { await RPC.claimDailyWin(day); try { delete _DB_CACHE["dailyWins"]; } catch (e) {} }
       } catch (e) { failed = true; console.warn("daily win claim failed for", day, e && e.message); }
     }
@@ -3411,7 +3565,7 @@ async function _endDaily(t, camped, rec) {
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
-    if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) === null || _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0 })).sort((a, b) => b.t - a.t); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
+    if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) === null || _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort(_tcmpT); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
   } catch (e) {}
   _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
@@ -3561,7 +3715,7 @@ async function modDailyWinsDialog(day) {
       u, time: Number(v && v.time) || 0, ts: Number(v && v.ts) || 0, ci: _dEntryIdx(v),
       name: (pl && pl[u] && pl[u].name) || (v && v.name) || "?", exists: !!(pl && pl[u]),
       won: !!(wins && wins[u] && wins[u][day])
-    })).filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts);
+    })).filter(r => r.time > 0).sort(_tcmp);
     const auto = rows.find(r => r.exists && (r.ci === null || r.ci === eff));
     const wonRows = Object.entries(wins || {}).filter(([u, d]) => d && d[day]).map(([u]) => (pl && pl[u] && pl[u].name) || u);
     const modeLbl = (ci) => ci === null ? "–" : (DAILY_CHALLENGES[ci] ? DAILY_CHALLENGES[ci].icon : "?");
@@ -3659,7 +3813,7 @@ async function loadDailyBoard(sel) {
       });
       rows = Object.values(best);
     }
-    rows = rows.filter(r => r.time > 0).sort((a, b) => b.time - a.time || a.ts - b.ts).slice(0, 100);
+    rows = rows.filter(r => r.time > 0).sort(_tcmp).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? 'No runs yet today – be the first!' : 'No runs in this mode yet') + '</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}${isToday ? "" : '<br><small style="opacity:.6;">' + r.day + '</small>'}</span><span>${survFmt(r.time)}</span>
@@ -3693,7 +3847,7 @@ async function loadSurvivalBoard() {
     const rows = Object.entries(sv || {})
       .filter(([uid]) => !pl || pl[uid])                       // geloeschte Accounts ausblenden
       .map(([uid, r]) => ({ uid, time: Number(r && r.time) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
-      .filter(r => r.time > 0).sort((a, b) => b.time - a.time)
+      .filter(r => r.time > 0).sort(_tcmp)
       .filter((r, i, arr) => { // pro Spieler nur die beste Zeit (Liste ist bereits absteigend sortiert)
         const key = String(dn(r.name)).trim().toLowerCase();
         return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === key) === i;
@@ -4618,6 +4772,41 @@ function setBallColor(color) {
   renderBallColorUI();
 }
 
+// Eigenes Ballbild: wird nur lokal gespeichert (localStorage) und nur auf deinem eigenen Bildschirm gezeichnet. Andere sehen weiter die Farbe, nichts wird hochgeladen.
+let _myBallImg = null;
+function _loadBallImg() {
+  try {
+    const d = localStorage.getItem("dobBallImg");
+    if (!d) { _myBallImg = null; return; }
+    const im = new Image(); im.onload = () => { _myBallImg = im; try { drawBallPreview(); } catch (e) {} }; im.src = d;
+  } catch (e) { _myBallImg = null; }
+}
+function setBallImageFromFile(f) {
+  if (!f || !/^image\//.test(f.type)) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const c = document.createElement("canvas"); c.width = c.height = 128;
+        const k = Math.min(im.width, im.height), sx = (im.width - k) / 2, sy = (im.height - k) / 2;
+        c.getContext("2d").drawImage(im, sx, sy, k, k, 0, 0, 128, 128);
+        localStorage.setItem("dobBallImg", c.toDataURL("image/jpeg", 0.85));
+        _loadBallImg();
+      } catch (e) { console.warn("ball image failed", e); }
+    };
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+function clearBallImage() { try { localStorage.removeItem("dobBallImg"); } catch (e) {} _myBallImg = null; try { drawBallPreview(); } catch (e) {} }
+function drawBallImageAt(c, x, y, r, color) {   // Bild im Kreis (gleiche Groesse wie der Ball, Hitbox unveraendert) + duenner Farbring
+  c.save(); c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.clip();
+  c.drawImage(_myBallImg, x - r, y - r, r * 2, r * 2); c.restore();
+  c.beginPath(); c.arc(x, y, Math.max(1, r - 1), 0, Math.PI * 2); c.strokeStyle = color; c.lineWidth = 2; c.stroke();
+}
+_loadBallImg();
+
 function setBallTrail(enabled) {
   ballTrailEnabled = enabled;
   localStorage.setItem("dobBallTrail", enabled ? "1" : "0");
@@ -4676,6 +4865,7 @@ function drawBallPreview() {
   pctx.shadowBlur = 18;
   pctx.fill();
   pctx.shadowBlur = 0;
+  if (_myBallImg) drawBallImageAt(pctx, cx, cy, 18, myBallColor);
 }
 
 function openSettings() { showScreen("settings"); renderBallColorUI(); SFX.syncUI(); }
@@ -4783,17 +4973,17 @@ const NET_SMOOTH = {
   // Minimum/maximum opponent packet interval we plan around (ms).
   // Below this we trust packets are basically "live"; above this we
   // treat the connection as laggy and lean more on extrapolation.
-  MIN_INTERVAL: 60,
+  MIN_INTERVAL: 30,
   MAX_INTERVAL: 1000,
   // Maximum distance (px, virtual coords) we'll extrapolate the
   // opponent forward without a fresh packet, to avoid them flying
   // off if their connection drops entirely.
-  MAX_EXTRAPOLATE_DIST: 140,
+  MAX_EXTRAPOLATE_DIST: 45,   // weniger Vorausrechnen = Gegner wird naeher an seiner echten Position gezeigt
   // After this long with no packet at all, stop extrapolating and
   // just hold position (still alive-looking, just paused).
   FREEZE_AFTER_MS: 1200,
   // Online-1v1: so lange (ms) ohne neues Paket wird hoechstens weiter extrapoliert
-  ONLINE_EXTRAP_MS: 250
+  ONLINE_EXTRAP_MS: 140
 };
 
 // Gemeinsame Paket-Verarbeitung für Online-Gegner UND Online TV (identisch sauber)
@@ -4925,7 +5115,24 @@ window.showScreen = function(id) {
   if (id === "menu") updateAccountBtn();
   const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen","leagueScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
+  chatDock(id === "onlineWait");
 };
+// Der Global Chat zieht waehrend der Ranked-Suche in den Such-Bildschirm um und beim Verlassen zurueck ins Menue (gleiche Elemente, also gleicher Verlauf)
+let _chatHome = null;
+function chatDock(on) {
+  const c = document.getElementById("chatPanel"); if (!c) return;
+  if (on) {
+    const w = document.getElementById("onlineWait"); if (!w || c.parentNode === w) return;
+    if (!_chatHome) { _chatHome = document.createComment("chatHome"); c.parentNode.insertBefore(_chatHome, c); }
+    const cancel = [...w.children].find(x => x.tagName === "BUTTON" && /cancel/i.test(x.textContent));
+    w.insertBefore(c, cancel || null);
+    c.style.height = "min(340px, 42vh)"; c.style.width = "min(380px, 92vw)"; c.style.margin = "10px 0";
+  } else if (_chatHome && _chatHome.parentNode && c.parentNode !== _chatHome.parentNode) {
+    _chatHome.parentNode.insertBefore(c, _chatHome);
+    c.style.height = "400px"; c.style.width = "320px"; c.style.margin = "";
+  } else return;
+  const box = document.getElementById("chatMessages"); if (box) box.scrollTop = box.scrollHeight;
+}
 
 // ═══════════════════════════════════════════════
 //  ELO ANIMATION
@@ -4975,7 +5182,7 @@ async function loadLeaderboard() {
         if (better) _lbSeen.set(key, p);
       });
     const activePlayers = [..._lbSeen.values()]
-      .sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
+      .sort(_ecmp);
 
     if (activePlayers.length === 0) {
       lbTable.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No active players yet</span></div>';
@@ -5012,10 +5219,10 @@ async function profileRanks(uid) {
       const k = String(q.name || "").toLowerCase(), prev = seen.get(k);
       if (!prev || q.uid === myUid || (prev.uid !== myUid && games(q) > games(prev))) seen.set(k, q);
     });
-    out.elo = tag([...seen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500)).findIndex(q => q.uid === uid));
+    out.elo = tag([...seen.values()].sort(_ecmp).findIndex(q => q.uid === uid));
     // Survival
     const sr = Object.entries(sv || {}).filter(([u]) => pl[u]).map(([u, r]) => ({ uid: u, time: Number(r && r.time) || 0, name: pl[u].name || (r && r.name) || "?" }))
-      .filter(r => r.time > 0).sort((a, b) => b.time - a.time).filter((r, i, arr) => arr.findIndex(x => nk(x.name) === nk(r.name)) === i);
+      .filter(r => r.time > 0).sort(_tcmp).filter((r, i, arr) => arr.findIndex(x => nk(x.name) === nk(r.name)) === i);
     out.surv = tag(sr.findIndex(r => r.uid === uid));
     // Streak
     const kr = Object.entries(sb || {}).filter(([u]) => pl[u]).map(([u, r]) => ({ uid: u, level: Number(r && r.level) || 0, ts: Number(r && r.ts) || 0 }))
@@ -5834,7 +6041,7 @@ async function getPlayerRanks(p1Name, p2Name) {
         const prev = _rkSeen.get(key);
         if (!prev || p.uid === myUid || (prev.uid !== myUid && _rkGames(p) > _rkGames(prev))) _rkSeen.set(key, p);
       });
-    const sorted = [..._rkSeen.values()].sort((a, b) => (Number(b.elo) || 1500) - (Number(a.elo) || 1500));
+    const sorted = [..._rkSeen.values()].sort(_ecmp);
 
     const _lc = v => String(v || "").toLowerCase();
     const idx1 = sorted.findIndex(p => _lc(p.name) === _lc(p1Name));
@@ -6280,7 +6487,7 @@ let lastSentAlive = true;
 function pushMyPosition() {
   if (!fbReady || !onlineMatchId || !running || mode !== "online") return;
   const now = Date.now();
-  if (now - lastPosPush < 75) return;
+  if (now - lastPosPush < 33) return;   // ~30 Positions-Updates pro Sekunde (vorher ~13): Gegner/TV sehen genauere Positionen
 
   const me = players.find(p => p.name === myPlayName());
   if (!me) return;
@@ -6318,7 +6525,7 @@ let lastBallPush = 0;
 function pushBallState() {
   if (!onlineIsHost || !fbReady || !onlineMatchId || !running) return;
   const now = Date.now();
-  if (now - lastBallPush < 120) return;
+  if (now - lastBallPush < 70) return;
   lastBallPush = now;
 
   const bs = JSON.stringify(balls.map(b => ({
@@ -6715,7 +6922,7 @@ function postChatAddLocal(name, text, mine) {
   const nm = document.createElement("b"); nm.setAttribute("translate", "no");
   nm.textContent = dn(name) + ": "; nm.style.color = mine ? "#00ff88" : "#ff8844";
   const tx = document.createElement("span"); tx.setAttribute("translate", "no");
-  tx.textContent = text; tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+  tx.textContent = chatFilter(text); tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
   row.append(nm, tx); box.appendChild(row); box.scrollTop = box.scrollHeight;
 }
 function botSay(text, delay, onlyIfQuiet, isAsk) {
@@ -6854,7 +7061,7 @@ function handlePostMatch(d) {
     nm.style.color = (m.name === onlineAccount.name) ? "#00ff88" : "#ff8844";
     const tx = document.createElement("span");
     tx.setAttribute("translate", "no");
-    tx.textContent = m.text;
+    tx.textContent = chatFilter(m.text);
     tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
     row.append(nm, tx);
     box.appendChild(row);
@@ -6902,15 +7109,16 @@ function sendPostChat() {
   if (onlineVsBot) {
     if (!text || Date.now() - lastPostChat < 600) return;
     lastPostChat = Date.now(); inp.value = "";
-    postChatAddLocal(onlineAccount.name, text.slice(0, 200), true);
+    postChatAddLocal(onlineAccount.name, chatFilter(text.slice(0, 200)), true);
     botPostChatReply(text);
     return;
   }
   if (!text || !fbReady || !onlineMatchId || Date.now() - lastPostChat < 600) return;
   lastPostChat = Date.now();
   inp.value = "";
+  const _pf = chatFilterEx(text.slice(0, 200)); if (_pf.hit) chatFilterNotice();
   RPC.setMatchPath(onlineMatchId, "postChat/" + Date.now() + "_" + onlineRole,
-    { name: onlineAccount.name, text: text.slice(0, 200), ts: Date.now() }).catch(() => {});
+    { name: onlineAccount.name, text: _pf.text, ts: Date.now() }).catch(() => {});
 }
 document.getElementById("postChatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendPostChat(); });
 
@@ -7664,7 +7872,7 @@ function update() {
       { const r = p.radius || 0; p.tx = Math.max(r, Math.min(W() - r, p.tx)); p.ty = Math.max(r, Math.min(H() - r, p.ty)); }
       // Zeitbasierte (framerate-unabhängige) Glättung, passend zur Paketrate
       const iv = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(NET_SMOOTH.MIN_INTERVAL, p.netInterval || NET_SMOOTH.MIN_INTERVAL));
-      const a = smoothingAlpha(timestep, 90 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.25);
+      const a = smoothingAlpha(timestep, 50 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.2);
       p.x += (p.tx - p.x) * a;
       p.y += (p.ty - p.y) * a;
     }
@@ -7800,7 +8008,7 @@ function update() {
         // catchUpMs scales from ~70ms (great connection, near-instant
         // chase) up to ~260ms (bad connection, gentle glide) — tuned
         // so it never feels sluggish even at the high end.
-        const catchUpMs = 70 + (recentInterval - NET_SMOOTH.MIN_INTERVAL) * 0.2;
+        const catchUpMs = 45 + (recentInterval - NET_SMOOTH.MIN_INTERVAL) * 0.2;
         const alpha = smoothingAlpha(timestep, catchUpMs);
 
         opp.x += (opp.tx - opp.x) * alpha;
@@ -8501,6 +8709,7 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
 
     ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fillStyle = p.color; ctx.fill();
+    if (_myBallImg && mode !== "online_tv" && isLocalPlayer(p)) drawBallImageAt(ctx, p.x, p.y, p.radius, p.color);
 
     if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) {
       ctx.beginPath();
@@ -9225,31 +9434,31 @@ function _humanEvent(e) {
 document.addEventListener("keydown", e => { if (!_humanEvent(e)) return; keys[e.key.toLowerCase()] = true; });
 document.addEventListener("keyup",   e => { if (!_humanEvent(e)) return; keys[e.key.toLowerCase()] = false; });
 
-canvas.addEventListener("mousemove", e => {
+gameWrap.addEventListener("mousemove", e => {
   if (!_humanEvent(e)) return;
   if (running && ["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) {
-    const pos = screenToVirtual(e.clientX, e.clientY);
+    const pos = screenToVirtualClamped(e.clientX, e.clientY);
     moveSingle(pos.x, pos.y);
   }
 });
 
-canvas.addEventListener("touchmove", e => {
+gameWrap.addEventListener("touchmove", e => {
   e.preventDefault();
   if (!_humanEvent(e)) return;
   if (!running) return;
   if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
-  const pos   = screenToVirtual(touch.clientX, touch.clientY);
+  const pos   = screenToVirtualClamped(touch.clientX, touch.clientY);
   moveSingle(pos.x, pos.y);
 }, { passive: false });
 
-canvas.addEventListener("touchstart", e => {
+gameWrap.addEventListener("touchstart", e => {
   e.preventDefault();
   if (!_humanEvent(e)) return;
   if (!running) return;
   if (!["single","tournament","coin","mirror","online","survival","streak"].includes(mode)) return;
   const touch = e.touches[0];
-  const pos   = screenToVirtual(touch.clientX, touch.clientY);
+  const pos   = screenToVirtualClamped(touch.clientX, touch.clientY);
   moveSingle(pos.x, pos.y);
 }, { passive: false });
 </script>
@@ -10708,7 +10917,7 @@ async function dailyAdminClaimAll() {
         .filter(([u, v]) => pl && pl[u] && (_dEntryIdx(v) === null || _dEntryIdx(v) === eff))
         .map(([u, v]) => ({ u, t: Number(v.time) || 0, ts: Number(v.ts) || 0 }))
         .filter(x => x.t > 0)
-        .sort((a, b) => b.t - a.t || a.ts - b.ts);
+        .sort(_tcmpT);
       if (!arr.length) continue;
       const w = arr[0].u;
       if (!(wins && wins[w] && wins[w][day])) up["dailyWins/" + w + "/" + day] = true;
@@ -11065,6 +11274,20 @@ async function modDeleteChatMsg(key) {
     ov.style.display = "flex";
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
   };
+})();
+</script>
+<script id="rotateHintJs">
+(function () {
+  const el = document.createElement("div"); el.id = "rotateHint"; el.textContent = "↻ Rotate your device for a bigger arena";
+  document.body.appendChild(el);
+  let was = false, t = 0;
+  setInterval(() => {
+    let run = false; try { run = !!running && document.getElementById("menu").style.display !== "flex"; } catch (e) {}
+    const portrait = window.innerHeight > window.innerWidth * 1.1;
+    if (run && !was && portrait) { el.style.opacity = 1; clearTimeout(t); t = setTimeout(() => { el.style.opacity = 0; }, 5000); }
+    if (!run || !portrait) el.style.opacity = 0;
+    was = run;
+  }, 500);
 })();
 </script>
 </body>
