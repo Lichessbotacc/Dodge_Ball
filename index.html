@@ -2904,26 +2904,20 @@ function dailyMakeBall(g, gi, T, initial) {
     } while (me0 && m[0] > 0 && Math.hypot(ob.x - me0.x, ob.y - me0.y) < me0.radius + ob.radius + 200 && k++ < 20);
     ob.gi = gi; return ob;
   }
-  const rng = Math.random, me = players[0];
-  const cx = me ? me.x : W() / 2, cy = me ? me.y : H() / 2, mr = me ? me.radius : 12;
+  const rng = onlineRng || Math.random;   // gleiche Zufallsquelle wie makeOnlineBall
   const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10;
-  let x = null, y = null, vx, vy, tries = 0;
   const a = rng() * Math.PI * 2;
-  vx = Math.cos(a) * g.v; vy = Math.sin(a) * g.v;
-  if (g.from === "top") {
-    do { x = r + rng() * (W() - 2 * r); } while (Math.abs(x - cx) < mr + r + 140 && tries++ < 40);
-    y = r; vx = (rng() - 0.5) * 2; vy = g.v;
-  } else if (g.from === "echo") {   // Spawn an der Stelle, an der du vor g.delay Ticks warst
-    const P = survRec && survRec.p, k = Math.floor((T - (g.delay || 150)) / 3);
-    if (P && k >= 0 && P[2 * k + 1] !== undefined) { x = P[2 * k]; y = P[2 * k + 1]; }
-  }
-  if (x === null && g.from === "near") {   // direkt in deiner Naehe (130-230 px), wachsen dort aus dem Nichts
-    tries = 0;
-    do { const an = rng() * Math.PI * 2, d = 130 + rng() * 100; x = Math.min(W() - r, Math.max(r, cx + Math.cos(an) * d)); y = Math.min(H() - r, Math.max(r, cy + Math.sin(an) * d)); } while (Math.hypot(x - cx, y - cy) < 110 && tries++ < 30);
-  }
-  if (x === null) {
-    x = cx; y = cy; tries = 0;
-    do { x = r + rng() * (W() - 2 * r); y = r + rng() * (H() - 2 * r); } while (Math.hypot(x - cx, y - cy) < mr + r + 220 && tries++ < 200);
+  const vx = Math.cos(a) * g.v, vy = Math.sin(a) * g.v;
+  // Position: exakt wie makeOnlineBall - zufaellig in der ganzen Arena, mind. 220 px Abstand zu lebenden Spielern (alle Gruppen, auch Meteor/Echo)
+  let x = r, y = r, tries = 0, valid = false;
+  while (!valid && tries++ < 100) {
+    x = r + rng() * (W() - r * 2);
+    y = r + rng() * (H() - r * 2);
+    valid = true;
+    for (const p of players) {
+      if (!p.alive) continue;
+      if (Math.hypot(p.x - x, p.y - y) < p.radius + r + 220) { valid = false; break; }
+    }
   }
   const b = { x, y, radius: r, vx, vy, gi };
   if (g.h) { b.chase = true; b.dch = { spd: g.v, turn: g.h }; }   // chase: orange Optik wie im Streak-Modus
@@ -3040,7 +3034,7 @@ function startSurvival(daily, testIdx) {
   running = true; startTime = Date.now();
   onlineVsBot = true; onlineIsHost = true; onlineMatchId = null; onlineOpponent = null;   // keine Netzwerk-Schreibzugriffe im Match
   onlineResultHandled = false; campReset(); onlineMatchStatus = null; onlineSimTick = 0; myTrail = [];
-  onlineRng = makeLCG(_dailyKey ? dailySeed(_dailyKey) : Math.floor(Math.random() * 1e9) + 1);
+  onlineRng = makeLCG(Math.floor(Math.random() * 1e9) + 1);   // Baelle spawnen bei JEDEM Lauf zufaellig (auch im Daily); Replay speichert die Spawns selbst
   onlineBallSpawnTimer = Date.now();
   const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? (_dailyTest ? "Test: " : "Daily: ") + dailyActiveCh().name : "Survival";
   document.getElementById("onlineHUD").style.display = "none";
