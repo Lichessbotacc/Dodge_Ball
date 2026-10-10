@@ -1458,7 +1458,7 @@ async function rpcSaveSurvival(time, replayStr, name) {
   const uid = requireUid();
   return update(ref(db), {
     ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
-    ["survivalReplays/" + uid]: replayStr ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
+    ["survivalReplays/" + uid]: (replayStr && String(replayStr).length <= 880000) ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
   });
 }
 // Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
@@ -1474,6 +1474,7 @@ async function rpcSaveDailyReplay(day, str) {
   requireNotBanned();
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  if (String(str).length > 880000) return;   // zu gross fuer die Rules (900000) -> Zeit bleibt gespeichert, nur ohne Replay
   return set(ref(db, "dailyReplays/" + uid + "/" + day), String(str));
 }
 async function rpcRemoveDailyReplay(day) {
@@ -3029,7 +3030,7 @@ function startSurvival(daily, testIdx) {
   _dailyTest = (daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null;
   _dailyRunIdx = _dailyKey ? dailyIdxFor(_dailyKey) : null;
   if (!guestGate("survival")) return;
-  countModeRun("survPlayed");
+  countModeRun(_dailyKey ? "dailyPlayed" : "survPlayed");   // Daily-Laeufe zaehlen NICHT als Survival-Runs
   try { cleanupOnline(); } catch (e) {}
   clearAllTimers();
   ["survivalResult", "survReplay"].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
@@ -3620,6 +3621,7 @@ function sanitizeAccount(acc) {
   acc.worstLossOpp = acc.worstLossOpp ?? "";
   acc.survPlayed = Number(acc.survPlayed) > 0 ? Math.floor(acc.survPlayed) : 0;
   acc.streakPlayed = Number(acc.streakPlayed) > 0 ? Math.floor(acc.streakPlayed) : 0;
+  acc.dailyPlayed = Number(acc.dailyPlayed) > 0 ? Math.floor(acc.dailyPlayed) : 0;
   acc.leagueTier = acc.leagueTier ?? 0;
   acc.leagueBest = acc.leagueBest ?? acc.leagueTier;
   acc.leagueWeek = acc.leagueWeek ?? null;
@@ -4369,7 +4371,7 @@ async function pullAccountFromServer() {
     if (!sv || typeof sv !== "object") return false;
     const merged = Object.assign({}, onlineAccount);
     for (const k of Object.keys(sv)) if (!_SYNC_SKIP.has(k)) merged[k] = sv[k];
-    ["survPlayed", "streakPlayed"].forEach(k => { merged[k] = Math.max(Number(sv[k]) || 0, Number(onlineAccount[k]) || 0); });   // Run-Zaehler nie zuruecksetzen
+    ["survPlayed", "streakPlayed", "dailyPlayed"].forEach(k => { merged[k] = Math.max(Number(sv[k]) || 0, Number(onlineAccount[k]) || 0); });   // Run-Zaehler nie zuruecksetzen
     onlineAccount = sanitizeAccount(merged);
     saveAccountLocal();
     try { updateAccountBtn(); } catch (e) {}
@@ -4381,6 +4383,15 @@ async function pullAccountFromServer() {
 // only), and stores `name` as a field rather than as the key.
 async function pushAccountToFirebase() {
   if (!fbReady || !onlineAccount || !myUid) return;
+  // Drift-Schutz: Die Rules erlauben pro Write nur +-10 ELO gegenueber dem Serverwert. Weicht der lokale Wert staerker ab
+  // (z.B. weil ein frueherer Write abgelehnt wurde), wuerde ab da JEDER Write scheitern -> Serverwert als Basis nehmen.
+  try {
+    const _srvElo = await dbGet("players/" + myUid + "/elo");
+    if (typeof _srvElo === "number" && isFinite(_srvElo)) {
+      const _diff = onlineAccount.elo - _srvElo;
+      if (Math.abs(_diff) > MAX_ELO_DELTA_PER_GAME) onlineAccount.elo = _srvElo + Math.sign(_diff) * MAX_ELO_DELTA_PER_GAME;
+    }
+  } catch (e) {}
   await RPC.setOwnPlayer({
     uid: myUid,
     name: onlineAccount.name,
@@ -4400,6 +4411,7 @@ async function pushAccountToFirebase() {
     worstLossOpp: onlineAccount.worstLossOpp,
     survPlayed: onlineAccount.survPlayed || 0,
     streakPlayed: onlineAccount.streakPlayed || 0,
+    dailyPlayed: onlineAccount.dailyPlayed || 0,
     leagueTier: onlineAccount.leagueTier ?? 0,
     leagueBest: onlineAccount.leagueBest ?? 0,
     leagueWeek: onlineAccount.leagueWeek ?? null,
@@ -4967,7 +4979,7 @@ async function openOnlineProfile(uid) {
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}</div>
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + (p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + (p.totalEloLost ?? 0))}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
-          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}</div>
+          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}</div>
         </div>
       </div>`;
 
@@ -5141,9 +5153,24 @@ async function createAccount() {
     }
 
     onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
+    try {
+      await RPC.setUsernameIndex(name, newUid);   // Name ZUERST reservieren (atomar: nur wenn noch frei)
+      await pushAccountToFirebase();
+    } catch (e3) {
+      // Rollback: sonst bleibt ein halber Account zurueck und das Geraet ist fuer immer "belegt"
+      console.warn("account setup failed, rolling back", e3);
+      try { await RPC.removeOwnPlayer(); } catch (e4) {}
+      try { await RPC.removeUsernameIndex(name); } catch (e4) {}
+      try { await window._dobAuth.deleteAuthUser(); } catch (e4) {}
+      myUid = (window.dobMyUid && window.dobMyUid()) || null;
+      onlineAccount = null;
+      const denied3 = /permission_denied/i.test(String((e3 && (e3.code || e3.message)) || e3));
+      info.textContent = denied3 ? "Could not create the account (name taken or not allowed). Please try another name." : "Could not create the account (" + ((e3 && (e3.code || e3.message)) || "unknown") + "). Please try again.";
+      info.style.color = "#f44";
+      return;
+    }
     markDeviceAccount(name);
     saveAccountLocal();
-    await pushAccountToFirebase();
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
     await updatePlayerStatus("Idle in Menu");
     startMenuPresenceListener();
@@ -6317,7 +6344,13 @@ async function handleOnlineResult(winnerName, change) {
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
-  if (fbReady) await pushAccountToFirebase(); // writes ONLY players/{myUid}
+  if (fbReady) {   // writes ONLY players/{myUid}; bei Fehler einmal nach kurzer Pause erneut versuchen, danach weiterlaufen
+    try { await pushAccountToFirebase(); }
+    catch (e) {
+      console.warn("profile save failed, retrying once", e && (e.code || e.message));
+      try { await new Promise(r => setTimeout(r, 2500)); await pushAccountToFirebase(); } catch (e2) { console.warn("profile save failed again", e2 && (e2.code || e2.message)); }
+    }
+  }
   if (won && fbReady) leagueRecordWin().catch(e => console.warn("league win failed", e));
 
   showEloAnimation(won ? eloChange : -eloChange);
@@ -7054,12 +7087,21 @@ async function streakFlush() {
       if (streakSrv.level === null) {
         const cur = await dbGet("streakBoard/" + myUid);
         streakSrv.level = cur ? (Number(cur.level) || 0) : 0;
+        streakSrv.srvTs = cur ? (Number(cur.ts) || 0) : 0;
       }
       if (streakSrv.level >= streakSrv.target) break;
-      const wait = streakSrv.last + 6300 - Date.now();
+      const _base = streakSrv.last || streakSrv.srvTs || 0;
+      const wait = _base + 6300 - Date.now();
       if (wait > 0) await streakSleep(wait);
-      await RPC.setStreakBoard({ name: onlineAccount.name, level: streakSrv.level + 1 });
-      streakSrv.level++; streakSrv.last = Date.now();
+      // Die Rules erlauben 1 Level + 1 weiteres pro 6 s seit dem letzten Eintrag (Aufholen). Neuer Eintrag: immer Level 1.
+      let _step = 1;
+      if (streakSrv.level >= 1 && _base) _step = Math.max(1, Math.min(streakSrv.target - streakSrv.level, 1 + Math.floor((Date.now() - _base) / 7000)));
+      try { await RPC.setStreakBoard({ name: onlineAccount.name, level: streakSrv.level + _step }); }
+      catch (e1) {
+        if (_step > 1) { _step = 1; await RPC.setStreakBoard({ name: onlineAccount.name, level: streakSrv.level + 1 }); }   // Uhr-Abweichung: sicherer Einzelschritt
+        else throw e1;
+      }
+      streakSrv.level += _step; streakSrv.last = Date.now();
     }
   } catch (e) { console.warn("streak board sync failed", e && (e.code || e.message)); }
   streakSrv.busy = false;
@@ -10256,7 +10298,7 @@ async function _suspectCompute() {
   const top = (obj, key, n) => Object.entries(obj || {}).filter(([u, r]) => r && num(r[key]) > 0 && !banned(u)).sort((a, b) => num(b[1][key]) - num(a[1][key])).slice(0, n).map(x => x[0]);
   top(sv, "time", 10).forEach(u => { const n = num(pl && pl[u] && pl[u].survPlayed); if (n <= 2 && games(u) <= 3) add(u, 25, "Top-10 Survival record with only " + n + " counted run(s) and " + games(u) + " 1v1 games"); });
   top(sk, "level", 10).forEach(u => { const n = num(pl && pl[u] && pl[u].streakPlayed); if (n <= 2 && games(u) <= 3) add(u, 25, "Top-10 Streaks record with only " + n + " counted run(s) and " + games(u) + " 1v1 games"); });
-  top((daily && daily[dailyKeyNow()]) || {}, "time", 3).forEach(u => { const n = num(pl && pl[u] && pl[u].survPlayed); if (n <= 2 && games(u) <= 3) add(u, 20, "Top-3 Daily today with only " + n + " counted run(s)"); });
+  top((daily && daily[dailyKeyNow()]) || {}, "time", 3).forEach(u => { const n = num(pl && pl[u] && pl[u].survPlayed) + num(pl && pl[u] && pl[u].dailyPlayed); if (n <= 2 && games(u) <= 3) add(u, 20, "Top-3 Daily today with only " + n + " counted run(s)"); });
   Object.entries(pl || {}).forEach(([u, p]) => { if (!p) return; const w = num(p.wins); if (w >= 5 && num(p.elo) > CHEAT_START_ELO + 35 * w) add(u, 25, "ELO gains look too high (" + Math.round(num(p.elo)) + " with " + w + " wins)"); });
   if (dev) {   // Geraete-Gruppen (Alt-Accounts)
     const byDev = {}; Object.entries(dev).forEach(([u, d]) => Object.keys(d || {}).forEach(id => (byDev[id] = byDev[id] || []).push(u)));
