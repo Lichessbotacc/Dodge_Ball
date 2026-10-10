@@ -3156,7 +3156,7 @@ async function endSurvival(camped) {
         isRecord = true; best = t;
       }
     }
-  } catch (e) { saved = false; console.warn("survival save failed", e); }
+  } catch (e) { saved = false; window._lastSaveErr = String((e && (e.code || e.message)) || e).slice(0, 60); console.warn("survival save failed", e); }
   _survInfo = { best, isRecord, saved };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
@@ -3307,7 +3307,7 @@ async function _endDaily(t, camped, rec) {
         dailyCleanup(true);
       }
     } else if (t > best) { isRecord = true; best = t; }
-  } catch (e) { saved = false; if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
+  } catch (e) { saved = false; window._lastSaveErr = String((e && (e.code || e.message)) || e).slice(0, 60); if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
@@ -3326,7 +3326,7 @@ function renderSurvivalResult(t, camped) {
   const i = _survInfo;
   const dly = i && i.daily;
   const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
-    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)." :
+    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)" + (window._lastSaveErr ? " [" + window._lastSaveErr + "]" : "") + "." :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
