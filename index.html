@@ -724,7 +724,6 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 
 
 /* ── Handy: Menue-Reihenfolge (Buttons, Modi, Chat, Spieler), runde Arena mit sichtbarem Rand ── */
-#game{box-shadow:0 0 0 1px rgba(255,255,255,.16),0 0 60px rgba(0,255,136,.06);}
 @media (max-width:720px){
   #menu{align-items:center;}
   #accountBtn,#newsBtn,#bugBtn{position:static!important;order:-3;margin:0;padding:7px 10px;font-size:11px;letter-spacing:.5px;}
@@ -734,8 +733,6 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
   #chatPanel,#onlinePlayersPanel{width:min(380px,92vw)!important;}
   h1{font-size:34px;margin-bottom:14px;}
 }
-#rotateHint{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:120;pointer-events:none;opacity:0;transition:opacity .4s;
-  background:rgba(16,18,26,.85);border:1px solid rgba(255,255,255,.15);color:#dfe6f2;font-family:var(--font-display);font-size:12px;padding:7px 14px;border-radius:999px;white-space:nowrap;}
 body.ingame::before,body.ingame::after{display:none;}
 body.mode-online #homeBtn{display:none!important;}
 body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
@@ -1295,17 +1292,11 @@ function W() { return V_W; }
 function H() { return V_H; }
 
 function resize() {
-  // Arena immer im Seitenverhaeltnis 16:9 (Baelle bleiben rund, Spielfeld/Gameplay unveraendert), zentriert; Rest ist Rand
   const dpr = window.devicePixelRatio || 1;
-  const vw = window.innerWidth || document.documentElement.clientWidth, vh = window.innerHeight || document.documentElement.clientHeight;
-  const fit = Math.min(vw / V_W, vh / V_H);
-  const cw = Math.max(1, Math.floor(V_W * fit)), ch = Math.max(1, Math.floor(V_H * fit));
   gameWrap.style.width  = "100%";
   gameWrap.style.height = "100%";
-  gameWrap.style.display = "flex"; gameWrap.style.alignItems = "center"; gameWrap.style.justifyContent = "center";
-  canvas.style.width    = cw + "px";
-  canvas.style.height   = ch + "px";
-  canvas.style.flex     = "none";
+  canvas.style.width    = "100%";
+  canvas.style.height   = "100%";
   canvas.width  = Math.round(V_W * dpr);
   canvas.height = Math.round(V_H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -11277,20 +11268,6 @@ async function modDeleteChatMsg(key) {
     ov.style.display = "flex";
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
   };
-})();
-</script>
-<script id="rotateHintJs">
-(function () {
-  const el = document.createElement("div"); el.id = "rotateHint"; el.textContent = "↻ Rotate your device for a bigger arena";
-  document.body.appendChild(el);
-  let was = false, t = 0;
-  setInterval(() => {
-    let run = false; try { run = !!running && document.getElementById("menu").style.display !== "flex"; } catch (e) {}
-    const portrait = window.innerHeight > window.innerWidth * 1.1;
-    if (run && !was && portrait) { el.style.opacity = 1; clearTimeout(t); t = setTimeout(() => { el.style.opacity = 0; }, 5000); }
-    if (!run || !portrait) el.style.opacity = 0;
-    was = run;
-  }, 500);
 })();
 </script>
 </body>
