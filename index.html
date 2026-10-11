@@ -2663,7 +2663,7 @@ const PATRON_TIERS = [null,
   { id: 4, name: "Diamond", icon: "💎", eur: 10, color: "#5ee7ff" }
 ];
 let _PATRON_NAMES = new Map(), _patronP = null, _patronAt = 0;   // name(lowercase) -> Stufe 1..4
-function patronTierOfName(n) { return n ? (_PATRON_NAMES.get(String(n).toLowerCase()) || 0) : 0; }
+function patronTierOfName(n) { if (!n) return 0; if (n === CHAT_DEV_NAME) return 4; return _PATRON_NAMES.get(String(n).toLowerCase()) || 0; }   // der Mod/Dev ist immer Diamond
 function patronTier(p) {
   let n = p && p.name;
   try { if (isLocalPlayer(p) && onlineAccount) n = onlineAccount.name; } catch (e) {}
@@ -2691,6 +2691,7 @@ function _patronLoad(force) {
       });
       try { const an = pl && pl[MOD_ADMIN_UID] && pl[MOD_ADMIN_UID].name; if (an) map.set(String(an).toLowerCase(), 4); } catch (e) {}
       _PATRON_NAMES = map;
+      try { if (typeof renderChat === "function" && document.getElementById("chatMessages")) renderChat(true); } catch (e) {}   // Chat neu zeichnen, damit die Logos auftauchen
     } catch (e) { _patronAt = 0; }
   })();
   return _patronP;
@@ -2887,7 +2888,7 @@ function renderChat(keepScroll) {
     meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const nm = document.createElement("b");
     nm.setAttribute("translate", "no");
-    nm.textContent = (patronTierOfName(m.name) ? PATRON_TIERS[patronTierOfName(m.name)].icon + " " : "") + m.name + ": ";   // [DEV]-Tag kommt separat
+    nm.textContent = m.name + ": ";   // [DEV]-Tag und Patron-Logo kommen separat
     nm.dataset.uid = m.uid || "";
     chatStyleName(nm, m.uid);
     if (m.uid) {
@@ -2921,6 +2922,8 @@ function renderChat(keepScroll) {
       rt.style.cssText = "color:" + C[0] + ";text-shadow:0 0 8px " + C[1] + ";font-size:12px;";
       parts.push(rt);
     }
+    const _ptr = (m.uid && typeof MOD_ADMIN_UID !== "undefined" && m.uid === MOD_ADMIN_UID) ? 4 : patronTierOfName(m.name);
+    if (_ptr) { const pi = document.createElement("span"); pi.textContent = PATRON_TIERS[_ptr].icon + " "; pi.title = PATRON_TIERS[_ptr].name + " Patron"; parts.push(pi); }
     parts.push(nm, tx);
     row.append(...parts);
     if (typeof _modIsAdmin === "function" && _modIsAdmin()) {
