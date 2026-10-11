@@ -5762,7 +5762,21 @@ async function loginAccount() {
   try {
     const uid = await window._dobAuth.login(name, password);
     myUid = uid;
-    try { await ensureDeviceRegistered(); } catch (devErr) { console.warn("device register failed", devErr); }
+    try { await ensureDeviceRegistered(); }
+    catch (devErr) {
+      console.warn("device register failed", devErr);
+      // Gebanntes Geraet: nur Konten, die selbst gesperrt sind, duerfen sich anmelden (um Einspruch/Appeal zu senden). Alle anderen werden abgemeldet.
+      if (/permission_denied/i.test(String((devErr && (devErr.code || devErr.message)) || devErr))) {
+        let selfBanned = false;
+        try { selfBanned = !!(await dbGet("sanctions/" + uid + "/banned")); } catch (e5) {}
+        if (!selfBanned) {
+          try { await window._dobAuth.logout(); } catch (e6) {}
+          myUid = (window.dobMyUid && window.dobMyUid()) || null;
+          info.textContent = "This device has been banned. You cannot use another account here."; info.style.color = "#f44";
+          return;
+        }
+      }
+    }
 
     const data = await dbGet("players/" + uid);
     if (data) {
