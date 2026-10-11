@@ -4494,7 +4494,7 @@ async function renderLeague() {
     else html += `<div class="lg-card"><h4>👁 ${tr("Viewing only")}</h4>${tr("No groups in this league yet")}</div><button onclick="leagueView(null)" style="margin:0;">← ${tr("My league")}</button>`;
   }
 
-  if (r && r.group) html += `<button onclick="leagueShowLastRanking()" style="margin:0;">📜 ${tr("Last week's ranking")}</button>`;
+  html += `<button onclick="leagueShowLastRanking()" style="margin:0;">📜 ${tr("Last week's ranking")}</button>`;
 
   // 6) How it works
   html += `<details class="lg-how" ${grpId ? "" : "open"}><summary>❓ ${tr("How does the league work?")}</summary><div class="lg-steps">
@@ -4540,45 +4540,63 @@ function leagueCelebrate(r, force) {
   document.body.appendChild(ov);
 }
 
-// Rangliste der vergangenen Woche (eigene Gruppe, bleibt ca. 4 Wochen in der Datenbank)
+// Rangliste der vergangenen Woche: ALLE Ligen und ALLE Gruppen (bleibt ca. 4 Wochen in der Datenbank).
+// Startansicht = eigene Liga/Gruppe der letzten Woche (falls vorhanden), sonst die eigene Liga.
 async function leagueShowLastRanking(r) {
-  r = r || (onlineAccount && onlineAccount.leagueLastResult);
-  if (!r || !r.group) { leagueToast(tr("No ranking available"), "#ff8844"); return; }
+  r = r || (onlineAccount && onlineAccount.leagueLastResult) || null;
+  const week = leagueWeekId(leagueWeekStart() - 1);                 // letzte abgeschlossene Woche
   const old = document.getElementById("lgRankOv"); if (old) old.remove();
-  const L = leagueByTier(r.from);
   const ov = document.createElement("div");
   ov.id = "lgRankOv";
   ov.style.cssText = "position:fixed;inset:0;z-index:210;display:flex;align-items:center;justify-content:center;background:rgba(5,5,10,.85);backdrop-filter:blur(6px);padding:14px;box-sizing:border-box;";
-  ov.style.setProperty("--lc", L.color);
-  ov.innerHTML = `<div style="width:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;gap:10px;background:#0d0f16;border:1px solid ${L.color};border-radius:16px;padding:16px;color:#eaf2fb;">
+  ov.innerHTML = `<div class="lgBox" style="width:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;gap:10px;background:#0d0f16;border:1px solid #2a3142;border-radius:16px;padding:16px;color:#eaf2fb;">
     <div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;font-family:var(--font-display);">📜 ${tr("Last week's ranking")}</b><button class="lgX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>
-    <div style="font-size:13px;color:var(--text-dim);">${L.icon} ${escapeHtml(tr(L.name))} · ${tr("Week of")} ${escapeHtml(r.week)}</div>
-    <div class="lgBody lg-table" style="max-height:60vh;">${tr("Loading league…")}</div></div>`;
+    <div style="font-size:13px;color:var(--text-dim);">${tr("Week of")} ${escapeHtml(week)}</div>
+    <div class="lgLad lg-ladder" style="margin:0;"></div>
+    <div class="lgGrp lg-groups" style="margin:0;"></div>
+    <div class="lgInfo" style="font-size:13px;color:var(--text-dim);"></div>
+    <div class="lgBody lg-table" style="max-height:50vh;overflow-y:auto;">${tr("Loading league…")}</div></div>`;
   ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
   ov.querySelector(".lgX").onclick = () => ov.remove();
   document.body.appendChild(ov);
-  const body = ov.querySelector(".lgBody");
-  let list = [];
-  {
-    try {
-      const grp = leagueCleanGroup(await dbGet(`weeklyLeague/${r.week}/${r.from}/${r.group}`));
-      list = grp ? leagueSortMembers(Object.values(grp)) : [];
-    } catch (e) { body.textContent = tr("Error while loading"); return; }
-  }
-  if (!list.length) { body.textContent = tr("No ranking available"); return; }
-  const n = list.length, z = leagueZones(n, r.from);
-  let html = "";
-  if (z.up) html += `<div class="lg-zone up">⬆ ${tr("Promotion zone")} · ${tr("Top")} ${z.up} · ${tr("min.")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("Wins")}</div>`;
-  list.forEach((m, i) => {
-    if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
-    if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
-    const me = (myUid && m.uid === myUid), medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
-      <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
-      <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
-      <span class="lg-wins">${m.wins || 0}</span></div>`;
-  });
-  body.innerHTML = html;
+  const box = ov.querySelector(".lgBox"), lad = ov.querySelector(".lgLad"), grp = ov.querySelector(".lgGrp"), info = ov.querySelector(".lgInfo"), body = ov.querySelector(".lgBody");
+
+  let data;
+  try { data = await dbGet(`weeklyLeague/${week}`); }
+  catch (e) { body.textContent = tr("Error while loading"); return; }
+  const tiers = LEAGUES.map((_, i) => leagueCleanGroups(data && data[i]));
+  const own = (r && r.week === week && r.group && tiers[r.from] && tiers[r.from][r.group]) ? { t: Number(r.from) || 0, g: r.group } : null;
+  const idsOf = (tt) => Object.keys(tiers[tt]).sort((a, b) =>
+    ((own && own.t === tt && b === own.g) - (own && own.t === tt && a === own.g)) || Object.keys(tiers[tt][b]).length - Object.keys(tiers[tt][a]).length || (a < b ? -1 : 1));
+  let vt = own ? own.t : Math.max(0, Math.min(LEAGUES.length - 1, Number(onlineAccount && onlineAccount.leagueTier) || 0));
+  if (!own && !idsOf(vt).length) { const f = LEAGUES.findIndex((_, i) => idsOf(i).length); if (f >= 0) vt = f; }
+  let gid = own ? own.g : null;
+
+  const render = () => {
+    const L = leagueByTier(vt), ids = idsOf(vt);
+    if (!gid || !tiers[vt][gid]) gid = ids[0] || null;
+    ov.style.setProperty("--lc", L.color); box.style.borderColor = L.color;
+    lad.innerHTML = LEAGUES.map((l, i) => `<div class="lg-step ${i === vt ? "sel" : ""}" style="--c:${l.color}" data-t="${i}"><span>${l.icon}</span>${escapeHtml(tr(l.name))}</div>`).join('<div class="lg-arrow">›</div>');
+    grp.innerHTML = ids.length > 1 ? ids.map((id, i) => `<button class="lg-chip ${id === gid ? "on" : ""}" data-g="${escapeHtml(id)}">${tr("Group")} ${i + 1}${own && own.t === vt && own.g === id ? " ★" : ""}<small>${Object.keys(tiers[vt][id]).length}/${LEAGUE_GROUP_SIZE}</small></button>`).join("") : "";
+    if (!gid) { info.textContent = ""; body.textContent = tr("No groups in this league yet"); return; }
+    const list = leagueSortMembers(Object.values(tiers[vt][gid])), n = list.length, z = leagueZones(n, vt);
+    info.textContent = L.icon + " " + tr(L.name) + " · " + tr("Group") + " " + (ids.indexOf(gid) + 1) + " · " + n + " " + tr("players");
+    let html = "";
+    if (z.up) html += `<div class="lg-zone up">⬆ ${tr("Promotion zone")} · ${tr("Top")} ${z.up} · ${tr("min.")} ${LEAGUE_MIN_WINS_PROMOTE} ${tr("Wins")}</div>`;
+    list.forEach((m, i) => {
+      if (i === z.up && z.up) html += `<div class="lg-zone mid">${tr("Safe zone")}</div>`;
+      if (z.down && i === n - z.down) html += `<div class="lg-zone down">⬇ ${tr("Relegation zone")} · ${tr("Bottom")} ${z.down}</div>`;
+      const me = (myUid && m.uid === myUid), medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+      html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:${L.color}" onclick="openOnlineProfile('${escapeHtml(m.uid)}')">
+        <span class="lg-rank">${medal}</span><span class="lg-av">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
+        <span class="lg-name">${escapeHtml(dn(m.name))}${me ? "<small>" + tr("You") + "</small>" : ""}</span>
+        <span class="lg-wins">${m.wins || 0}</span></div>`;
+    });
+    body.innerHTML = html;
+  };
+  lad.addEventListener("click", e => { const s = e.target.closest("[data-t]"); if (!s) return; vt = Number(s.dataset.t); gid = (own && own.t === vt) ? own.g : null; render(); });
+  grp.addEventListener("click", e => { const s = e.target.closest("[data-g]"); if (!s) return; gid = s.dataset.g; render(); });
+  render();
 }
 
 const DATA_VERSION = "2"; // bei jedem kuenftigen Reset hochzaehlen
