@@ -1916,7 +1916,9 @@ async function rpcModSetPatron(uid, on) {
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
   const tier = on === true ? 1 : Number(on);
   if (on && !(Number.isInteger(tier) && tier >= 1 && tier <= 4)) throw new Error("Bad tier (1-4).");
-  return set(ref(db, "patrons/" + uid), on ? tier : null);
+  // Stufe gilt 1 Kalendermonat ab jetzt (erneutes Vergeben = verlaengern); danach verschwindet sie von selbst
+function _plusMonthFn(ts) { const d = new Date(ts), day = d.getDate(); d.setMonth(d.getMonth() + 1); if (d.getDate() !== day) d.setDate(0); return d.getTime(); }   // +1 Kalendermonat (30./31.-Problem: Monatsende wird abgeschnitten)
+  return set(ref(db, "patrons/" + uid), on ? { t: tier, u: _plusMonthFn(Date.now()) } : null);
 }
 async function rpcModApplyDailyWins(updates) {
   requireAdmin();
@@ -2663,6 +2665,13 @@ const PATRON_TIERS = [null,
   { id: 4, name: "Diamond", icon: "💎", eur: 10, color: "#5ee7ff" }
 ];
 let _PATRON_NAMES = new Map(), _patronP = null, _patronAt = 0;   // name(lowercase) -> Stufe 1..4
+function _patronPlusMonthC(ts) { const d = new Date(ts), day = d.getDate(); d.setMonth(d.getMonth() + 1); if (d.getDate() !== day) d.setDate(0); return d.getTime(); }   // +1 Kalendermonat (30./31.-Problem: Monatsende wird abgeschnitten)
+function _patronParse(v) {   // true | 1..4 (alt, ohne Ablauf) | {t, u}
+  if (v && typeof v === "object") return { tier: Math.max(1, Math.min(4, parseInt(v.t, 10) || 1)), until: Number(v.u) || 0 };
+  return { tier: v === true ? 1 : Math.max(1, Math.min(4, parseInt(v, 10) || 1)), until: 0 };
+}
+function _patronLeft(ms) { if (ms <= 0) return "expired"; const d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000); return d ? d + "d " + h + "h" : h ? h + "h " + m + "m" : m + "m"; }
+let _PATRON_UNTIL = new Map();   // name(lowercase) -> Ablaufzeit (ms)
 function patronTierOfName(n) { if (!n) return 0; if (n === CHAT_DEV_NAME) return 4; return _PATRON_NAMES.get(String(n).toLowerCase()) || 0; }   // der Mod/Dev ist immer Diamond
 function patronTier(p) {
   let n = p && p.name;
@@ -2683,14 +2692,16 @@ function _patronLoad(force) {
     try {
       if (!(await _waitFbReady(10000))) { _patronAt = 0; return; }
       const [pt, pl] = await Promise.all([RPC.get("patrons").catch(() => null), dbGet("players").catch(() => null)]);
-      const map = new Map();
+      const map = new Map(), until = new Map();
       Object.keys(pt || {}).forEach(u => {
         const n = pl && pl[u] && pl[u].name; if (!n) return;
-        const v = pt[u], t = v === true ? 1 : Math.max(1, Math.min(4, parseInt(v, 10) || 1));
-        map.set(String(n).toLowerCase(), t);
+        const pp = _patronParse(pt[u]);
+        if (pp.until && pp.until < Date.now()) return;   // abgelaufen -> kein Patron mehr
+        map.set(String(n).toLowerCase(), pp.tier);
+        if (pp.until) until.set(String(n).toLowerCase(), pp.until);
       });
       try { const an = pl && pl[MOD_ADMIN_UID] && pl[MOD_ADMIN_UID].name; if (an) map.set(String(an).toLowerCase(), 4); } catch (e) {}
-      _PATRON_NAMES = map;
+      _PATRON_NAMES = map; _PATRON_UNTIL = until;
       try { if (typeof renderChat === "function" && document.getElementById("chatMessages")) renderChat(true); } catch (e) {}   // Chat neu zeichnen, damit die Logos auftauchen
     } catch (e) { _patronAt = 0; }
   })();
@@ -2732,6 +2743,13 @@ function _patronPreviewStart() {
     requestAnimationFrame(f);
   })();
 }
+function _patronOwnLine() {
+  try {
+    const n = onlineAccount && onlineAccount.name, k = n && String(n).toLowerCase(), t = patronTierOfName(n), u = k && _PATRON_UNTIL.get(k);
+    if (t && u) return '<div style="font-size:13px;margin:8px 0;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.07);">' + PATRON_TIERS[t].icon + ' Your <b>' + PATRON_TIERS[t].name + '</b> ends in <b>' + _patronLeft(u - Date.now()) + '</b></div>';
+  } catch (e) {}
+  return "";
+}
 function openPatronInfo() {
   let ov = document.getElementById("patronOverlay"); if (ov) ov.remove();
   ov = document.createElement("div"); ov.id = "patronOverlay";
@@ -2742,6 +2760,7 @@ function openPatronInfo() {
     + '<p style="font-size:14px;line-height:1.5;">DarkOnBalls is made by one person. Support it <b>monthly</b> \u2013 from just <b>1 \u20ac</b> \u2013 and get a special logo next to your name and a glowing ball in every match.</p>'
     + '<canvas id="patronPrev" width="420" height="110" style="width:100%;max-width:420px;display:block;margin:6px auto;"></canvas>'
     + PATRON_TIERS.slice(1).map(t => '<div style="border:1px solid ' + t.color + ';border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px;display:flex;justify-content:space-between;"><span>' + t.icon + ' ' + t.name + '</span><b>' + t.eur + ' \u20ac / month</b></div>').join("")
+    + _patronOwnLine()
     + '<p style="font-size:13px;opacity:.8;line-height:1.5;">Cosmetic only \u2013 no advantages in the game.</p>'
     + '<ol style="font-size:13px;line-height:1.6;padding-left:20px;"><li>Support via PayPal (monthly).</li><li>Write your <b>in-game username</b> in the PayPal note.</li><li>Your tier is added manually, usually within a day.</li></ol>'
     + '<a href="' + PAYPAL_URL + '" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;padding:10px;border-radius:8px;background:#ffc439;color:#003087;text-decoration:none;font-size:15px;font-weight:bold;">'
@@ -2776,8 +2795,8 @@ function modPatronList() {
     .sort((a, b) => String(a[1].name).localeCompare(String(b[1].name))).slice(0, 12);
   if (!list.length) { el.innerHTML = '<div style="font-size:12px;opacity:.6;">' + (q ? "No player found." : "No patrons yet. Type a name to add one.") + '</div>'; return; }
   el.innerHTML = list.map(([u, p]) => {
-    const on = !!d.pt[u], cur = on ? (d.pt[u] === true ? 1 : Math.max(1, Math.min(4, parseInt(d.pt[u], 10) || 1))) : 0, id = escapeHtml(u);
-    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13px;"><span style="flex:1;">' + (on ? PATRON_TIERS[cur].icon + ' ' : '') + escapeHtml(p.name) + (on ? ' <small style="opacity:.7">(' + PATRON_TIERS[cur].name + ')</small>' : '') + '</span>'
+    const on = !!d.pt[u], pp = on ? _patronParse(d.pt[u]) : null, left = pp && pp.until ? pp.until - Date.now() : null, expired = left !== null && left <= 0, cur = on ? pp.tier : 0, id = escapeHtml(u);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13px;"><span style="flex:1;">' + (on ? PATRON_TIERS[cur].icon + ' ' : '') + escapeHtml(p.name) + (on ? ' <small style="opacity:.7">(' + PATRON_TIERS[cur].name + (left === null ? ', no expiry' : expired ? ', <span style="color:#ff6666">expired</span>' : ', ' + _patronLeft(left) + ' left') + ')</small>' : '') + '</span>'
       + PATRON_TIERS.slice(1).map(t => '<button style="margin:0;padding:4px 8px;font-size:12px;' + (cur === t.id ? 'border-color:' + t.color + ';background:rgba(255,255,255,.12);' : '') + '" title="' + t.name + '" onclick="modPatronSet(\'' + id + '\',' + t.id + ')">' + t.icon + '</button>').join("")
       + (on ? '<button style="margin:0;padding:4px 10px;font-size:12px;border-color:#ff6666;" onclick="modPatronSet(\'' + id + '\',false)">\u2716</button>' : '') + '</div>';
   }).join("");
@@ -2785,7 +2804,7 @@ function modPatronList() {
 async function modPatronSet(uid, on) {
   try {
     await _modRPC().modSetPatron(uid, on);
-    const d = window._modPt; if (d) { if (on) d.pt[uid] = on; else delete d.pt[uid]; }
+    const d = window._modPt; if (d) { if (on) d.pt[uid] = { t: on === true ? 1 : on, u: _patronPlusMonthC(Date.now()) }; else delete d.pt[uid]; }
     modPatronList(); _patronLoad(true);
   } catch (e) { alert("Failed: " + (e && e.message || e) + "\n(Are the new Database Rules for patrons published?)"); }
 }
