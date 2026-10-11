@@ -933,6 +933,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="startSurvival()">🏝 Survival</button>
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
+          <button id="idleBtn" onclick="openIdle()">🧱 Idle Brick Breaker</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
@@ -1066,6 +1067,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
         <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streaks</button>
+        <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
       </div>
@@ -1549,6 +1551,13 @@ function rpcArmMatchDisconnect(matchId, payload) {
 }
 
 function rpcServerTimestamp() { return serverTimestamp(); }
+// Idle Brick Breaker: nur eigener Eintrag idleBoard/{uid} (Gesamtgeld)
+async function rpcSetIdleBoard(name, total, best) {
+  requireNotBanned();
+  const uid = requireUid();
+  total = Number(total); if (!isFinite(total) || total < 0) throw new Error("Bad total.");
+  return set(ref(db, "idleBoard/" + uid), { name: String(name).slice(0, 20), total: Math.min(total, 1e300), best: Math.max(1, Math.floor(Number(best) || 1)), ts: serverTimestamp() });
+}
 
 // Expose the guarded surface (functions only — no raw db/ref handles,
 // no arbitrary-path set/get). This is intentionally still a `window`
@@ -1769,7 +1778,7 @@ async function rpcModPurgeUser(uid, name) {
   uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
   const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
-    "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid]);
+    "idleBoard/" + uid, "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid]);
   const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
   const [un, wl, ch, h2h, chat, dly] = await Promise.all([
     safe(async () => (await get(ref(db, "usernames"))).val()),
@@ -2017,7 +2026,7 @@ window._dobRPC = {
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
-  get: rpcGet, on: rpcOn,
+  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
@@ -2857,6 +2866,7 @@ function escapeHtml(v) {
 function currentPresenceStatus() {
   const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks" };
   try {
+    if (window.__idleOpen) return "Idle Brick Breaker";
     if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
     if (survivalActive) return _dailyKey ? "Daily" : "Survival";
     // Hauptmenue sichtbar = nicht im Spiel, auch wenn alte Match-Variablen (running/onlineMatchId) noch gesetzt sind
@@ -3657,7 +3667,8 @@ function lbShowTab(tab) {
   if (k) k.style.borderColor = tab === "streak" ? "#00ff88" : "";
   const dd = document.getElementById("lbTabDaily"), dw = document.getElementById("lbTabDailyWins");
   if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
-  if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
+  const _li = document.getElementById("lbTabIdle"); if (_li) _li.style.borderColor = tab === "idle" ? "#00ff88" : "";
+  if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 async function loadStreakBoard() {
   const t = document.getElementById("lbTable");
@@ -9589,6 +9600,925 @@ gameWrap.addEventListener("touchstart", e => {
         if you want to fully solve it.
 ═══════════════════════════════════════════════════════════════════ -->
 
+<script type="text/idle-html" id="idleSrc"><!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Idle Brick Breaker</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap">
+<style>
+  :root { --bg:#eef1f6; --panel:#ffffff; --fg:#141922; --muted:#5a6475; --line:#d9dfe9; --accent:#1c6bff; --accent-fg:#fff; --good:#10895a; --gold:#b07d00; --stage:#0a0c13; --off:#e8ecf3; --danger:#d23b4b; --pur:#8a3ffc; color-scheme:light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0b0f15; --panel:#151a23; --fg:#e8edf5; --muted:#8c97a9; --line:#252e3d; --accent:#5b9bff; --accent-fg:#06101f; --good:#4fd69a; --gold:#ffd24a; --stage:#06080d; --off:#1a212e; --danger:#ff6b7a; --pur:#b78bff; color-scheme:dark; } }
+  :root[data-theme="dark"] { --bg:#0b0f15; --panel:#151a23; --fg:#e8edf5; --muted:#8c97a9; --line:#252e3d; --accent:#5b9bff; --accent-fg:#06101f; --good:#4fd69a; --gold:#ffd24a; --stage:#06080d; --off:#1a212e; --danger:#ff6b7a; --pur:#b78bff; color-scheme:dark; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 "Sora",system-ui,sans-serif; padding-inline:14px; padding-block:14px 40px; }
+  main { max-width:470px; margin-inline:auto; display:flex; flex-direction:column; gap:10px; position:relative; }
+  .hud { display:grid; grid-template-columns:1fr auto; gap:2px 12px; align-items:end; }
+  .money { font-size:1.75rem; font-weight:700; letter-spacing:-.02em; color:var(--good); font-variant-numeric:tabular-nums; }
+  .sub { color:var(--muted); font-size:.76rem; font-variant-numeric:tabular-nums; }
+  .r { text-align:right; } .gem { color:var(--accent); font-weight:600; }
+  canvas { width:min(100%, calc((100vh - 175px) * 500 / 745)); width:min(100%, calc((100dvh - 175px) * 500 / 745)); margin-inline:auto; aspect-ratio:500/745; background:var(--stage); border:1px solid var(--line); border-radius:12px; display:block; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  .tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
+  .tabs button { font:inherit; font-size:.68rem; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 0; cursor:pointer; position:relative; }
+  .tabs button[aria-pressed="true"] { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+  .dot { position:absolute; top:3px; right:4px; width:7px; height:7px; border-radius:50%; background:var(--danger); }
+  .panel { display:flex; flex-direction:column; gap:8px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .head { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+  .head b { font-weight:600; display:flex; align-items:center; gap:7px; }
+  .sw { width:11px; height:11px; border-radius:50%; display:inline-block; }
+  .btns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  .btns2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+  .b { font:inherit; font-size:.74rem; text-align:left; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:7px 8px; cursor:pointer; display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .b span { color:var(--accent); font-weight:600; font-variant-numeric:tabular-nums; }
+  .b:disabled { background:var(--off); cursor:not-allowed; } .b:disabled span { color:var(--muted); }
+  .b:not(:disabled):hover { border-color:var(--accent); }
+  .b.pur { border-color:var(--pur); } .b.pur span { color:var(--pur); }
+  .b.on { border-color:var(--good); }
+  .wide { width:100%; flex-direction:row; justify-content:space-between; align-items:center; font-size:.82rem; }
+  small, .mut { color:var(--muted); font-size:.76rem; }
+  .bar { height:6px; background:var(--off); border-radius:4px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--accent); }
+  .lock { opacity:.85; }
+  .rar0 { border-left:3px solid var(--muted); } .rar1 { border-left:3px solid var(--accent); } .rar2 { border-left:3px solid var(--pur); }
+  button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .ov { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; width:min(420px,100%); display:flex; flex-direction:column; gap:10px; }
+  .modal h2 { margin:0; font-size:1.1rem; }
+  #toast { min-height:1.2em; color:var(--good); font-size:.82rem; }
+  .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .gold { color:var(--gold); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:.8rem; } td { padding:4px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hud">
+    <div><div class="money" id="money">$0</div><div class="sub">$<span id="rate">0</span>/s · Weltwert $<span id="wv">0</span></div></div>
+    <div class="r"><div style="font-weight:600">Level <span id="lvl">1</span><span id="gl" class="gold"></span></div><div class="sub"><span class="gem" id="gems">0</span> 💎 · <span id="ptv">0</span> PT</div></div>
+  </div>
+  <canvas id="c" width="500" height="745"></canvas>
+  <div id="toast"></div>
+  <div class="tabs" id="tabs"></div>
+  <div class="panel" id="panel"></div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var CFG = { persist: false }; try { CFG = (window.parent && window.parent.__idleCfg) || CFG; } catch (e) {}
+  var W = 500, H = 745, COLS = 9, ROWS = 30, PITCH = 24.5, MX = 67.5, BW = (W - 2 * MX) / COLS, BH = 22, GAP = 2, FIELD_Y = 0, KEY = "idleBrickBreaker_v5", TAU = Math.PI * 2;
+  function $(id) { return document.getElementById(id); }
+  var cv = $("c"), cx = cv.getContext("2d");
+  var S, M = {}, bricks = [], balls = [], pel = [], fx = [], ass = null, stageSum = 0, piT = 0, fireT = 0;
+  var rageT = 0, rageCnt = 0, laserT = 0;
+  var TAP = { id: "tap" }, BOOM = { id: "boom" };
+  var lastT = 0, saveT = 0, uiT = 0, wall = Date.now(), earnLog = [], lvlStart = Date.now();
+
+  // ════════ Zahlenformat wie im Original: K M B T q Q s S O N aa ab ac ... ════════
+  var SUF = ["", "K", "M", "B", "T", "q", "Q", "s", "S", "O", "N"];
+  function suf(i) { if (i < SUF.length) return SUF[i]; var k = i - SUF.length; return String.fromCharCode(97 + Math.floor(k / 26)) + String.fromCharCode(97 + k % 26); }
+  function fmt(v) {
+    if (!isFinite(v)) return "∞"; if (v < 0) return "-" + fmt(-v);
+    if (v < 1000) return (v < 10 && v % 1) ? String(Math.round(v * 100) / 100) : String(Math.floor(v));
+    var i = 0; while (v >= 1000) { v /= 1000; i++; }
+    var s = v.toFixed(2); if (s === "1000.00") { s = "1.00"; i++; }
+    return s + suf(i);
+  }
+  function pct(v) { return (Math.round(v * 1000) / 10) + "%"; }
+  function pctf(v) { return (v * 100).toFixed(2).replace(/\.?0+$/, "") + "%"; }
+
+  // ════════ Steinleben (Wiki): Level^1.32 × kumulativer Multiplikator ════════
+  // Bestätigt: Level 75 ×1.2, 100 ×1.25, 150 ×1.4, 200 ×1.5, 250 ×1.6; ab Level 200.000 gesamt ×13.162.922.164.224
+  // Geschätzt: die Level der weiteren Sprünge nach 250 (Wiki: "viele weitere", letzter bei 200.000)
+  var HT = [75, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 75000, 100000, 125000, 150000, 175000, 200000];
+  var HV = [1.2, 1.25, 1.4, 1.5, 1.6, 1.7, 1.8, 2, 2.5, 2.5, 2.5, 3, 3, 3.5, 3.5, 4, 4, 4, 4, 4, 4, 4, 5, 6, 7, 8, 9];
+  function cumMult(L) { var m = 1; for (var i = 0; i < HT.length && HT[i] <= L; i++) m *= HV[i]; return m; }
+  function health(L) { return Math.pow(L, 1.32) * cumMult(L); }
+
+  // ════════ Bälle ════════
+  // Freischaltkosten je Slot (Wiki): 2: 175 · 3: 7.5K · 4: 175K · 5: 15M · 6: 400B · 7: 10q · 8: 10s · 9: 100O · 10: 5aa · 11: 80ac · 12: 110ae
+  var UNLOCK = [0, 0, 175, 7500, 175000, 15e6, 4e11, 1e16, 1e22, 1e29, 5e33, 8e40, 1.1e47];
+  var BALLS = [
+    { id: "basic",     name: "Basic",        col: "#f4f8ff", tier: 1, pm: 1,    sm: 1,    info: "Prallt von Wänden und Steinen ab." },
+    { id: "sniper",    name: "Sniper",       col: "#4fb4ff", tier: 2, pm: 1.1,  sm: 1,    info: "Zielt nach dem Wandkontakt auf den nächsten Stein." },
+    { id: "splash",    name: "Splash",       col: "#ff9f43", tier: 2, pm: 1,    sm: 1,    info: "100 % Treffer + 40 % Flächenschaden (Radius 1,3)." },
+    { id: "demo",      name: "Demo",         col: "#c8a165", tier: 3, pm: 16,   sm: .5,   info: "Etwa halbes Tempo, etwa 16× Kraft." },
+    { id: "poison",    name: "Poison",       col: "#7bed9f", tier: 3, pm: .45,  sm: 1,    info: "Vergiftet Steine im Radius 1,3. Vergiftete Steine nehmen Schaden × Gift-Kraft.", powMax: 119 },
+    { id: "scatter",   name: "Scatter",      col: "#ff7ad9", tier: 4, pm: 1,    sm: 1,    info: "Spawnt bei Wandkontakt 2 Mini-Bälle mit 40 % Kraft (ein Treffer)." },
+    { id: "cash",      name: "Cash",         col: "#ffd32a", tier: 5, pm: .45,  sm: 1,    info: "Kein Schaden. Erzeugt Geld = Kraft × aktuelles Steinleben.", powMax: 199 },
+    { id: "pierce",    name: "Pierce",       col: "#e08cff", tier: 5, pm: 1,    sm: 1.1,  info: "Durchschlägt Steine, jeden nur einmal.", max: 40 },
+    { id: "sword",     name: "Sword",        col: "#d0d6e0", tier: 6, pm: 1,    sm: 1,    info: "Zielt nach Wandkontakt auf Schild-Steine (voller Schaden)." },
+    { id: "fire",      name: "Fire",         col: "#ff5d3a", tier: 6, pm: 1,    sm: 1,    info: "Setzt Steine in Brand: 35 % Kraft pro Sekunde." },
+    { id: "lightning", name: "Lightning",    col: "#7ee8ff", tier: 6, pm: 1,    sm: 1.15, info: "Blitzkette auf weitere Steine mit 30 % Schaden." },
+    { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blaue Steine ×2, Hex-Steine ×25 Schaden." }
+  ];
+  var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
+  function BP(slot) { return slot === 1 ? 9.46 / 5 : 12.12 * Math.pow(2.424, slot - 2); }   // Basic Lv.5 = 9,46 und Splash Lv.1 = 12,12 (Screenshot); Rest geschätzt
+  function baseCost(slot) { return slot === 1 ? 25 : UNLOCK[slot] / 3; }
+  function maxOwn(t) { return t.max || 50; }
+  function powMax(t) { return t.powMax ? t.powMax - 1 : Infinity; }
+  var SPD_MAX = 98;
+
+  // ════════ Perks (Wiki: 11 Typen, max. 50 pro Welt) ════════
+  var PK = [
+    { id: "pow",  name: "Ballkraft",           txt: "Kraft aller Bälle ×1,25",           max: Infinity },
+    { id: "spd",  name: "Ballgeschwindigkeit", txt: "Tempo aller Bälle ×1,20 (max ×4)",  max: 16 },
+    { id: "cpow", name: "Kraft-Kosten",        txt: "Kraft-Upgrades −20 % (max −60 %)",  max: 3 },
+    { id: "cspd", name: "Tempo-Kosten",        txt: "Tempo-Upgrades −20 % (max −60 %)",  max: 3 },
+    { id: "cnew", name: "Neuer-Ball-Kosten",   txt: "Neue Bälle −20 % (max −60 %)",      max: 3 },
+    { id: "mb",   name: "Max. Bälle",          txt: "Ballgrenze +5 (max +50)",           max: 10 },
+    { id: "pb",   name: "Prestige-Bonus",      txt: "Prestige-Bonus dieser Welt ×1,15",  max: Infinity },
+    { id: "cbc",  name: "Cash-Stein-Chance",   txt: "Cash-Stein-Chance +2 % (max +20 %)", max: 10 },
+    { id: "cbv",  name: "Cash-Stein-Wert",     txt: "Cash-Stein-Wert ×1,5",              max: Infinity },
+    { id: "preq", name: "Perk-Anforderung",    txt: "Künftige Perk-Level −20 % (max −60 %)", max: 3 },
+    { id: "sb",   name: "Stage-Bonus",         txt: "Stage-Bonus ×1,6",                  max: Infinity }
+  ];
+  // Bestätigt (Wiki): alle 50 Perk-Level.
+  var PERK_LV = [20, 50, 100, 175, 250, 400, 600, 900, 1400, 2000, 2750, 3500, 4500, 6000, 7500, 10000, 12500, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 140000, 160000, 180000, 200000, 225000, 250000, 275000, 300000, 325000, 350000, 375000, 400000, 425000, 450000, 475000, 500000, 550000, 600000, 650000];
+  var MAX_PERKS = 50;
+  function perkReq(n) {
+    var b = n < PERK_LV.length ? PERK_LV[n] : PERK_LV[PERK_LV.length - 1] * Math.pow(1.25, n - PERK_LV.length + 1);
+    return Math.max(1, Math.round(b * bv("preq") * (1 - 0.2 * Math.min(3, pc("preq")))));
+  }
+  function pc(id) { var n = 0; S.perks.forEach(function (p) { if (p === id) n++; }); return n; }
+  function pkDef(id) { return PK.filter(function (x) { return x.id === id; })[0]; }
+  function rollPerks() {
+    var pool = PK.filter(function (p) { return pc(p.id) < p.max; }), out = [];
+    while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+    return out;
+  }
+
+  // ════════ Karten (Wiki: 20 💎 pro Karte, zufällig nach Seltenheit, 48 Karten = Stufe 6, 15 Slots) ════════
+  var CT = [1, 3, 8, 16, 28, 48], CARD_COST = 20, MAX_SLOTS = 15, RAR = ["Normal", "Selten", "Episch"];
+  // Slotkosten: Slot 3 = 150, Slot 4 = 200 (bestätigt); alle 15 Slots zusammen 11.900 💎 (bestätigt) → Verlauf dazwischen geschätzt
+  var SLOTC = (function () {
+    var c = { 3: 150, 4: 200 }, need = 11900 - 350, lo = 1.0001, hi = 3, i, n, s, x;
+    for (i = 0; i < 80; i++) { var m = (lo + hi) / 2; s = 0; x = 250; for (n = 5; n <= MAX_SLOTS; n++) { s += x; x *= m; } if (s < need) lo = m; else hi = m; }
+    x = 250; for (n = 5; n <= MAX_SLOTS; n++) { c[n] = Math.round(x); x *= hi; }
+    return c;
+  })();
+  var CARDS = [
+    { id: "spd",  name: "Ballgeschwindigkeit", rar: 0, f: function (l) { return 1.25 + 0.15 * (l - 1); }, t: function (v) { return "Tempo ×" + v.toFixed(2); } },
+    { id: "pow",  name: "Ballkraft",           rar: 0, f: function (l) { return 1.5 + 0.5 * (l - 1); },   t: function (v) { return "Kraft ×" + v.toFixed(2); } },
+    { id: "bc",   name: "Stein-Geld",          rar: 0, f: function (l) { return 1.5 + 0.4 * (l - 1); },   t: function (v) { return "Steingeld ×" + v.toFixed(1); } },
+    { id: "sb",   name: "Stage-Bonus",         rar: 0, f: function (l) { return [1.8, 2.2, 2.6, 3.0, 3.5, 4.0][l - 1]; }, t: function (v) { return "Stage-Bonus ×" + v.toFixed(1); } },
+    { id: "sr",   name: "Splash-Radius",       rar: 0, f: function (l) { return [1.5, 1.7, 1.9, 2.1, 2.25, 2.4][l - 1]; }, t: function (v) { return "Radius ×" + v.toFixed(2) + " (Splash, Poison, Bombe)"; } },
+    { id: "qc",   name: "Qualitätskontrolle",  rar: 0, f: function (l) { return 3 + 0.4 * (l - 1); },     t: function (v) { return "Kraft ×" + v.toFixed(1) + ", Tempo −50 %"; } },
+    { id: "mb",   name: "Max. Bälle",          rar: 0, f: function (l) { return 10 + 4 * (l - 1); },      t: function (v) { return "Ballgrenze +" + v; } },
+    { id: "cbc",  name: "Cash-Stein-Chance",   rar: 0, f: function (l) { return 0.03 + 0.02 * l; },       t: function (v) { return "+" + pct(v) + " Chance"; } },
+    { id: "cbb",  name: "Cash-Stein-Bonus",    rar: 0, f: function (l) { return 2 + 0.5 * (l - 1); },     t: function (v) { return "Bonus ×" + v.toFixed(1); } },
+    { id: "cat",  name: "Katalysator",         rar: 0, f: function (l) { return 3 + 0.5 * (l - 1); },     t: function (v) { return "Schaden auf vergiftete Steine ×" + v.toFixed(1); } },
+    { id: "skip", name: "Level überspringen",  rar: 0, f: function (l) { return 0.08 + 0.01 * (l - 1); }, t: function (v) { return "+" + pct(v) + " Chance"; } },
+    { id: "shp",  name: "Schild-Durchdringung", rar: 0, f: function (l) { return 10 + 2 * (l - 1); },     t: function (v) { return "Schaden auf Schild-Steine ×" + v + " (Schild-Steine fehlen noch im Spiel)"; } },
+    { id: "pi",   name: "Passives Einkommen",  rar: 0, f: function (l) { return 0.10 + 0.04 * (l - 1); }, t: function (v) { return pct(v) + " vom Stage-Bonus pro Sekunde"; } },
+    { id: "sd",   name: "Splash-Schaden",      rar: 0, f: function (l) { return 1 + 0.1 * l; },           t: function (v) { return "Flächenschaden +" + pct(v - 1); } },
+    { id: "ass",  name: "Assassin-Ball",       rar: 1, f: function (l) { return 4 + 0.5 * (l - 1); },     t: function (v) { return "Ball zerstört Steine sofort, Basistempo " + v.toFixed(2); } },
+    { id: "nox",  name: "Giftige Dämpfe",      rar: 1, f: function (l) { return [0.12, 0.16, 0.20, 0.245, 0.28, 0.32][l - 1]; }, t: function (v) { return pct(v) + " Chance, dass ein Stein vergiftet spawnt"; } },
+    { id: "spec", name: "Ball-Spezialisierung", rar: 1, f: function (l) { return 2 + 0.4 * (l - 1); },    t: function (v) { return "Kraft des gewählten Balls ×" + v.toFixed(1); } },
+    { id: "crit", name: "Kritische Treffer",   rar: 1, f: function (l) { return 0.05 + 0.03 * (l - 1); }, t: function (v) { return pct(v) + " Chance auf +50 % Schaden (außer Poison)"; } },
+    { id: "int",  name: "Zinsen",              rar: 1, f: function (l) { return 0.001 * l; },             t: function (v) { return pctf(v) + " vom Geld pro Level (max. 100K × Stage-Bonus)"; } },
+    { id: "bomb", name: "Bombenstein",         rar: 2, f: function (l) { return 0.07 + 0.03 * l; },       t: function (v) { return pct(v) + " Chance, halbe HP, Explosion 60 %"; } },
+    { id: "laser", name: "Laser",              rar: 2, f: function (l) { return [1.5, 1.3, 1.1, 0.9, 0.7, 0.5][l - 1]; }, t: function (v) { return "Laser alle " + v.toFixed(1) + " s mit der Kraft des stärksten Balls"; } },
+    { id: "rage", name: "Wut-Batterie",        rar: 2, f: function (l) { return 1.3 + 0.3 * (l - 1); },   t: function (v) { return "Nach 5.000 zerstörten Steinen: Kraft ×" + v.toFixed(1) + " für 30 s"; } }
+  ];
+  var CM = {}; CARDS.forEach(function (c) { CM[c.id] = c; });
+  function cardLvl(e) { var l = 0; if (e) for (var i = 0; i < CT.length; i++) if (e.n >= CT[i]) l = i + 1; return l; }
+  function cl(id) { var e = S.cards[id]; return (e && S.eq.indexOf(id) >= 0) ? cardLvl(e) : 0; }
+  function cv_(id, neutral) { var l = cl(id); return l ? CM[id].f(l) : neutral; }
+  function drawCard() {
+    var r = Math.random() * 100, rar = r < 80.5 ? 0 : r < 97 ? 1 : 2;
+    function open(c) { var e = S.cards[c.id]; return !e || e.n < CT[CT.length - 1]; }
+    var pool = CARDS.filter(function (c) { return c.rar === rar && open(c); });
+    while (!pool.length && rar < 2) { rar++; pool = CARDS.filter(function (c) { return c.rar === rar && open(c); }); }
+    if (!pool.length) pool = CARDS.filter(open);
+    if (!pool.length) return null;
+    var tot = 0, w = pool.map(function (c) { var e = S.cards[c.id]; var m = CT[CT.length - 1] - (e ? e.n : 0); tot += m; return m; });
+    var x = Math.random() * tot;
+    for (var i = 0; i < pool.length; i++) { x -= w[i]; if (x <= 0) return pool[i]; }
+    return pool[pool.length - 1];
+  }
+
+  // ════════ Prestige-Abzeichen (Kosten und Werte aus dem Wiki) ════════
+  // Slot-Freischaltkosten (bestätigt): 1: 3 · 2: 6 · 3: 12 · 4: 21 · 5: 35 · 6: 56 · 7: 87 · 8: 133 · 9: 200 · 10: 298 · 11: 439 · 12: 642 · 15: 2569 · 16: 5159 · 17: 12910
+  var TIERS = [3, 6, 12, 21, 35, 56, 87, 133, 200, 298, 439, 642, 934, 1486, 2569, 5159, 12910];
+  function mkCosts(max, ex, total, c2, rGuess) {
+    var c = ex.slice(); if (!c.length) c = [c2];
+    var need = max - 1 - c.length;
+    if (need > 0) {
+      var last = c[c.length - 1], r = rGuess || 1.3;
+      if (total) {
+        var sum = 0; c.forEach(function (x) { sum += x; });
+        var rem = total - sum, lo = 1.0001, hi = 4;
+        for (var i = 0; i < 90; i++) { var m = (lo + hi) / 2, s = 0, x = last; for (var j = 0; j < need; j++) { x *= m; s += x; } if (s < rem) lo = m; else hi = m; }
+        r = hi;
+      }
+      var y = last; for (var k = 0; k < need; k++) { y *= r; c.push(Math.round(y)); }
+    }
+    if (total) { var sm = 0; c.forEach(function (x) { sm += x; }); c[c.length - 1] += total - sm; } // Rundungsrest, damit die Summe exakt stimmt
+    return c;
+  }
+  var PCOST = [11, 16, 22, 31, 42, 57, 75, 99, 129, 167, 215, 276, 353, 449, 570, 721, 909];
+  var CASHC = [6, 9, 14, 20, 27, 38, 51, 68, 90, 117, 152, 197, 253, 324, 413, 525, 665, 840, 1058, 1330, 1669, 2090, 2613, 3260, 4063, 5056, 6284, 7801, 9673];
+  var GOLDC = [8830, 10938, 13546, 16736, 20673, 25517, 31471, 38786, 47768, 58791, 72313, 88892, 109210, 134100, 197492, 242257, 297029, 364018, 445922, 546028, 668338, 817730, 1000147, 1222822, 1494560, 1826081];
+  var BD = {
+    spd:   { name: "Ballgeschwindigkeit", tier: 1, max: 20, neu: 1, val: function (l) { return 1.4 + 0.1 * (l - 1); }, txt: function (v) { return "Tempo ×" + v.toFixed(2); },
+             costs: [6, 10, 15, 22, 31, 43, 58, 77, 102, 133, 173, 224, 288, 368, 469, 596, 755, 954, 1202] },
+    pow:   { name: "Ballkraft", tier: 1, max: 60, neu: 1, val: function (l) { return 1.5 + 0.2 * (l - 1); }, txt: function (v) { return "Kraft ×" + v.toFixed(2); },
+             costs: mkCosts(60, [5, 8, 12, 18, 25, 34, 46, 62, 82, 107, 139, 180, 231, 296, 377, 479, 607, 767, 966, 1215, 1524, 1908, 2385, 2976, 4451, 5539, 6884], 182891054) },
+    mb:    { name: "Max. Bälle", tier: 2, max: 35, neu: 0, val: function (l) { return 10 + 4 * (l - 1); }, txt: function (v) { return "Ballgrenze +" + v; },
+             costs: [7, 11, 17, 24, 33, 46, 61, 82, 107, 140, 182, 235, 302, 387, 493, 625, 792, 1000, 1259, 1582, 1984, 2483, 3103, 3871, 11093, 13800, 17149, 21282, 26386, 32676, 40429, 49977, 61725, 76176] },
+    bc:    { name: "Stein-Geld", tier: 3, max: 60, neu: 1, val: function (l) { return 1.5 + 0.25 * (l - 1); }, txt: function (v) { return "Steingeld ×" + v.toFixed(2); },
+             costs: mkCosts(60, CASHC, 143389432) },
+    sb:    { name: "Stage-Bonus", tier: 4, max: 60, neu: 1, val: function (l) { return 1.75 + 0.25 * (l - 1); }, txt: function (v) { return "Stage-Bonus ×" + v.toFixed(2); },
+             costs: mkCosts(60, CASHC, 143389432) },
+    idle:  { name: "Max. Idle-Zeit", tier: 5, max: 50, neu: 0, val: function (l) { return 60 + 15 * (l - 1); }, txt: function (v) { return "+" + (v / 60).toFixed(2) + " h"; },
+             costs: mkCosts(50, [], 8413561, 12) },
+    cpow:  { name: "Kraft-Kosten", tier: 6, max: 18, neu: 1, val: function (l) { return 1 - (0.15 + 0.03 * (l - 1)); }, txt: function (v) { return "Kosten −" + Math.round((1 - v) * 100) + " %"; },
+             costs: PCOST },
+    cspd:  { name: "Tempo-Kosten", tier: 7, max: 18, neu: 1, val: function (l) { return 1 - (0.15 + 0.03 * (l - 1)); }, txt: function (v) { return "Kosten −" + Math.round((1 - v) * 100) + " %"; },
+             costs: PCOST.map(function (x) { return Math.round(x * 1.48); }) },
+    cnew:  { name: "Neuer-Ball-Kosten", tier: 8, max: 18, neu: 1, val: function (l) { return 1 - (0.15 + 0.03 * (l - 1)); }, txt: function (v) { return "Kosten −" + Math.round((1 - v) * 100) + " %"; },
+             costs: [78, 105, 141, 186, 243, 316, 408, 525, 672, 857, 1089, 1379, 1742, 2195, 2759, 3461, 4334] },
+    prest: { name: "Prestige-Belohnung", tier: 9, max: 50, neu: 1, val: function (l) { return 1.3 + 0.1 * (l - 1); }, txt: function (v) { return "Token ×" + v.toFixed(2); },
+             costs: mkCosts(50, [67, 89, 118, 154, 200, 259, 333, 426, 543, 690, 874, 1104, 1391, 1749, 2194, 2747, 3434, 4286, 5341, 6647, 8261, 10255, 12716, 15751, 19492], 54380398) },
+    cbc:   { name: "Cash-Stein-Chance", tier: 10, max: 30, neu: 0, val: function (l) { return 0.03 + 0.01 * (l - 1); }, txt: function (v) { return "+" + pct(v) + " Chance"; },
+             costs: mkCosts(30, [25, 34, 46, 62, 82, 107, 139, 180, 231, 296, 377, 479, 607, 767, 966, 1215, 1524, 1908, 2385, 2976, 3709, 4616, 5737], 106302) },
+    cbb:   { name: "Cash-Stein-Bonus", tier: 11, max: 60, neu: 1, val: function (l) { return 2 + 0.25 * (l - 1); }, txt: function (v) { return "Bonus ×" + v.toFixed(2); },
+             costs: mkCosts(60, [], 290403151, 145) },
+    preq:  { name: "Perk-Anforderung", tier: 12, max: 18, neu: 1, val: function (l) { return 1 - (0.15 + 0.03 * (l - 1)); }, txt: function (v) { return "Perk-Level −" + Math.round((1 - v) * 100) + " %"; },
+             costs: [288, 373, 479, 613, 782, 994, 1259, 1590, 2003, 2518, 3160, 3956, 4945, 6172, 7691, 9571, 11895] },
+    sskip: { name: "Stage Skip", tier: 13, max: 15, neu: 0, val: function (l) { return 0.10 + 0.025 * (l - 1); }, txt: function (v) { return "+" + pct(v) + " Chance, Level sofort abzuschließen"; },
+             costs: mkCosts(15, [], 15339, 300) },
+    iskip: { name: "Idle-Level-Skip", tier: 14, max: 20, neu: 0, val: function (l) { return 0.10 + 0.03 * (l - 1); }, txt: function (v) { return pct(v) + " der echten Zeit"; },
+             costs: mkCosts(20, [479], 160602) },
+    bh:    { name: "Schwarzes Loch", tier: 15, max: 20, neu: 0, val: function (l) { return 50 + 10 * (l - 1); }, txt: function (v) { return "1 % Chance, " + v + " Level vorzuspringen"; },
+             costs: mkCosts(20, [], 335105, 800) },
+    gold:  { name: "Goldlevel-Chance", tier: 16, max: 20, neu: 0.01, val: function (l) { return 0.03 + 0.005 * (l - 1); }, txt: function (v) { return pct(v) + " Chance"; },
+             costs: GOLDC.slice(0, 19) },
+    goldc: { name: "Goldlevel-Geld", tier: 17, max: 40, neu: 2, val: function (l) { return 10 + (l - 1); }, txt: function (v) { return "Goldsteine ×" + v; },
+             costs: mkCosts(40, GOLDC, 361819575) }
+  };
+  var BDK = Object.keys(BD);
+  function bv(id) { var l = S.badges[id] || 0; return l > 0 ? BD[id].val(l) : BD[id].neu; }
+
+  // ════════ Erfolge (Edelsteine) ════════
+  var ACH = [
+    { id: "lvl", name: "Level-Kletterer", th: [10, 25, 50, 100, 200, 350, 500, 750, 1000, 2000], val: function () { return S.best; } },
+    { id: "brk", name: "Steinbrecher", th: [100, 500, 2000, 1e4, 5e4, 2e5, 1e6, 5e6, 2e7, 1e8], val: function () { return S.c.broken; } },
+    { id: "mon", name: "Tycoon", th: [1e3, 1e5, 1e7, 1e9, 1e11, 1e13, 1e15, 1e18, 1e21, 1e24], val: function () { return S.c.tot; } },
+    { id: "bal", name: "Ballsammler", th: [5, 15, 30, 60, 100, 150, 200, 250, 300, 350], val: function () { return totalBalls(); } },
+    { id: "pre", name: "Wiedergeburt", th: [1, 2, 4, 7, 10, 15, 25, 40, 60, 100], val: function () { return S.pCount; } },
+    { id: "gld", name: "Goldgräber", th: [1, 5, 20, 50, 100, 250, 500, 1000, 2500, 5000], val: function () { return S.c.gold; } }
+  ];
+
+  // ════════ Zustand ════════
+  function newC() { return { broken: 0, cleared: 0, bought: 0, pwBought: 0, spBought: 0, cashBr: 0, gemBr: 0, perksPicked: 0, skipped: 0, prest: 0, crit: 0, gold: 0, tot: 0 }; }
+  function freshBalls() {
+    var b = {}; BALLS.forEach(function (t) { b[t.id] = { own: 0, pow: 0, spd: 0, bp: 0, slot: 0 }; });
+    b.basic.own = 1; b.basic.slot = 1; return b;
+  }
+  function fresh() {
+    return { cash: 0, wv: 0, gems: 0, tokens: 0, level: 1, best: 1, pCount: 0, balls: freshBalls(), order: ["basic"], buyLog: [], perks: [], perkN: 0, pend: null, offer: null,
+      cards: {}, eq: [], slots: 2, badges: {}, tier: 0, c: newC(), ach: {}, wake: false, gemPool: 0, gemProg: 0, specBall: "basic", seen: Date.now(), rate: 0, lvT: 0 };
+  }
+  function load() {
+    try {
+      var d = CFG.persist ? JSON.parse(localStorage.getItem(KEY) || "null") : null;
+      if (d && d.balls) {
+        var f = fresh(); S = Object.assign(f, d);
+        BALLS.forEach(function (t) { S.balls[t.id] = Object.assign(f.balls[t.id], d.balls[t.id] || {}); });
+        S.c = Object.assign(newC(), d.c || {}); return;
+      }
+    } catch (e) {}
+    S = fresh();
+  }
+  function save() { if (!CFG.persist) return; try { S.seen = Date.now(); S.rate = rate(); localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} try { if (window.parent && window.parent.idleReport) window.parent.idleReport(S.c.tot, S.best); } catch (e) {} }
+  function totalBalls() { var n = 0; BALLS.forEach(function (t) { n += S.balls[t.id].own; }); return n; }
+  function toast(t) { var el = $("toast"); el.textContent = t; clearTimeout(toast.t); toast.t = setTimeout(function () { el.textContent = ""; }, 3500); }
+
+  // ════════ Multiplikatoren ════════
+  function recalc() {
+    var qc = cl("qc");
+    M.pow = bv("pow") * cv_("pow", 1) * (qc ? CM.qc.f(qc) : 1) * Math.pow(1.25, pc("pow"));
+    M.spd = bv("spd") * cv_("spd", 1) * (qc ? 0.5 : 1) * Math.min(4, 1 + 0.2 * pc("spd"));
+    M.bc = bv("bc") * cv_("bc", 1);
+    M.cbb = bv("cbb") * cv_("cbb", 1) * Math.pow(1.5, pc("cbv"));
+    M.sb = bv("sb") * cv_("sb", 1) * Math.pow(1.6, pc("sb"));
+    M.cbc = 0.05 + bv("cbc") + cv_("cbc", 0) + 0.02 * pc("cbc");
+    M.bomb = cv_("bomb", 0);
+    M.gem = 0.012;
+    M.nox = cv_("nox", 0); M.crit = cv_("crit", 0); M.spec = cv_("spec", 1); M.rage = cv_("rage", 1);
+    M.cat = cv_("cat", 1);
+    M.pi = cv_("pi", 0);
+    M.goldCh = bv("gold");
+    M.goldMul = bv("goldc");
+    M.skip = cv_("skip", 0) + bv("sskip"); M.bh = bv("bh");
+    M.iskip = bv("iskip");
+    M.maxIdle = 120 + bv("idle");
+    M.interest = cv_("int", 0);
+    M.maxBalls = 50 + cv_("mb", 0) + 5 * pc("mb") + bv("mb");
+    M.dNew = bv("cnew") * (1 - 0.2 * pc("cnew"));
+    M.dPow = bv("cpow") * (1 - 0.2 * pc("cpow"));
+    M.dSpd = bv("cspd") * (1 - 0.2 * pc("cspd"));
+    M.splR = cv_("sr", 1);
+    M.splD = cv_("sd", 1);
+    M.prest = bv("prest") * Math.pow(1.15, pc("pb"));
+    M.psnMul = S.balls.poison.own > 0 ? Math.max(1, dmgOf(BM.poison)) : 2;
+    // Kartenlimit: überzählige Bälle in umgekehrter Kaufreihenfolge entfernen
+    var over = totalBalls() - M.maxBalls, changed = false;
+    while (over > 0 && S.buyLog.length) {
+      var id = S.buyLog.pop(); var st = S.balls[id];
+      if (st && st.own > (id === "basic" ? 1 : 0)) { st.own--; over--; changed = true; if (st.own === 0 && id !== "basic") { st.slot = 0; S.order = S.order.filter(function (x) { return x !== id; }); } }
+    }
+    if (changed) rebuildBalls();
+    S.eq = S.eq.filter(function (id) { return S.cards[id]; }).slice(0, S.slots);
+    ass = cl("ass") ? (ass || { x: W / 2, y: H / 2, vx: 0.6, vy: -0.8 }) : null;
+  }
+  function dmgOf(t) {
+    var st = S.balls[t.id];
+    return BP(st.slot) * t.pm * (st.pow + 1) * M.pow * Math.pow(5, st.bp) * (S.specBall === t.id ? M.spec : 1) * (rageT > 0 ? M.rage : 1);
+  }
+  function speedOf(t) {
+    var st = S.balls[t.id], s = 60 * Math.min(8.5, 1.245 * Math.pow(st.spd + 1, 0.735)) * t.sm * M.spd * Math.pow(0.4, st.bp);
+    return Math.min(s, 800);
+  }
+  function cNew(t) { var st = S.balls[t.id], b = st.slot === 1 ? 510 / Math.pow(1.5, 8) : UNLOCK[st.slot] * 541 / 175 / 2.25; return Math.ceil(b * Math.pow(1.5, st.own) * M.dNew); }   // Screenshot: Basic mit 8 Bällen $510, Splash mit 2 Bällen $541 (exakt); +50 % pro Ball geschätzt
+  function cPow(t) { var st = S.balls[t.id], b = st.slot === 1 ? 248 / Math.pow(1.3, 5) : UNLOCK[st.slot] * 285 / 175 / 1.3; return Math.ceil(b * Math.pow(1.3, st.pow + 1) * M.dPow); }
+  function cSpd(t) { var st = S.balls[t.id], b = st.slot === 1 ? 38.9 : UNLOCK[st.slot] * 1.7; return Math.ceil(b * Math.pow(1.35, st.spd + 1) * M.dSpd); }
+
+  // ════════ Geld ════════
+  function earn(g) {
+    if (!(g > 0)) return; S.cash += g; S.wv += g; S.c.tot += g;
+    var sec = Math.floor(Date.now() / 1000);
+    if (earnLog.length && earnLog[earnLog.length - 1][0] === sec) earnLog[earnLog.length - 1][1] += g; else earnLog.push([sec, g]);
+  }
+  function rate() { var now = Math.floor(Date.now() / 1000), tot = 0; earnLog = earnLog.filter(function (e) { return e[0] > now - 12; }); earnLog.forEach(function (e) { tot += e[1]; }); return tot / 12; }
+
+  // ════════ Level-Muster (feste Layouts) ════════
+  // 0 leer · 1 grün · 2 blau (2× Leben) · 3 Hex (25× Leben)
+  // Wiki-FAQ nennt: 6-Hex-Karte (Hex von Grün umgeben), 3-Hex-Karte mit 4 blauen Spalten, 3-Hex-Raute aus Grün mit Blau unten
+  function RC(L, c0, c1, r0, r1, t, hu) { hu = hu || 1; for (var r = r0; r + hu - 1 <= r1; r += hu) for (var c = c0; c <= c1; c++) L.push({ c: c, r: r, t: t, h: hu }); }
+  function HX(L, cc, r) { L.push({ hx: cc, r: r, t: 3, h: 3 }); }
+  var PATS = [
+    function () { var L = []; RC(L, 0, 8, 0, 0, 1); RC(L, 0, 0, 1, 21, 1); RC(L, 8, 8, 1, 19, 1); RC(L, 2, 6, 2, 2, 1); RC(L, 2, 2, 3, 19, 1); RC(L, 6, 6, 3, 19, 1); RC(L, 3, 5, 19, 19, 1); RC(L, 4, 4, 10, 16, 1); RC(L, 5, 6, 17, 17, 1); HX(L, 4, 6); return L; },
+    function () { var L = []; RC(L, 0, 8, 0, 0, 2); RC(L, 0, 8, 24, 24, 2); RC(L, 0, 0, 1, 23, 2); RC(L, 8, 8, 1, 23, 2); RC(L, 1, 7, 1, 2, 1); RC(L, 1, 2, 3, 22, 1); RC(L, 6, 7, 3, 22, 1); RC(L, 1, 7, 21, 22, 1); return L; },
+    function () { var L = []; [0, 2, 6, 8].forEach(function (c) { RC(L, c, c, 0, 27, 1, 2); }); HX(L, 4, 4); HX(L, 4, 12); HX(L, 4, 20); return L; },
+    function () { var L = []; RC(L, 0, 8, 5, 5, 1); RC(L, 0, 0, 6, 22, 1); RC(L, 8, 8, 6, 22, 1); RC(L, 2, 6, 9, 22, 1); return L; },
+    function () { var L = []; RC(L, 0, 8, 0, 0, 1); HX(L, 1, 6); HX(L, 4, 6); HX(L, 7, 6); RC(L, 0, 8, 12, 12, 1); RC(L, 0, 8, 13, 16, 2, 2); RC(L, 0, 8, 17, 17, 1); HX(L, 1, 21); HX(L, 4, 21); HX(L, 7, 21); [1, 3, 5, 7].forEach(function (c) { RC(L, c, c, 25, 25, 1); }); RC(L, 0, 8, 26, 26, 1); return L; },
+    function () { var L = []; RC(L, 0, 8, 3, 5, 1); RC(L, 0, 1, 6, 18, 1); RC(L, 7, 8, 6, 18, 1); RC(L, 0, 8, 19, 21, 2); HX(L, 3, 6); HX(L, 5, 6); HX(L, 3, 10); HX(L, 5, 10); HX(L, 3, 14); HX(L, 5, 14); RC(L, 2, 6, 9, 9, 1); RC(L, 2, 6, 13, 13, 1); RC(L, 2, 6, 17, 18, 1); return L; }
+  ];
+
+  // ════════ Level / Steine ════════
+  function layout() {
+    bricks.forEach(function (b) { b.dead = true; });
+    bricks = []; pel = [];
+    var gold = Math.random() < M.goldCh; S.goldStage = gold; stageSum = 0;
+    var hb = health(S.level), flip = Math.random() < 0.5, cells = PATS[Math.floor(Math.random() * PATS.length)]();
+    var r0 = 1e9, r1 = 0; cells.forEach(function (q) { r0 = Math.min(r0, q.r); r1 = Math.max(r1, q.r + q.h); });
+    var ext = r1 - r0, vf = Math.max(0.9, Math.min(1.3, 26 / ext));   // oben 1 Zeile Rand, unten ca. 10 % frei für die Bälle
+    for (var ci = 0; ci < cells.length; ci++) {
+      var cell = cells[ci], ty = cell.t, bx, bw;
+      var type = ty === 3 ? "h" : ty === 2 ? "b" : "g", mult = type === "h" ? 25 : type === "b" ? 2 : 1, base = hb * mult;
+      if (cell.hx !== undefined) { bw = BW * 1.8; bx = MX + ((flip ? COLS - 1 - cell.hx : cell.hx) + 0.5) * BW - bw / 2; } else { bx = MX + (flip ? COLS - 1 - cell.c : cell.c) * BW + 1; bw = BW - 2; }
+      var isHx = cell.hx !== undefined, rr = cell.r - r0 + 1, bh = isHx ? cell.h * PITCH - GAP : cell.h * PITCH * vf - GAP, by = isHx ? FIELD_Y + (rr + cell.h / 2) * vf * PITCH - bh / 2 : FIELD_Y + rr * vf * PITCH;
+      var br = { x: bx, y: by, w: bw, h: bh, type: type, max: base, hp: base, cash: false, bomb: false, gem: false, gold: gold, psn: 0, fire: 0 };
+      // Reihenfolge laut Wiki: erst Bombe, dann Cash, dann Gem (Gem nur auf Grün/Blau)
+      var rr = Math.random();
+      if (rr < M.bomb) { br.bomb = true; br.max = br.hp = base / 2; }
+      else if (rr < M.bomb + M.cbc) br.cash = true;
+      br.val = base * M.bc * (br.cash ? M.cbb : 1);
+      if (M.nox > 0 && Math.random() < M.nox) br.psn = 1;
+      stageSum += br.val; bricks.push(br);
+    }
+    if (S.gemPool > 0 && Math.random() < 0.08) {   // Wiki: max. ein Gem-Stein pro Stage, nur grün/blau; verpasste bleiben im Pool
+      var cand = bricks.filter(function (x) { return x.type !== "h" && !x.cash && !x.bomb; });
+      if (cand.length) { var gb = cand[Math.floor(Math.random() * cand.length)]; gb.gem = true; gb.max = gb.hp = 1; stageSum -= gb.val; gb.val = 0; }
+    }
+    if (!bricks.length) layout();
+  }
+  function kill(b) {
+    var i = bricks.indexOf(b); if (i < 0 || b.dead) return; b.dead = true; bricks.splice(i, 1); S.c.broken++; if (cl("rage")) { rageCnt++; if (rageCnt >= 5000) { rageCnt = 0; rageT = 30; toast("Wut-Batterie aktiv!"); } }
+    if (b.cash) S.c.cashBr++;
+    if (b.gold) S.c.gold++;
+    if (b.gem) { S.gems++; S.c.gemBr++; S.gemPool = Math.max(0, S.gemPool - 1); toast("+1 💎 Gem-Stein"); }
+    fx.push({ x: b.x + b.w / 2, y: b.y + b.h / 2, r: Math.max(b.w, b.h) / 2, t: 0, c: b.gold ? "#ffd32a" : b.cash ? "#ffd32a" : "#7bed9f", ring: true });
+    if (b.bomb) explode(b.x + b.w / 2, b.y + b.h / 2, BW * 1.5 * M.splR, 0.6 * b.max, b, BOOM);
+    if (!b.noClear && bricks.every(function (x) { return x.gem; })) clearLevel(); // Gem-Steine dürfen übrig bleiben (Wiki: man kann sie verpassen)
+  }
+  function advance() {
+    S.level++; S.c.cleared++; S.gemProg = (S.gemProg || 0) + 1; if (S.gemProg >= 150) { S.gemProg = 0; if (S.gemPool < 3) S.gemPool++; } if (S.level > S.best) S.best = S.level;
+    if (S.level % 10 === 0) balls.forEach(function (b) { if (!b.hits) { b.x = W / 2; b.y = H / 2; } b.hits = 0; }); // Wiki: alle 10 Stages Ball ohne Treffer zurück in die Mitte
+    while (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) S.pend = rollPerks();
+  }
+  function clearLevel() {
+    var bonus = 0.7 * stageSum * M.sb; earn(bonus);
+    if (M.interest > 0) earn(Math.min(S.cash * M.interest, 1e5 * bonus));
+    var now = Date.now(), dt = (now - lvlStart) / 1000; lvlStart = now; if (dt > 0.5 && dt < 3600) S.lvT = S.lvT ? S.lvT * 0.9 + dt * 0.1 : dt;
+    advance(); layout();
+    var guard = 0;
+    while (Math.random() < M.skip && guard++ < 200) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(); layout(); }
+    if (M.bh > 0 && Math.random() < 0.01) { for (var w = 0; w < M.bh; w++) advance(); layout(); S.c.skipped += M.bh; toast("Schwarzes Loch: +" + M.bh + " Level!"); }
+    checkAch(); renderTabs(); if (tab === "perks" || tab === "stats") renderPanel();
+  }
+  function explode(x0, y0, R, d, skip, ball) {
+    fx.push({ x: x0, y: y0, r: R, t: 0, c: "#ff9f43", ring: true });
+    var list = bricks.slice();
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i]; if (o === skip || o.dead) continue;
+      var nx = Math.max(o.x, Math.min(x0, o.x + o.w)), ny = Math.max(o.y, Math.min(y0, o.y + o.h));
+      if (Math.hypot(nx - x0, ny - y0) < R) dmgBrick(o, d, ball);
+    }
+  }
+  function dmgBrick(b, d, ball) {
+    if (b.dead || b.hp <= 0) return 0;
+    if (b.gem && ball !== TAP) return 0;            // Wiki: Gem-Steine haben 1 HP und nehmen nur Tipp-Schaden
+    if (b.psn) d *= M.psnMul * M.cat;               // Wiki: vergiftete Steine nehmen Schaden × Gift-Kraft (Katalysator-Karte obendrauf)
+    d = Math.min(d, b.hp); b.hp -= d;
+    var g = b.val * (d / b.max); if (b.gold) g *= M.goldMul;  // Wiki: Gold gilt nur beim Zerstören, nicht für den Stage-Bonus
+    earn(g);
+    if (fx.length < 60 && g > 0 && Math.random() < 0.5) fx.push({ x: b.x + b.w / 2 + (Math.random() - .5) * 16, y: b.y + b.h / 2, t: 0, s: "+" + fmt(g), c: "#7bed9f" });
+    if (b.hp <= b.max * 1e-9) { kill(b); }
+    return d;
+  }
+  function nearBricks(x0, y0, R, except) {
+    var out = []; for (var i = 0; i < bricks.length; i++) { var o = bricks[i]; if (o === except || o.dead) continue; var nx = Math.max(o.x, Math.min(x0, o.x + o.w)), ny = Math.max(o.y, Math.min(y0, o.y + o.h)); if (Math.hypot(nx - x0, ny - y0) < R) out.push(o); }
+    return out;
+  }
+
+  // ════════ Bälle ════════
+  // Wiki: Bälle ohne Treffer kommen "zurück in die Mitte" → neue Bälle starten in der Spielfeldmitte, in zufälliger Richtung (nie exakt waagerecht/senkrecht)
+  function addBall(t) {
+    var a = -(Math.PI * (0.2 + 0.6 * Math.random()));
+    balls.push({ t: t, x: W / 2 + (Math.random() - .5) * 60, y: H - 30, vx: Math.cos(a), vy: Math.sin(a), hits: 0, ov: {} });
+  }
+  function rebuildBalls() { balls = []; BALLS.forEach(function (t) { for (var i = 0; i < S.balls[t.id].own; i++) addBall(t); }); }
+  function aimAt(b, best) { if (best) { var a = Math.atan2(best.y + best.h / 2 - b.y, best.x + best.w / 2 - b.x); b.vx = Math.cos(a); b.vy = Math.sin(a); } }
+  function aim(b) {
+    var best = null, bd = 1e12;
+    for (var i = 0; i < bricks.length; i++) { var o = bricks[i], dx = o.x + o.w / 2 - b.x, dy = o.y + o.h / 2 - b.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = o; } }
+    aimAt(b, best);
+  }
+  function aimShield(b) {                           // Sword: nur Schild-Steine anvisieren (im Wiki ohne bekannte Spawn-Regel, daher aktuell keine Schild-Steine)
+    var best = null, bd = 1e12;
+    for (var i = 0; i < bricks.length; i++) { var o = bricks[i]; if (!o.shield) continue; var dx = o.x + o.w / 2 - b.x, dy = o.y + o.h / 2 - b.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = o; } }
+    aimAt(b, best);
+  }
+  function spawnMini(b, d) { for (var i = 0; i < 2; i++) { var a = Math.random() * TAU; pel.push({ x: b.x, y: b.y, vx: Math.cos(a), vy: Math.sin(a), d: d, life: 8 }); } }
+  function onHit(ball, b, d) {
+    var t = ball.t, cx0 = b.x + b.w / 2, cy0 = b.y + b.h / 2;
+    if (t.id === "splash") {
+      explode(cx0, cy0, BW * 1.3 * M.splR, d * 0.4 * M.splD, b, ball);
+    } else if (t.id === "poison") {
+      var R = BW * 1.3 * M.splR; b.psn = 1; nearBricks(cx0, cy0, R, b).forEach(function (o) { o.psn = 1; });
+      fx.push({ x: cx0, y: cy0, r: R, t: 0, c: "#7bed9f", ring: true });
+    } else if (t.id === "fire") {
+      if (!b.dead) b.fire = Math.max(b.fire, dmgOf(t) * 0.35);
+    } else if (t.id === "lightning") {
+      var l = nearBricks(cx0, cy0, 1e9, b).sort(function (p, q) { return Math.hypot(p.x - b.x, p.y - b.y) - Math.hypot(q.x - b.x, q.y - b.y); }).slice(0, 3);
+      l.forEach(function (o) { fx.push({ line: [cx0, cy0, o.x + o.w / 2, o.y + o.h / 2], t: 0, c: "#7ee8ff" }); dmgBrick(o, d * 0.3, ball); });
+    }
+  }
+  var spC = {}, dmC = {};
+  function stepBalls(dt) {
+    var i, k;
+    BALLS.forEach(function (t) { spC[t.id] = speedOf(t); dmC[t.id] = dmgOf(t); });
+    for (i = 0; i < balls.length; i++) {
+      var b = balls[i], t = b.t, sp = spC[t.id], n = Math.max(1, Math.ceil(sp * dt / 4)), h = dt / n, pierce = t.id === "pierce";
+      // Absicherung: Ein Ball, der 12 s keinen Stein getroffen hat, bekommt einen kleinen Richtungsstoß, damit er nicht ewig in einer Schleife fliegt
+      if (b.hits !== b.lh) { b.lh = b.hits; b.idle = 0; } else { b.idle = (b.idle || 0) + dt; if (b.idle > 12) { b.idle = 0; var ang = Math.atan2(b.vy, b.vx) + (Math.random() - .5) * 0.5; b.vx = Math.cos(ang); b.vy = Math.sin(ang); } }
+      for (var s = 0; s < n; s++) {
+        b.x += b.vx * sp * h; b.y += b.vy * sp * h; var wl = false;
+        if (b.x < 5) { b.x = 5; b.vx = Math.abs(b.vx); wl = true; } if (b.x > W - 5) { b.x = W - 5; b.vx = -Math.abs(b.vx); wl = true; }
+        if (b.y < 5) { b.y = 5; b.vy = Math.abs(b.vy); wl = true; } if (b.y > H - 5) { b.y = H - 5; b.vy = -Math.abs(b.vy); wl = true; }
+        if (wl) {
+          if (t.id === "sniper") aim(b);
+          else if (t.id === "sword") aimShield(b);
+          else if (t.id === "scatter" && balls.length + pel.length < 500) spawnMini(b, dmC.scatter * 0.4);
+        }
+        for (k = bricks.length - 1; k >= 0; k--) {
+          var r = bricks[k]; if (!r) continue;
+          if (b.y + 5 < r.y || b.y - 5 > r.y + r.h || b.x + 5 < r.x || b.x - 5 > r.x + r.w) { if (pierce) b.ov[k] = 0; continue; }
+          var nx = Math.max(r.x, Math.min(b.x, r.x + r.w)), ny = Math.max(r.y, Math.min(b.y, r.y + r.h)), dx = b.x - nx, dy = b.y - ny;
+          if (dx * dx + dy * dy > 25) continue;
+          if (!pierce) {
+            var ox = Math.min(b.x + 5 - r.x, r.x + r.w - (b.x - 5)), oy = Math.min(b.y + 5 - r.y, r.y + r.h - (b.y - 5));
+            if (ox < oy) { var sx = b.x < r.x + r.w / 2 ? -1 : 1; b.vx = sx * Math.abs(b.vx); b.x += sx * ox; } else { var sy = b.y < r.y + r.h / 2 ? -1 : 1; b.vy = sy * Math.abs(b.vy); b.y += sy * oy; }
+          } else { if (b.ov[k]) continue; b.ov[k] = 1; }
+          b.hits++;
+          var d = dmC[t.id]; if (M.crit > 0 && t.id !== "poison" && Math.random() < M.crit) d *= 1.5;
+          if (t.id === "cash") {                    // Cash-Ball: kein Schaden, Geld = Kraft × aktuelles Steinleben
+            if (!r.gem) { var cg = d * r.hp * M.bc * (r.cash ? M.cbb : 1); earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
+            break;
+          }
+          if (t.id === "prop") d *= r.type === "h" ? 25 : r.type === "b" ? 2 : 1;
+          var dealt = dmgBrick(r, d, t);
+          if (dealt > 0 || r.dead) onHit(b, r, d);
+          if (!pierce) break;
+        }
+      }
+    }
+    // Scatter-Mini-Bälle (ein Treffer, dann weg)
+    var ssp = spC.scatter || 150;
+    for (i = pel.length - 1; i >= 0; i--) {
+      var p = pel[i]; if (!p) continue; p.life -= dt; p.x += p.vx * ssp * dt; p.y += p.vy * ssp * dt;
+      if (p.x < 3 || p.x > W - 3) p.vx = -p.vx; if (p.y < 3 || p.y > H - 3) p.vy = -p.vy;
+      var hitB = null; for (k = 0; k < bricks.length; k++) { var q = bricks[k]; if (q.gem) continue; if (p.x > q.x - 3 && p.x < q.x + q.w + 3 && p.y > q.y - 3 && p.y < q.y + q.h + 3) { hitB = q; break; } }
+      if (hitB) { pel.splice(i, 1); dmgBrick(hitB, p.d, BM.scatter); } else if (p.life <= 0) pel.splice(i, 1);
+    }
+    // Assassin-Ball (Basistempo aus der Karte, zählt nicht zum Ballmaximum)
+    if (ass) {
+      var asp = Math.min(800, CM.ass.f(cl("ass")) * 42.5 * M.spd), an = Math.max(1, Math.ceil(asp * dt / 4)), ah = dt / an;
+      for (var u = 0; u < an; u++) {
+        ass.x += ass.vx * asp * ah; ass.y += ass.vy * asp * ah;
+        if (ass.x < 5 || ass.x > W - 5) { ass.vx = -ass.vx; ass.x = Math.max(5, Math.min(W - 5, ass.x)); }
+        if (ass.y < 5 || ass.y > H - 5) { ass.vy = -ass.vy; ass.y = Math.max(5, Math.min(H - 5, ass.y)); }
+        for (k = bricks.length - 1; k >= 0; k--) {
+          var r2 = bricks[k]; if (!r2) continue;
+          var nx2 = Math.max(r2.x, Math.min(ass.x, r2.x + r2.w)), ny2 = Math.max(r2.y, Math.min(ass.y, r2.y + r2.h));
+          if ((ass.x - nx2) * (ass.x - nx2) + (ass.y - ny2) * (ass.y - ny2) <= 25) {
+            var ox2 = Math.min(ass.x + 5 - r2.x, r2.x + r2.w - (ass.x - 5)), oy2 = Math.min(ass.y + 5 - r2.y, r2.y + r2.h - (ass.y - 5));
+            if (ox2 < oy2) ass.vx = (ass.x < r2.x + r2.w / 2 ? -1 : 1) * Math.abs(ass.vx); else ass.vy = (ass.y < r2.y + r2.h / 2 ? -1 : 1) * Math.abs(ass.vy);
+            dmgBrick(r2, r2.hp, { id: "ass" }); break;
+          }
+        }
+      }
+    }
+  }
+  function stepWorld(dt) {
+    fireT += dt;                                    // Wiki: Brand-Schaden läuft auf einem globalen 1-Sekunden-Takt
+    if (fireT >= 1) { fireT -= 1; bricks.slice().forEach(function (b) { if (b.fire > 0 && !b.dead) dmgBrick(b, b.fire, BM.fire); }); }
+    piT += dt;                                      // Passives Einkommen: Prozent vom Stage-Bonus pro Sekunde
+    if (piT >= 1) { piT -= 1; if (M.pi > 0) earn(M.pi * 0.7 * stageSum * M.sb); }
+    if (rageT > 0) rageT = Math.max(0, rageT - dt);
+    var li = cl("laser") ? CM.laser.f(cl("laser")) : 0;
+    if (li > 0) { laserT += dt; if (laserT >= li) { laserT = 0; fireLaser(); } }
+    stepBalls(dt);
+  }
+  function fireLaser() {
+    var best = 0; BALLS.forEach(function (t) { if (S.balls[t.id].own > 0 && t.id !== "cash") best = Math.max(best, dmgOf(t)); });
+    if (!(best > 0) || !bricks.length) return;
+    var x = 5 + Math.random() * (W - 10);
+    fx.push({ line: [x, 0, x, H], t: 0, c: "#ff5d3a" });
+    bricks.slice().forEach(function (b) { if (!b.dead && x >= b.x && x <= b.x + b.w) dmgBrick(b, best, BM.basic); });
+  }
+  function step(dt) { stepWorld(dt); }
+
+  // ════════ Zeichnen ════════
+  function draw() {
+    cx.clearRect(0, 0, W, H);
+    if (S.goldStage) { cx.fillStyle = "rgba(255,200,40,.08)"; cx.fillRect(0, 0, W, H); }
+    bricks.forEach(function (b) {
+      var f = Math.max(0, b.hp / b.max), hue = b.type === "h" ? 320 : b.type === "b" ? 210 : 140;
+      cx.fillStyle = b.gold ? "hsl(45,92%," + (34 + 20 * f) + "%)" : "hsl(" + hue + ",60%," + (30 + 22 * f) + "%)";
+      if (b.type === "h") { cx.beginPath(); cx.moveTo(b.x + 7, b.y); cx.lineTo(b.x + b.w - 7, b.y); cx.lineTo(b.x + b.w, b.y + b.h / 2); cx.lineTo(b.x + b.w - 7, b.y + b.h); cx.lineTo(b.x + 7, b.y + b.h); cx.lineTo(b.x, b.y + b.h / 2); cx.closePath(); cx.fill(); }
+      else cx.fillRect(b.x, b.y, b.w, b.h);
+      if (b.psn) { cx.fillStyle = "rgba(123,237,159,.3)"; cx.fillRect(b.x, b.y, b.w, b.h); }
+      if (b.fire > 0) { cx.fillStyle = "rgba(255,93,58,.3)"; cx.fillRect(b.x, b.y, b.w, b.h); }
+      if (b.cash) { cx.strokeStyle = "#ffd32a"; cx.lineWidth = 1.5; cx.strokeRect(b.x + .5, b.y + .5, b.w - 1, b.h - 1); }
+      if (b.bomb) { cx.fillStyle = "rgba(210,40,40,.55)"; cx.fillRect(b.x, b.y, b.w, b.h); }
+      if (b.gem) { cx.strokeStyle = "#5fe3ff"; cx.lineWidth = 1.5; cx.strokeRect(b.x + .5, b.y + .5, b.w - 1, b.h - 1); }
+      cx.fillStyle = "rgba(255,255,255,.93)"; cx.font = "600 9px Sora,system-ui,sans-serif"; cx.textAlign = "center";
+      cx.fillText((b.cash ? "$ " : b.bomb ? "● " : b.gem ? "◆ " : "") + fmt(b.hp), b.x + b.w / 2, b.y + b.h / 2 + 3.2);
+    });
+    pel.forEach(function (p) { cx.fillStyle = "#ff7ad9"; cx.beginPath(); cx.arc(p.x, p.y, 2.5, 0, TAU); cx.fill(); });
+    balls.forEach(function (b) { cx.fillStyle = b.t.col; cx.beginPath(); cx.arc(b.x, b.y, 5, 0, TAU); cx.fill(); });
+    if (ass) { cx.fillStyle = "#ff3355"; cx.beginPath(); cx.arc(ass.x, ass.y, 5, 0, TAU); cx.fill(); }
+    for (var i = fx.length - 1; i >= 0; i--) {
+      var f = fx[i]; f.t += f.ring ? .06 : .03; if (f.t >= 1) { fx.splice(i, 1); continue; }
+      cx.globalAlpha = 1 - f.t;
+      if (f.ring) { cx.strokeStyle = f.c; cx.lineWidth = 2; cx.beginPath(); cx.arc(f.x, f.y, f.r * (.4 + f.t * .8), 0, TAU); cx.stroke(); }
+      else if (f.line) { cx.strokeStyle = f.c; cx.lineWidth = 2; cx.beginPath(); cx.moveTo(f.line[0], f.line[1]); cx.lineTo(f.line[2], f.line[3]); cx.stroke(); }
+      else { cx.fillStyle = f.c; cx.font = "600 10px Sora,system-ui,sans-serif"; cx.textAlign = "center"; cx.fillText(f.s, f.x, f.y - f.t * 20); }
+      cx.globalAlpha = 1;
+    }
+  }
+
+  // ════════ UI ════════
+  var TABS = [["balls", "Bälle"], ["cards", "Karten"], ["perks", "Perks"], ["prestige", "Prestige"], ["stats", "Stats"]], tab = "balls";
+  var tabsEl = $("tabs"), panel = $("panel"), ballEls = {};
+  function renderTabs() {
+    tabsEl.innerHTML = "";
+    TABS.forEach(function (x) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = x[1]; b.setAttribute("aria-pressed", tab === x[0] ? "true" : "false");
+      var dot = (x[0] === "prestige" && S.wv >= 1e7) || (x[0] === "cards" && S.gems >= CARD_COST && Object.keys(S.cards).length === 0);
+      if (dot) { var d = document.createElement("i"); d.className = "dot"; b.appendChild(d); }
+      b.addEventListener("click", function () { tab = x[0]; renderTabs(); renderPanel(); }); tabsEl.appendChild(b);
+    });
+    if (S.pend) showPerkModal();
+  }
+  function btn(label, cost, fn, dis, cls) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "b" + (cls ? " " + cls : ""); b.innerHTML = "<div>" + label + "</div><span>" + cost + "</span>"; b.disabled = !!dis;
+    b.addEventListener("click", fn); return b;
+  }
+  function setBtn(b, label, cost, dis) { b.firstChild.textContent = label; b.lastChild.textContent = cost; b.disabled = !!dis; }
+  function card(html) { var c = document.createElement("div"); c.className = "card"; c.innerHTML = html; return c; }
+  function note(txt) { var s = document.createElement("small"); s.className = "mut"; s.textContent = txt; return s; }
+
+  function renderPanel() {
+    panel.innerHTML = ""; ballEls = {}; recalc();
+    if (tab === "balls") renderBalls();
+    else if (tab === "cards") renderCards();
+    else if (tab === "perks") renderPerks();
+    else if (tab === "prestige") renderPrestige();
+    else if (tab === "stats") renderStats();
+  }
+
+  // ── Bälle ──
+  function renderBalls() {
+    panel.appendChild(card('<div class="head"><b>Bälle</b><small id="bcount"></small></div>'));
+    S.order.forEach(function (id) {
+      var t = BM[id], st = S.balls[id];
+      var c = card('<div class="head"><b><i class="sw" style="background:' + t.col + '"></i>' + t.name + ' <small>Slot ' + st.slot + '</small></b><small class="st"></small></div><small>' + t.info + '</small>');
+      var row = document.createElement("div"); row.className = "btns";
+      var a = btn("Ball +1", "", function () {
+        if (S.cash >= cNew(t) && st.own < maxOwn(t) && totalBalls() < M.maxBalls) { S.cash -= cNew(t); st.own++; S.buyLog.push(id); S.c.bought++; addBall(t); checkAch(); }
+      });
+      var p = btn("Kraft", "", function () { if (S.cash >= cPow(t) && st.pow < powMax(t)) { S.cash -= cPow(t); st.pow++; S.c.pwBought++; } });
+      var s = btn("Tempo", "", function () { if (S.cash >= cSpd(t) && st.spd < SPD_MAX) { S.cash -= cSpd(t); st.spd++; S.c.spBought++; } });
+      row.append(a, p, s); c.appendChild(row);
+      var bp = btn("Ball-Prestige", "Kraft ×5 · Tempo −60 %", function () { if ((st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79)) { st.bp++; renderPanel(); } }, false, "pur");
+      bp.classList.add("wide"); c.appendChild(bp);
+      ballEls[id] = { a: a, p: p, s: s, bp: bp, st: c.querySelector(".st"), t: t };
+      panel.appendChild(c);
+    });
+    if (S.order.length < 12) {
+      var slot = S.order.length + 1, cost = UNLOCK[slot], av = BALLS.filter(function (t) { return t.tier <= Math.min(slot, 7) && S.order.indexOf(t.id) < 0; });
+      if (!S.offer || S.offer.slot !== slot) {      // Wiki/Store: pro Slot nur zwei zufällige Bälle zur Auswahl
+        var pool = av.slice(), ids = []; while (ids.length < 2 && pool.length) ids.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+        S.offer = { slot: slot, ids: ids };
+      }
+      var shown = S.offer.ids.map(function (i) { return BM[i]; }).filter(function (t) { return S.order.indexOf(t.id) < 0; });
+      var u = card('<div class="head"><b>Neuer Ball · Slot ' + slot + '</b><small>Zwei zufällige zur Auswahl · spätere Slots: höhere Kosten und Kraft</small></div>');
+      var g = document.createElement("div"); g.className = "btns2"; ballEls.unlock = [];
+      shown.forEach(function (t) {
+        var b = btn('<i class="sw" style="background:' + t.col + '"></i> ' + t.name, "$" + fmt(cost), function () {
+          if (S.cash < cost || totalBalls() >= M.maxBalls) return; S.cash -= cost; var st = S.balls[t.id]; st.own = 1; st.slot = slot; S.order.push(t.id); S.buyLog.push(t.id); S.offer = null; S.c.bought++; addBall(t); checkAch(); renderPanel();
+        });
+        ballEls.unlock.push({ b: b, cost: cost }); g.appendChild(b);
+      });
+      u.appendChild(g); panel.appendChild(u);
+    }
+    updBalls();
+  }
+  function updBalls() {
+    if (tab !== "balls") return;
+    var bc = $("bcount"); if (bc) bc.textContent = totalBalls() + " / " + M.maxBalls + " Bälle";
+    S.order.forEach(function (id) {
+      var e = ballEls[id]; if (!e) return; var t = e.t, st = S.balls[id];
+      e.st.textContent = "Kraft " + fmt(dmgOf(t)) + " · Tempo " + Math.round(speedOf(t));
+      var full = st.own >= maxOwn(t) || totalBalls() >= M.maxBalls;
+      setBtn(e.a, "Ball +1 (" + st.own + "/" + maxOwn(t) + ")", full ? "Max" : "$" + fmt(cNew(t)), full || S.cash < cNew(t));
+      var pm = st.pow >= powMax(t); setBtn(e.p, "Kraft Lv." + (st.pow + 1), pm ? "Max" : "$" + fmt(cPow(t)), pm || S.cash < cPow(t));
+      var sm = st.spd >= SPD_MAX; setBtn(e.s, "Tempo Lv." + (st.spd + 1), sm ? "Max" : "$" + fmt(cSpd(t)), sm || S.cash < cSpd(t));
+      var ok = (st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79);
+      e.bp.style.display = (st.bp < 2 && st.spd >= (st.bp === 0 ? 39 : 79)) ? "" : "none"; e.bp.disabled = !ok;
+    });
+    if (ballEls.unlock) ballEls.unlock.forEach(function (u) { u.b.disabled = S.cash < u.cost || totalBalls() >= M.maxBalls; });
+  }
+
+  // ── Karten ──
+  function buyCard() {
+    if (S.gems < CARD_COST) return;
+    var c = drawCard(); if (!c) { toast("Alle Karten sind auf Stufe 6."); return; }
+    S.gems -= CARD_COST; var e = S.cards[c.id] || (S.cards[c.id] = { n: 0 }), before = cardLvl(e); e.n++;
+    toast("Gezogen: " + c.name + (cardLvl(e) > before ? " – Stufe " + cardLvl(e) + "!" : ""));
+    recalc(); renderTabs(); renderPanel();
+  }
+  function renderCards() {
+    panel.appendChild(note("Eine Karte kostet " + CARD_COST + " 💎 und wird zufällig nach Seltenheit gezogen. 48 Exemplare = Stufe 6. Ausgerüstet: " + S.eq.length + " / " + S.slots + " Slots (max. " + MAX_SLOTS + "). Gem-Steine droppen 💎, sie lassen sich nur antippen."));
+    var top = document.createElement("div"); top.className = "btns2";
+    top.appendChild(btn("Karte kaufen", CARD_COST + " 💎", buyCard, S.gems < CARD_COST));
+    var nx = S.slots + 1;
+    top.appendChild(btn("Slot " + nx + " kaufen", nx <= MAX_SLOTS ? SLOTC[nx] + " 💎" : "Max", function () { if (nx <= MAX_SLOTS && S.gems >= SLOTC[nx]) { S.gems -= SLOTC[nx]; S.slots++; renderPanel(); } }, nx > MAX_SLOTS || S.gems < SLOTC[nx]));
+    panel.appendChild(top);
+    var g = document.createElement("div"); g.className = "grid2";
+    CARDS.forEach(function (cd) {
+      var e = S.cards[cd.id], lv = cardLvl(e), eq = S.eq.indexOf(cd.id) >= 0, c = document.createElement("div"); c.className = "card rar" + cd.rar + (e ? "" : " lock");
+      var nxt = lv < CT.length ? CT[lv] : CT[CT.length - 1], n = e ? e.n : 0;
+      c.innerHTML = "<b>" + cd.name + (lv ? " · Stufe " + lv : "") + "</b><small>" + RAR[cd.rar] + " · " + (lv ? cd.t(cd.f(lv)) : "Noch nicht freigeschaltet") + "</small><div class='bar'><i style='width:" + Math.min(100, n / nxt * 100) + "%'></i></div><small>" + n + " / " + nxt + " Karten</small>";
+      c.appendChild(btn(eq ? "Ablegen" : "Ausrüsten", "", function () {
+        if (eq) S.eq = S.eq.filter(function (x) { return x !== cd.id; }); else if (S.eq.length < S.slots) S.eq.push(cd.id); recalc(); renderPanel();
+      }, !e || (!eq && S.eq.length >= S.slots), eq ? "on" : ""));
+      if (cd.id === "spec" && e) {
+        var sel = document.createElement("select"); sel.style.cssText = "font:inherit;font-size:.76rem;padding:4px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg)";
+        BALLS.forEach(function (t) { var o = document.createElement("option"); o.value = t.id; o.textContent = t.name; if (S.specBall === t.id) o.selected = true; sel.appendChild(o); });
+        sel.addEventListener("change", function () { S.specBall = sel.value; });
+        c.appendChild(sel);
+      }
+      g.appendChild(c);
+    });
+    panel.appendChild(g);
+  }
+
+  // ── Perks ──
+  function renderPerks() {
+    var nx = S.perkN < MAX_PERKS ? perkReq(S.perkN) : null;
+    panel.appendChild(card("<div class='head'><b>Perks dieser Welt</b><small>" + S.perks.length + " / " + MAX_PERKS + "</small></div><small>" + (nx ? "Nächster Perk bei Level " + nx + " (aktuell " + S.level + ")" : "Alle Perks gewählt") + ". Perks gelten bis zum Prestige.</small>"));
+    PK.forEach(function (p) { var n = pc(p.id); panel.appendChild(card("<div class='head'><b>" + p.name + "</b><small>" + n + (p.max === Infinity ? "" : " / " + p.max) + "×</small></div><small>" + p.txt + "</small>")); });
+  }
+  function showPerkModal() {
+    if ($("perkOv") || !S.pend) return;
+    var ov = document.createElement("div"); ov.className = "ov"; ov.id = "perkOv";
+    var m = document.createElement("div"); m.className = "modal"; m.innerHTML = "<h2>Neuer Perk</h2><small>Wähle einen von drei. Perks gelten bis zum nächsten Prestige.</small>";
+    S.pend.forEach(function (id) {
+      var p = pkDef(id), b = btn("<b>" + p.name + "</b><br><small>" + p.txt + "</small>", "", function () {
+        S.perks.push(id); S.perkN++; S.pend = null; S.c.perksPicked++; ov.remove(); recalc();
+        while (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) S.pend = rollPerks();
+        save(); renderTabs(); if (tab === "perks") renderPanel();
+      });
+      b.classList.add("wide"); m.appendChild(b);
+    });
+    ov.appendChild(m); document.body.appendChild(ov);
+  }
+
+  // ── Prestige ──
+  function tokenBase(w) {
+    if (w < 1e7) return 0; var P = [[1e7, 10], [1.7e7, 11], [3.5e8, 20]], l = Math.log(w);
+    if (w >= 3.5e8) return Math.min(8673, Math.floor((l - 13) * (l - 13) / 3 + 5 + 0.2));
+    for (var i = 0; i < 2; i++) { var a = P[i], b = P[i + 1]; if (w < b[0]) { var f = (l - Math.log(a[0])) / (Math.log(b[0]) - Math.log(a[0])); return Math.floor(a[1] + f * (b[1] - a[1])); } }
+    return 10;
+  }
+  function tokenGain() { return Math.floor(tokenBase(S.wv) * M.prest); }
+  function renderPrestige() {
+    var gain = tokenGain(), c = card("<div class='head'><b>Prestige</b><small>" + S.pCount + "× · " + fmt(S.tokens) + " PT</small></div><small>Ab $10.00M Weltwert. Setzt Level, Geld, Bälle und Perks zurück. Du behältst Karten, Gems und Abzeichen. Aktueller Weltwert: $" + fmt(S.wv) + "</small>");
+    c.appendChild(btn(S.wv >= 1e7 ? "Jetzt Prestige" : "Ab $10.00M Weltwert", "+" + fmt(gain) + " PT", doPrestige, S.wv < 1e7)); panel.appendChild(c);
+    var bh = card("<div class='head'><b>Abzeichen</b><small>Prestige-Token (PT)</small></div>");
+    if (S.tier < TIERS.length) {
+      var tc = TIERS[S.tier], names = BDK.filter(function (k) { return BD[k].tier === S.tier + 1; }).map(function (k) { return BD[k].name; }).join(", ");
+      bh.appendChild(btn("Slot " + (S.tier + 1) + " freischalten: " + (names || "(kein Abzeichen eingebaut)"), fmt(tc) + " PT", function () {
+        if (S.tokens >= tc) { S.tokens -= tc; S.tier++; BDK.forEach(function (k) { if (BD[k].tier === S.tier) S.badges[k] = 1; }); recalc(); renderPanel(); }
+      }, S.tokens < tc));
+    }
+    panel.appendChild(bh);
+    BDK.filter(function (k) { return BD[k].tier <= S.tier; }).forEach(function (k) {
+      var d = BD[k], l = S.badges[k] || 1, cc = card("<div class='head'><b>" + d.name + " · " + l + "/" + d.max + "</b><small>" + d.txt(d.val(l)) + "</small></div>");
+      if (l < d.max) { var cost = d.costs[l - 1]; cc.appendChild(btn("Verbessern → " + d.txt(d.val(l + 1)), fmt(cost) + " PT", function () { if (S.tokens >= cost) { S.tokens -= cost; S.badges[k] = l + 1; recalc(); renderPanel(); } }, S.tokens < cost)); }
+      panel.appendChild(cc);
+    });
+  }
+  function doPrestige() {
+    var g = tokenGain(); if (S.wv < 1e7 || g <= 0) return;
+    var keep = { gems: S.gems, best: S.best, pCount: S.pCount + 1, tokens: S.tokens + g, cards: S.cards, eq: S.eq, slots: S.slots, badges: S.badges, tier: S.tier, c: S.c, ach: S.ach, wake: S.wake, gemPool: S.gemPool, gemProg: S.gemProg, specBall: S.specBall };
+    S = Object.assign(fresh(), keep); S.c.prest++; recalc(); rebuildBalls(); layout(); earnLog = []; lvlStart = Date.now(); checkAch(); save(); toast("Prestige! +" + fmt(g) + " PT"); renderTabs(); renderPanel();
+  }
+
+  // ── Stats ──
+  function renderStats() {
+    var st = card("<b>Statistik</b><table>" + [["Level", S.level], ["Bestes Level", S.best], ["Zerstörte Steine", fmt(S.c.broken)], ["Cash-Steine", fmt(S.c.cashBr)], ["Gem-Steine", fmt(S.c.gemBr)], ["Goldsteine", fmt(S.c.gold)], ["Übersprungene Level", fmt(S.c.skipped)], ["Verdientes Geld gesamt", "$" + fmt(S.c.tot)], ["Ø Level-Zeit", S.lvT ? S.lvT.toFixed(1) + " s" : "—"], ["Bälle", totalBalls() + " / " + M.maxBalls]].map(function (r) { return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</table>");
+    panel.appendChild(st);
+    var ac = card("<b>Erfolge</b>");
+    ACH.forEach(function (a) { var l = S.ach[a.id] || 0, nxt = a.th[Math.min(l, 9)], v = a.val(); ac.insertAdjacentHTML("beforeend", "<div><div class='head'><span>" + a.name + " · " + l + "/10</span><small>" + (l >= 10 ? "fertig" : fmt(v) + " / " + fmt(nxt) + " · " + (5 * (l + 1)) + " 💎") + "</small></div><div class='bar'><i style='width:" + (l >= 10 ? 100 : Math.min(100, v / nxt * 100)) + "%'></i></div></div>"); });
+    panel.appendChild(ac);
+    var o = card('<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wk"> Bildschirm anlassen</label>');
+    o.querySelector("#wk").checked = !!S.wake; o.querySelector("#wk").addEventListener("change", function () { S.wake = this.checked; wakeLock(); save(); });
+    var sv = btn("Jetzt speichern", "", function () { save(); toast("Gespeichert"); });
+    var rs = btn("Alles löschen", "", function () {
+      if (!rs._a) { rs._a = true; rs.firstChild.textContent = "Wirklich löschen?"; setTimeout(function () { rs._a = false; rs.firstChild.textContent = "Alles löschen"; }, 3000); return; }
+      try { localStorage.removeItem(KEY); } catch (e) {} S = fresh(); recalc(); rebuildBalls(); layout(); earnLog = []; renderTabs(); renderPanel();
+    });
+    var rr = document.createElement("div"); rr.className = "btns2"; rr.append(sv, rs); o.appendChild(rr); panel.appendChild(o);
+    panel.appendChild(note("Nach dem Wiki übernommen: Ball-Freischaltkosten, Steinleben (alle Level-Sprünge), Perks (Werte und alle 50 Level), Prestige-Abzeichen, alle 22 Karten mit Werten, Schwellen, Seltenheiten und Ziehchancen, Ballfähigkeiten und -grenzen, Offline-Verdienst, Gem-Pool. Aus Screenshots: Preise und Kraft von Basic und Splash, Level-Layouts. Noch geschätzt: Preise und Kraft bei höheren Stufen und anderen Bällen, Grundtempo, Prestige-Token, Laser-Verhalten, Slotpreise der Kartenslots 5 bis 15. Schild-Steine fehlen noch."));
+  }
+  function checkAch() {
+    ACH.forEach(function (a) { var l = S.ach[a.id] || 0; while (l < 10 && a.val() >= a.th[l]) { l++; S.gems += 5 * l; toast("Erfolg: " + a.name + " Stufe " + l + " (+" + (5 * l) + " 💎)"); } S.ach[a.id] = l; });
+  }
+  function wakeLock() { try { if (S.wake && navigator.wakeLock) navigator.wakeLock.request("screen").catch(function () {}); } catch (e) {} }
+  function hud() {
+    $("money").textContent = "$" + fmt(S.cash); $("rate").textContent = fmt(rate()); $("wv").textContent = fmt(S.wv);
+    $("lvl").textContent = S.level; $("gl").textContent = S.goldStage ? " ★ Gold" : ""; $("gems").textContent = S.gems; $("ptv").textContent = fmt(S.tokens);
+  }
+  cv.addEventListener("pointerdown", function (e) {
+    var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+    for (var i = 0; i < bricks.length; i++) { var b = bricks[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { dmgBrick(b, 1, TAP); break; } } // Wiki: Tipp-Schaden = 1
+  });
+
+  // ════════ Offline ════════
+  function away(sec) {
+    if (sec < 120 || S.rate <= 0) return;
+    sec = Math.min(sec, M.maxIdle * 60);
+    var g = 0.1 * S.rate * sec; earn(g);
+    var msg = "Willkommen zurück! Offline verdient: $" + fmt(g);
+    if (M.iskip > 0 && S.lvT > 0) {
+      var n = Math.min(1000, Math.floor(sec * M.iskip / S.lvT));
+      if (n > 0) { for (var i = 0; i < n; i++) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(); } layout(); msg += " · " + n + " Level übersprungen"; }
+    }
+    toast(msg);
+  }
+  function loop(ts) {
+    var nowW = Date.now(); if (nowW - wall > 5000) away((nowW - wall) / 1000); wall = nowW;
+    var dt = Math.min(.05, (ts - lastT) / 1000 || 0); lastT = ts;
+    step(dt); draw(); hud(); uiT += dt; saveT += dt;
+    if (uiT > .25) { uiT = 0; recalc(); updBalls(); if (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) { S.pend = rollPerks(); renderTabs(); } }
+    if (saveT > 8) { saveT = 0; checkAch(); save(); }
+    requestAnimationFrame(loop);
+  }
+
+  load(); recalc();
+  var off0 = (Date.now() - (S.seen || Date.now())) / 1000;
+  rebuildBalls(); layout(); away(off0); checkAch(); renderTabs(); renderPanel(); wakeLock();
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) wakeLock(); });
+  window.__ib = { S: function () { return S; }, M: function () { return M; }, BALLS: BALLS, BM: BM, UNLOCK: UNLOCK, bricks: function () { return bricks; }, step: step, recalc: recalc, layout: layout, rebuild: rebuildBalls,
+    cNew: cNew, cPow: cPow, cSpd: cSpd, addBall: addBall, powMax: powMax, maxOwn: maxOwn, totalBalls: totalBalls, SPD_MAX: SPD_MAX, health: health, fmt: fmt, tokenGain: tokenGain, doPrestige: doPrestige, save: save, away: away, TOK: tokenBase, BD: BD, TIERS: TIERS, CARDS: CARDS, SLOTC: SLOTC, buyCard: buyCard,
+    tab: function (x) { tab = x; renderTabs(); renderPanel(); } };
+  requestAnimationFrame(loop);
+})();
+<\/script>
+</body>
+</html>
+</script>
+<script id="idleMode">
+// ═══════════════════════════════════════════════
+//  IDLE BRICK BREAKER (Modus)
+//  Gesperrt bis Mittwoch 14.10.2026 00:00 Uhr deutscher Zeit (Mod darf vorher testen, ohne dass etwas gespeichert wird).
+//  Leaderboard: idleBoard/{uid} = { name, total, best, ts }  (siehe Database Rules in der Antwort)
+// ═══════════════════════════════════════════════
+const IDLE_UNLOCK_AT = Date.UTC(2026, 9, 13, 22, 0, 0);   // Mi 14.10.2026 00:00 Europe/Berlin (MESZ = UTC+2)
+function idleNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
+function idleUnlocked() { return idleNow() >= IDLE_UNLOCK_AT; }
+function idleCanPlay() { return idleUnlocked() || _modIsAdminSafe(); }
+function idleLeftText() {
+  const ms = Math.max(0, IDLE_UNLOCK_AT - idleNow()), d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000);
+  return (d ? d + "d " : "") + h + "h " + m + "m";
+}
+function updIdleBtn() {
+  try { if (fbReady) ensureSrvOffset(); } catch (e) {}
+  const b = document.getElementById("idleBtn"); if (!b) return;
+  b.textContent = idleUnlocked() ? "🧱 Idle Brick Breaker" : (_modIsAdminSafe() ? "🧱 Idle Brick Breaker 🛡 (test, unlocks in " + idleLeftText() + ")" : "🔒 Idle Brick Breaker (opens in " + idleLeftText() + ")");
+  b.style.opacity = idleCanPlay() ? "" : "0.6";
+}
+setInterval(updIdleBtn, 15000); setTimeout(updIdleBtn, 500); setTimeout(updIdleBtn, 3000);
+
+let _idleLast = 0, _idleAt = 0;
+window.idleReport = function (total, best, force) {
+  try {
+    if (!idleUnlocked() || !fbReady || !myUid || !onlineAccount || window.__dobBanned || !window.__idleCfg || !window.__idleCfg.persist) return;
+    total = Number(total); if (!isFinite(total) || total <= 0 || total <= _idleLast) return;
+    const now = Date.now(); if (!force && now - _idleAt < 60000) return;
+    _idleAt = now; _idleLast = total;
+    RPC.setIdleBoard(onlineAccount.name, total, best).catch(e => { _idleLast = 0; console.warn("idle board write failed", e && (e.code || e.message)); });
+  } catch (e) {}
+};
+
+async function openIdle() {
+  try { if (fbReady) ensureSrvOffset(); } catch (e) {}
+  if (!idleCanPlay()) { try { leagueToast("🔒 Idle Brick Breaker opens in " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
+  if (document.getElementById("idleOverlay")) return;
+  const persist = idleUnlocked();
+  window.__idleCfg = { persist };
+  if (persist && fbReady && myUid) { try { const o = await RPC.get("idleBoard/" + myUid); _idleLast = Math.max(_idleLast, Number(o && o.total) || 0); } catch (e) {} }
+  const src = document.getElementById("idleSrc").textContent.replace(/<\\\/script>/g, "<" + "/script>");
+  const ov = document.createElement("div"); ov.id = "idleOverlay";
+  ov.style.cssText = "position:fixed;inset:0;z-index:8000;background:#0b0f15;display:flex;flex-direction:column;";
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 10px;background:#0b0f15;border-bottom:1px solid #252e3d;color:#e8edf5;font:600 13px var(--font-display),sans-serif;flex:none;";
+  const home = document.createElement("button"); home.textContent = "← Menu"; home.style.cssText = "margin:0;padding:5px 12px;font-size:13px;";
+  const info = document.createElement("span"); info.style.cssText = "opacity:.75;font-size:12px;";
+  info.textContent = persist ? (onlineAccount ? "💾 Progress saved · counts for the 💰 Idle leaderboard" : "💾 Progress saved on this device · log in to join the leaderboard") : "🛡 Mod test – nothing is saved";
+  bar.append(home, info);
+  const fr = document.createElement("iframe"); fr.style.cssText = "flex:1;width:100%;border:0;background:#0b0f15;"; fr.setAttribute("title", "Idle Brick Breaker");
+  fr.srcdoc = src;
+  ov.append(bar, fr); document.body.appendChild(ov);
+  window.__idleOpen = true; try { syncPresence(true); } catch (e) {}
+  home.onclick = () => closeIdle();
+}
+function closeIdle() {
+  const ov = document.getElementById("idleOverlay"); if (!ov) return;
+  try {
+    const w = ov.querySelector("iframe").contentWindow;
+    if (window.__idleCfg && window.__idleCfg.persist && w.__ib) { w.__ib.save(); const S = w.__ib.S(); window.idleReport(S.c.tot, S.best, true); }
+  } catch (e) {}
+  ov.remove(); window.__idleOpen = false; window.__idleCfg = null;
+  try { syncPresence(true); } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) { try { const f = document.querySelector("#idleOverlay iframe"); if (f && window.__idleCfg && window.__idleCfg.persist) f.contentWindow.__ib.save(); } catch (e) {} } });
+
+const _IDLE_SUF = ["", "K", "M", "B", "T", "q", "Q", "s", "S", "O", "N"];
+function idleFmt(v) {
+  v = Number(v) || 0;
+  if (v < 1000) return String(Math.floor(v));
+  let i = 0; while (v >= 1000) { v /= 1000; i++; }
+  let s = v.toFixed(2); if (s === "1000.00") { s = "1.00"; i++; }
+  const suf = i < _IDLE_SUF.length ? _IDLE_SUF[i] : String.fromCharCode(97 + Math.floor((i - _IDLE_SUF.length) / 26)) + String.fromCharCode(97 + (i - _IDLE_SUF.length) % 26);
+  return s + suf;
+}
+async function loadIdleBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>💰 Total money</span><span></span></div>';
+  if (!fbReady) { t.innerHTML += '<div class="lb-row"><span>Firebase not connected</span></div>'; return; }
+  try {
+    const [ib, pl] = await Promise.all([dbGet("idleBoard"), dbGet("players")]);
+    const rows = Object.entries(ib || {})
+      .filter(([uid]) => !pl || pl[uid])
+      .map(([uid, r]) => ({ uid, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
+      .filter(r => r.total > 0)
+      .sort((a, b) => b.total - a.total || a.ts - b.ts)
+      .slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">' + (idleUnlocked() ? "No Idle records yet" : "🔒 Idle Brick Breaker opens in " + idleLeftText()) + '</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>$${idleFmt(r.total)}</span><span></span></div>`).join("");
+  } catch (e) { t.innerHTML += '<div class="lb-row"><span>Error while loading</span></div>'; }
+}
+</script>
 <script>
 // ═══════════════════════════════════════════════
 //  SPRACHE / LANGUAGE  (English = Originaltexte, Deutsch = Übersetzung)
