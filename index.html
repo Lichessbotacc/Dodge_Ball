@@ -241,6 +241,8 @@ async function dobRegisterWithPassword(username, password) {
   if (!_fbReady) throw new Error("Firebase not ready.");
   const email = usernameToEmail(username);
   const cred = await createUserWithEmailAndPassword(_auth, email, password);
+  // Account-Alter merken (Regeln: Chat erst nach 2 Stunden). Darf den Registrierungsvorgang nie abbrechen.
+  try { await cred.user.getIdToken(true); await set(ref(_db, "accountAge/" + cred.user.uid), serverTimestamp()); } catch (e) { console.warn("accountAge", e); }
   return cred.user.uid;
 }
 
@@ -3008,7 +3010,7 @@ async function sendChat() {
   lastChatText = clean; chatSentTimes.push(now);
   lastChatSent = now;
   inp.value = "";
-  try { await RPC.sendChat(onlineAccount.name, clean); } catch(e) { console.warn("chat failed", e); }
+  try { await RPC.sendChat(onlineAccount.name, clean); } catch(e) { console.warn("chat failed", e); if (/permission/i.test(String(e && (e.code || e.message || e)))) { inp.placeholder = "New accounts can chat after 2 hours"; } }
 }
 document.getElementById("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
 
