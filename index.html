@@ -3930,11 +3930,11 @@ async function modDailyWinsDialog(day) {
       won: !!(wins && wins[u] && wins[u][day])
     })).filter(r => r.time > 0).sort(_tcmp);
     const auto = rows.find(r => r.exists && (r.ci === null || r.ci === eff));
-    const wonRows = Object.entries(wins || {}).filter(([u, d]) => d && d[day]).map(([u]) => (pl && pl[u] && pl[u].name) || u);
+    const wonRows = Object.entries(wins || {}).filter(([u, d]) => d && d[day]).map(([u]) => ({ u, n: (pl && pl[u] && pl[u].name) || u }));
     const modeLbl = (ci) => ci === null ? "–" : (DAILY_CHALLENGES[ci] ? DAILY_CHALLENGES[ci].icon : "?");
     let h = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b style="font-size:16px;">👑 Daily wins (Mod)</b><button style="margin:0;padding:4px 10px;font-size:13px;" onclick="document.getElementById(\'modDwOverlay\').remove()">✕</button></div>'
       + '<div style="margin-bottom:8px;font-size:13px;">Day: <input type="date" id="modDwDay" value="' + day + '" style="font-size:13px;padding:3px;" onchange="modDailyWinsDialog(this.value)"></div>'
-      + '<div style="font-size:12px;opacity:.75;margin-bottom:8px;">Credited for this day: ' + (wonRows.length ? wonRows.map(n => escapeHtml(dn(n))).join(", ") : "nobody") + (auto ? ' · Auto would pick: <b>' + escapeHtml(dn(auto.name)) + '</b>' : '') + '</div>';
+      + '<div style="font-size:12px;opacity:.75;margin-bottom:8px;">Credited for this day: ' + (wonRows.length ? wonRows.map(w => escapeHtml(dn(w.n)) + ' <button style="margin:0 4px 0 2px;padding:1px 6px;font-size:11px;border-color:#ff6666;" onclick="modDwSet(\'' + escapeHtml(w.u) + '\',\'' + day + '\',false)">✖</button>').join(" ") : "nobody") + (auto ? ' · Auto would pick: <b>' + escapeHtml(dn(auto.name)) + '</b>' : '') + '</div>';
     h += '<div style="margin:10px 0;padding:8px;border:1px solid rgba(255,215,0,.35);border-radius:8px;"><b style="font-size:13px;">➕ Bonus wins (no date)</b>'
       + '<div style="font-size:11px;opacity:.7;margin:2px 0 6px;">Counted in Daily wins, independent of any day.</div>'
       + '<input id="modBwQ" placeholder="Search player… (empty = show players with bonus)" oninput="modBwList()" style="width:100%;box-sizing:border-box;font-size:13px;padding:5px;"><div id="modBwList" style="margin-top:6px;"></div></div>'
@@ -3964,7 +3964,9 @@ function modBwList() {
       + '<button style="margin:0;padding:3px 9px;font-size:13px;" onclick="modBwSet(\'' + id + '\',' + Math.max(0, bn - 1) + ')">−1</button>'
       + '<button style="margin:0;padding:3px 9px;font-size:13px;border-color:#00ff88;" onclick="modBwSet(\'' + id + '\',' + (bn + 1) + ')">+1</button>'
       + '<input id="modBwN_' + id + '" type="number" min="0" max="10000" value="' + bn + '" style="width:60px;font-size:13px;padding:3px;">'
-      + '<button style="margin:0;padding:3px 9px;font-size:13px;" onclick="modBwSet(\'' + id + '\',document.getElementById(\'modBwN_' + id + '\').value)">Set</button></div>';
+      + '<button style="margin:0;padding:3px 9px;font-size:13px;" onclick="modBwSet(\'' + id + '\',document.getElementById(\'modBwN_' + id + '\').value)">Set</button>'
+      + (base ? '<div style="width:100%;font-size:11px;opacity:.9;">Win days: ' + Object.keys(d.wins[u]).sort().map(dy => dy + ' <button style="margin:0 6px 0 1px;padding:0 5px;font-size:11px;border-color:#ff6666;" onclick="modDwSet(\'' + id + '\',\'' + dy + '\',false)">✖</button>').join("") + '</div>' : '')
+      + '</div>';
   }).join("");
 }
 async function modBwSet(uid, n) {
