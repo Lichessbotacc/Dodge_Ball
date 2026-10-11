@@ -12320,6 +12320,35 @@ async function leagueAdminResolveAll() {
   return applied;
 }
 setTimeout(() => { leagueAdminResolveAll(); setInterval(leagueAdminResolveAll, 15 * 60000); }, 25000);
+// Korrektur zur Silber-Aktion: Wer in der Woche LEAGUE_SILVER_BOOST_WEEK in Silber Platz 1-5 war, aber (z.B. durch einen noch alten Client)
+// nicht aufgestiegen ist, wird nachtraeglich auf Gold gesetzt. Idempotent: fasst nur Spieler an, die noch in Silber stehen und deren letztes Ergebnis nicht "up" war.
+async function leagueAdminFixSilverBoost() {
+  if (!_modIsAdmin() || !_modRPC()) return 0;
+  if (leagueWeekId() <= LEAGUE_SILVER_BOOST_WEEK) return 0;
+  let fixed = 0;
+  try {
+    const R = _modRPC(), week = LEAGUE_SILVER_BOOST_WEEK;
+    const [groups, players] = await Promise.all([R.get("weeklyLeague/" + week + "/1"), R.get("players")]);
+    const up = {};
+    for (const [gid, members] of Object.entries(groups || {})) {
+      const list = leagueSortMembers(Object.values(members || {})).filter(m => (m.wins || 0) > 0), size = list.length;
+      list.slice(0, 5).forEach((m, idx) => {
+        const p = players && players[m.uid]; if (!p) return;
+        const lr = p.leagueLastResult;
+        if ((Number(p.leagueTier) || 0) !== 1 || p.leagueWeek) return;            // schon aufgestiegen oder bereits in neuer Gruppe
+        if (!lr || String(lr.week) !== week || lr.outcome === "up") return;
+        const b = "players/" + m.uid + "/";
+        up[b + "leagueTier"] = 2;
+        up[b + "leagueBest"] = Math.max(p.leagueBest || 0, 2);
+        up[b + "leagueLastResult"] = { week, rank: idx + 1, size, wins: m.wins || 0, outcome: "up", from: 1, to: 2, group: gid };
+        fixed++;
+      });
+    }
+    if (fixed) { await R.modApplyLeague(up); try { leagueToast("🥇 " + fixed + " Silver promotion(s) corrected", "#00ff88"); } catch (e) {} }
+  } catch (e) { console.warn("silver boost fix failed", e); fixed = 0; }
+  return fixed;
+}
+setTimeout(() => { leagueAdminFixSilverBoost(); }, 45000);
 let _dwAdminBusy = false;
 async function dailyAdminClaimAll() {
   if (!_modIsAdmin() || !_modRPC() || _dwAdminBusy) return;
