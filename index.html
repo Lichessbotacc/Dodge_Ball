@@ -10443,7 +10443,9 @@ function idleLeftText() {
 function updIdleBtn() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   const b = document.getElementById("idleBtn"); if (!b) return;
-  b.textContent = idleUnlocked() ? "🧱 Idle Brick Breaker" : (_modIsAdminSafe() ? "🧱 Idle Brick Breaker 🛡 (test, unlocks in " + idleLeftText() + ")" : "🔒 Idle Brick Breaker (opens in " + idleLeftText() + ")");
+  const sub = idleUnlocked() ? "" : (_modIsAdminSafe() ? "🛡 Test · " : "🔒 ") + idleLeftText();
+  const key = "🧱 Idle Brick Breaker|" + sub;
+  if (b.dataset.k !== key) { b.dataset.k = key; b.textContent = "🧱 Idle Brick Breaker"; if (sub) { const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = sub; b.appendChild(sm); } }
   b.style.opacity = idleCanPlay() ? "" : "0.6";
 }
 setInterval(updIdleBtn, 15000); setTimeout(updIdleBtn, 500); setTimeout(updIdleBtn, 3000);
