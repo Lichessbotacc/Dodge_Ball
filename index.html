@@ -909,6 +909,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="openSettings()">⚙️ Settings</button>
           <button onclick="inviteFriends()">🔗 Invite friends</button>
           <div id="socialBarMain">
+            <a class="socialLink patronLink" href="#" onclick="openPatronInfo();return false;" title="Support the game &amp; get a glowing ball" aria-label="Patron"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">💎</span><span>Patron</span></a>
             <a id="linkWhatsAppMain" class="socialLink" href="https://chat.whatsapp.com/HA0w5ZkjAt9I5xlHOcFLLh?mode=gi_t" target="_blank" rel="noopener noreferrer" title="Join our WhatsApp group" aria-label="WhatsApp">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#25D366"/>
@@ -939,6 +940,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
           <button onclick="showMenuPage('menuMain')">← Back</button>
           <div id="socialBar">
+            <a class="socialLink patronLink" href="#" onclick="openPatronInfo();return false;" title="Support the game &amp; get a glowing ball" aria-label="Patron"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">💎</span><span>Patron</span></a>
             <a id="linkWhatsApp" class="socialLink" href="https://chat.whatsapp.com/HA0w5ZkjAt9I5xlHOcFLLh?mode=gi_t" target="_blank" rel="noopener noreferrer" title="Join our WhatsApp group" aria-label="WhatsApp">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#25D366"/>
@@ -1908,6 +1910,14 @@ async function rpcModSetBonusWins(uid, n) {
   if (!Number.isInteger(n) || n < 0 || n > 10000) throw new Error("Bad number (0-10000).");
   return set(ref(db, "dailyBonusWins/" + uid), n > 0 ? n : null);
 }
+// Admin: Patron-Stufe vergeben/entfernen: patrons/{uid} = 1..4 (Bronze/Silver/Gold/Diamond); alter Wert true = Bronze
+async function rpcModSetPatron(uid, on) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  const tier = on === true ? 1 : Number(on);
+  if (on && !(Number.isInteger(tier) && tier >= 1 && tier <= 4)) throw new Error("Bad tier (1-4).");
+  return set(ref(db, "patrons/" + uid), on ? tier : null);
+}
 async function rpcModApplyDailyWins(updates) {
   requireAdmin();
   const keys = Object.keys(updates || {});
@@ -2024,7 +2034,7 @@ async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || "")
 window._dobRPC = {
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -2643,7 +2653,140 @@ function nameIsBlocked(n) {
 let chatAll = {};                 // alle bisher gesehenen Nachrichten (Push-Key -> Nachricht)
 let chatLoadingOlder = false, chatNoMoreOlder = false;
 const CHAT_DEV_NAME = "DarkOnCrack";   // bekommt das [DEV]-Label überall
-function dn(name) { return name === CHAT_DEV_NAME ? "[DEV] " + name : name; }
+// ═══ PATRON-FLUEGEL ═══
+const PAYPAL_URL = "https://www.paypal.com/donate?business=DarkOnTeams%40gmail.com&currency_code=EUR&item_name=DarkOnBalls%20Patron";   // PayPal-Mail-Spendenlink (alternativ: https://www.paypal.me/NAME)
+const PATRON_ICON = "💎";
+const PATRON_TIERS = [null,
+  { id: 1, name: "Bronze",  icon: "🔶", eur: 1,  color: "#e8a366" },
+  { id: 2, name: "Silver",  icon: "💠", eur: 3,  color: "#dfe6ee" },
+  { id: 3, name: "Gold",    icon: "👑", eur: 5,  color: "#ffd24a" },
+  { id: 4, name: "Diamond", icon: "💎", eur: 10, color: "#5ee7ff" }
+];
+let _PATRON_NAMES = new Map(), _patronP = null, _patronAt = 0;   // name(lowercase) -> Stufe 1..4
+function patronTierOfName(n) { return n ? (_PATRON_NAMES.get(String(n).toLowerCase()) || 0) : 0; }
+function patronTier(p) {
+  let n = p && p.name;
+  try { if (isLocalPlayer(p) && onlineAccount) n = onlineAccount.name; } catch (e) {}
+  return patronTierOfName(n);
+}
+function isPatronPlayer(p) { return patronTier(p) > 0; }
+function dn(name) {
+  const base = name === CHAT_DEV_NAME ? "[DEV] " + name : name;
+  const t = patronTierOfName(name);
+  return t ? PATRON_TIERS[t].icon + " " + base : base;
+}
+// patrons/{uid}=Stufe  ->  Map Name->Stufe. Gecached 5 min, nie blockierend/werfend. Der Admin/Mod ist immer Diamond.
+function _patronLoad(force) {
+  if (!force && _patronP && Date.now() - _patronAt < 300000) return _patronP;
+  _patronAt = Date.now();
+  _patronP = (async () => {
+    try {
+      if (!(await _waitFbReady(10000))) { _patronAt = 0; return; }
+      const [pt, pl] = await Promise.all([RPC.get("patrons").catch(() => null), dbGet("players").catch(() => null)]);
+      const map = new Map();
+      Object.keys(pt || {}).forEach(u => {
+        const n = pl && pl[u] && pl[u].name; if (!n) return;
+        const v = pt[u], t = v === true ? 1 : Math.max(1, Math.min(4, parseInt(v, 10) || 1));
+        map.set(String(n).toLowerCase(), t);
+      });
+      try { const an = pl && pl[MOD_ADMIN_UID] && pl[MOD_ADMIN_UID].name; if (an) map.set(String(an).toLowerCase(), 4); } catch (e) {}
+      _PATRON_NAMES = map;
+    } catch (e) { _patronAt = 0; }
+  })();
+  return _patronP;
+}
+window.addEventListener("dobAuthReady", () => { _patronLoad(true); });
+// Kleine Live-Vorschau der Patron-Ball-Effekte im Info-Popup
+function _patronPreviewStart() {
+  const cv = document.getElementById("patronPrev"); if (!cv) return;
+  const x = cv.getContext("2d"), R = 20, items = [{ px: 52, t: 1 }, { px: 157, t: 2 }, { px: 262, t: 3 }, { px: 367, t: 4 }];
+  (function f() {
+    if (!document.body.contains(cv)) return;
+    const T = Date.now(); x.clearRect(0, 0, 420, 110);
+    for (const o of items) {
+      const t = o.t, c = PATRON_TIERS[t], y = 45, px = o.px;
+      x.beginPath(); x.arc(px, y, R, 0, 7); x.fillStyle = c.color;
+      x.shadowColor = t === 4 ? "#2fd8ff" : c.color; x.shadowBlur = [0, 12, 16, 20, 28][t] + 5 * Math.sin(T / 250);
+      x.fill(); x.fill(); x.shadowBlur = 0; x.shadowColor = "transparent";
+      x.save(); x.lineWidth = 2;
+      if (t === 1) { x.fillStyle = "#fff"; for (let i = 0; i < 3; i++) { const a = T / 500 + i * 2.1, s2 = 2 + Math.sin(T / 200 + i); x.fillRect(px + Math.cos(a) * (R + 8) - s2 / 2, y + Math.sin(a) * (R + 8) - s2 / 2, s2 * 1.5, s2 * 1.5); } }
+      else if (t === 2) { x.fillStyle = "#e6edf5"; for (let i = 0; i < 4; i++) { const k = Math.random(); x.globalAlpha = 1 - k; x.beginPath(); x.arc(px + (Math.random() - .5) * R * 1.4, y + R * .5 - k * R * 2.2, 3 * (1 - k) + 1, 0, 7); x.fill(); } }
+      else {
+        x.strokeStyle = t === 4 ? "#bff7ff" : "#fff6c0"; const a0 = (t === 4 ? -T : T) / 400;
+        x.beginPath(); x.arc(px, y, R + 8, a0, a0 + 4.2); x.stroke();
+        if (t === 3) { x.fillStyle = "#ffe27a"; if (Math.random() < .5) x.fillRect(px + (Math.random() - .5) * R * 1.6, y - Math.random() * R * 1.8, 3, 3); }
+        else {
+          x.strokeStyle = "#e8fdff"; x.lineWidth = 1.6; x.shadowColor = "#2fd8ff"; x.shadowBlur = 10;
+          for (let n = 0; n < 2; n++) if (Math.random() < .45) {
+            const a = Math.random() * 6.283; let qx = px + Math.cos(a) * R, qy = y + Math.sin(a) * R; x.beginPath(); x.moveTo(qx, qy);
+            for (let i = 0; i < 5; i++) { qx += Math.cos(a) * R * .35 + (Math.random() - .5) * R * .4; qy += Math.sin(a) * R * .35 + (Math.random() - .5) * R * .4; x.lineTo(qx, qy); }
+            x.stroke();
+          }
+        }
+      }
+      x.restore();
+      x.fillStyle = "#fff"; x.font = "12px Arial"; x.textAlign = "center"; x.fillText(c.icon + " " + c.name, px, 98);
+    }
+    requestAnimationFrame(f);
+  })();
+}
+function openPatronInfo() {
+  let ov = document.getElementById("patronOverlay"); if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "patronOverlay";
+  ov.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;";
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div style="background:#14161e;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:18px;width:min(460px,100%);max-height:90vh;overflow-y:auto;color:#fff;font-family:var(--font-body);text-align:left;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><b style="font-size:18px;">' + PATRON_ICON + ' Become a Patron</b><button style="margin:0;padding:4px 10px;font-size:13px;" onclick="document.getElementById(\'patronOverlay\').remove()">✕</button></div>'
+    + '<p style="font-size:14px;line-height:1.5;">DarkOnBalls is made by one person. Support it <b>monthly</b> \u2013 from just <b>1 \u20ac</b> \u2013 and get a special logo next to your name and a glowing ball in every match.</p>'
+    + '<canvas id="patronPrev" width="420" height="110" style="width:100%;max-width:420px;display:block;margin:6px auto;"></canvas>'
+    + PATRON_TIERS.slice(1).map(t => '<div style="border:1px solid ' + t.color + ';border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px;display:flex;justify-content:space-between;"><span>' + t.icon + ' ' + t.name + '</span><b>' + t.eur + ' \u20ac / month</b></div>').join("")
+    + '<p style="font-size:13px;opacity:.8;line-height:1.5;">Cosmetic only \u2013 no advantages in the game.</p>'
+    + '<ol style="font-size:13px;line-height:1.6;padding-left:20px;"><li>Support via PayPal (monthly).</li><li>Write your <b>in-game username</b> in the PayPal note.</li><li>Your tier is added manually, usually within a day.</li></ol>'
+    + '<a href="' + PAYPAL_URL + '" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;padding:10px;border-radius:8px;background:#ffc439;color:#003087;text-decoration:none;font-size:15px;font-weight:bold;">'
+    + '<svg width="22" height="26" viewBox="0 0 24 28" xmlns="http://www.w3.org/2000/svg"><path fill="#003087" d="M7.1 27.2l.5-3.2H4.2L6.7 4.6C6.8 4 7.3 3.6 7.9 3.6h7.6c3.4 0 5.7 1.8 5.2 5.3-.6 4.3-3.4 6.2-7.4 6.2h-2.1c-.5 0-.9.4-1 .9l-1.1 7.2z"/><path fill="#009cde" d="M20.8 8.5c-.6 4.3-3.4 6.2-7.4 6.2h-2.1c-.5 0-.9.4-1 .9l-1.1 7.2-.4 2.7h3.5c.5 0 .9-.3 1-.8l.9-5.6c.1-.5.5-.8 1-.8h.6c3.6 0 6.4-1.6 7.2-5.700.3-1.500.1-2.700-.7-3.600z"/></svg>'
+    + '<span>Support monthly with PayPal</span></a>'
+    + '</div>';
+  document.body.appendChild(ov);
+  _patronPreviewStart();
+}
+async function modPatronDialog() {
+  if (!_modIsAdminSafe()) return;
+  let ov = document.getElementById("modPatronOverlay"); if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "modPatronOverlay";
+  ov.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;";
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div style="background:#14161e;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:16px;width:min(520px,100%);max-height:90vh;overflow-y:auto;color:#fff;font-family:var(--font-body);text-align:left;">Loading…</div>';
+  document.body.appendChild(ov);
+  const box = ov.firstChild;
+  try {
+    const R = _modRPC();
+    const [pt, pl] = await Promise.all([R.get("patrons"), R.get("players")]);
+    window._modPt = { pt: pt || {}, pl: pl || {} };
+    box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b style="font-size:16px;">' + PATRON_ICON + ' Patrons (Mod)</b><button style="margin:0;padding:4px 10px;font-size:13px;" onclick="document.getElementById(\'modPatronOverlay\').remove()">✕</button></div>'
+      + '<input id="modPtQ" placeholder="Search player… (empty = current patrons)" oninput="modPatronList()" style="width:100%;box-sizing:border-box;font-size:13px;padding:5px;"><div id="modPtList" style="margin-top:8px;"></div>';
+    modPatronList();
+  } catch (e) { box.innerHTML = '<div style="padding:12px;">Error while loading: ' + escapeHtml(String(e && e.message || e)) + '</div>'; }
+}
+function modPatronList() {
+  const d = window._modPt, el = document.getElementById("modPtList"); if (!d || !el) return;
+  const q = String((document.getElementById("modPtQ") || {}).value || "").trim().toLowerCase();
+  const list = Object.entries(d.pl).filter(([u, p]) => p && p.name && (q ? String(p.name).toLowerCase().indexOf(q) !== -1 : d.pt[u]))
+    .sort((a, b) => String(a[1].name).localeCompare(String(b[1].name))).slice(0, 12);
+  if (!list.length) { el.innerHTML = '<div style="font-size:12px;opacity:.6;">' + (q ? "No player found." : "No patrons yet. Type a name to add one.") + '</div>'; return; }
+  el.innerHTML = list.map(([u, p]) => {
+    const on = !!d.pt[u], cur = on ? (d.pt[u] === true ? 1 : Math.max(1, Math.min(4, parseInt(d.pt[u], 10) || 1))) : 0, id = escapeHtml(u);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13px;"><span style="flex:1;">' + (on ? PATRON_TIERS[cur].icon + ' ' : '') + escapeHtml(p.name) + (on ? ' <small style="opacity:.7">(' + PATRON_TIERS[cur].name + ')</small>' : '') + '</span>'
+      + PATRON_TIERS.slice(1).map(t => '<button style="margin:0;padding:4px 8px;font-size:12px;' + (cur === t.id ? 'border-color:' + t.color + ';background:rgba(255,255,255,.12);' : '') + '" title="' + t.name + '" onclick="modPatronSet(\'' + id + '\',' + t.id + ')">' + t.icon + '</button>').join("")
+      + (on ? '<button style="margin:0;padding:4px 10px;font-size:12px;border-color:#ff6666;" onclick="modPatronSet(\'' + id + '\',false)">\u2716</button>' : '') + '</div>';
+  }).join("");
+}
+async function modPatronSet(uid, on) {
+  try {
+    await _modRPC().modSetPatron(uid, on);
+    const d = window._modPt; if (d) { if (on) d.pt[uid] = on; else delete d.pt[uid]; }
+    modPatronList(); _patronLoad(true);
+  } catch (e) { alert("Failed: " + (e && e.message || e) + "\n(Are the new Database Rules for patrons published?)"); }
+}
 
 // Chat name color = exact color of the sender's current league (own league from the account, others from the live players data)
 function chatLeagueColor(uid) {
@@ -2743,7 +2886,7 @@ function renderChat(keepScroll) {
     meta.textContent = d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const nm = document.createElement("b");
     nm.setAttribute("translate", "no");
-    nm.textContent = m.name + ": ";
+    nm.textContent = dn(m.name) + ": ";
     nm.dataset.uid = m.uid || "";
     chatStyleName(nm, m.uid);
     if (m.uid) {
@@ -3677,7 +3820,7 @@ async function _waitFbReady(ms) {
 let _lbToken = 0;   // jeder neue Tab/Aufruf macht ältere, noch laufende Aufrufe ungültig
 // Wartet auf die Verbindung. false = nicht verbunden (Retry-Zeile ist dann schon im Table)
 async function _lbReady(t, head) {
-  if (await _waitFbReady(10000)) return true;
+  if (await _waitFbReady(10000)) { try { await _withTimeout(_patronLoad(), 4000); } catch (e) {} return true; }
   t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Not connected – <u style="cursor:pointer" onclick="lbShowTab(_lbTab)">retry</u></span></div>';
   return false;
 }
@@ -3831,7 +3974,7 @@ async function loadDailyBoard(sel) {
   t.innerHTML = _dailyTabsHtml(sel)
     + '<div class="lb-row"><span style="margin:0 auto;">' + (isToday ? '📅 Today: ' + ch.icon + ' ' + escapeHtml(ch.name) + ' · ' + key : mch.icon + ' ' + escapeHtml(mch.name) + ' · best times of all days') + '</span></div>'
     + '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Replay</span></div>';
-  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modCleanupReplays()">🧹 Clean replays</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDailyWinsDialog()">👑 Manage wins</button></div>');
+  if (typeof _modIsAdmin === "function" && _modIsAdmin()) t.insertAdjacentHTML("beforeend", '<div class="lb-row"><button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDeleteAllDaily()">🗑 Delete all daily runs</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modCleanupReplays()">🧹 Clean replays</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modDailyWinsDialog()">👑 Manage wins</button> <button style="margin:0 auto;padding:6px 14px;font-size:13px;" onclick="modPatronDialog()">🪽 Patrons</button></div>');
   const my = ++_lbToken;
   const head = t.innerHTML;
   t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
@@ -8780,7 +8923,42 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
     }
 
     ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
-    ctx.fillStyle = p.color; ctx.fill();
+    ctx.fillStyle = p.color;
+    const _pt = patronTier(p);
+    if (_pt) {
+      const _t = Date.now(), _c = PATRON_TIERS[_pt].color;
+      ctx.shadowColor = _pt === 4 ? "#2fd8ff" : _pt === 3 ? "#ffd24a" : p.color;
+      ctx.shadowBlur = [0, 14, 20, 24, 32][_pt] + 6 * Math.sin(_t / 250);
+      ctx.fill(); ctx.fill();
+      ctx.shadowBlur = 0; ctx.shadowColor = "transparent";
+      ctx.save(); ctx.lineWidth = 2;
+      if (_pt === 1) {   // Bronze: kreisende Glitzerpunkte
+        ctx.fillStyle = "#fff";
+        for (let i = 0; i < 3; i++) { const a = _t / 500 + i * 2.1, s2 = 2 + Math.sin(_t / 200 + i); ctx.fillRect(p.x + Math.cos(a) * (p.radius + 8) - s2 / 2, p.y + Math.sin(a) * (p.radius + 8) - s2 / 2, s2 * 1.5, s2 * 1.5); }
+      } else if (_pt === 2) {   // Silver: Funkenschweif
+        ctx.fillStyle = "#e6edf5";
+        for (let i = 0; i < 4; i++) { const k = Math.random(); ctx.globalAlpha = 1 - k; ctx.beginPath(); ctx.arc(p.x + (Math.random() - .5) * p.radius * 1.4, p.y + p.radius * 0.5 - k * p.radius * 2.2, 3 * (1 - k) + 1, 0, 7); ctx.fill(); }
+      } else if (_pt >= 3) {   // Gold: Ring + Funken | Diamond: Ring + Blitze + Aufblitzen
+        ctx.strokeStyle = _pt === 4 ? "#bff7ff" : "#fff6c0";
+        const _a0 = (_pt === 4 ? -_t : _t) / 400;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.radius + 8, _a0, _a0 + 4.2); ctx.stroke();
+        if (_pt === 3) {
+          ctx.fillStyle = "#ffe27a";
+          if (Math.random() < .5) { ctx.globalAlpha = .9; ctx.fillRect(p.x + (Math.random() - .5) * p.radius * 1.6, p.y - Math.random() * p.radius * 1.8, 3, 3); }
+        } else {
+          ctx.strokeStyle = "#e8fdff"; ctx.lineWidth = 1.8; ctx.shadowColor = "#2fd8ff"; ctx.shadowBlur = 12;
+          for (let n = 0; n < 2; n++) if (Math.random() < .45) {
+            const a = Math.random() * 6.283; let px = p.x + Math.cos(a) * p.radius, py = p.y + Math.sin(a) * p.radius;
+            ctx.beginPath(); ctx.moveTo(px, py);
+            for (let i = 0; i < 5; i++) { px += Math.cos(a) * p.radius * .35 + (Math.random() - .5) * p.radius * .4; py += Math.sin(a) * p.radius * .35 + (Math.random() - .5) * p.radius * .4; ctx.lineTo(px, py); }
+            ctx.stroke();
+          }
+          ctx.shadowBlur = 0;
+          if (Math.sin(_t / 700) > .93) { ctx.fillStyle = "rgba(180,250,255,.25)"; ctx.beginPath(); ctx.arc(p.x, p.y, p.radius * 2.2, 0, 7); ctx.fill(); }
+        }
+      }
+      ctx.restore();
+    } else ctx.fill();
     if (_myBallImg && mode !== "online_tv" && isLocalPlayer(p)) drawBallImageAt(ctx, p.x, p.y, p.radius, p.color);
 
     if (mode === "coin" && p.stunnedUntil && Date.now() < p.stunnedUntil) {
