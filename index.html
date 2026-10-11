@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2585,8 +2586,8 @@ async function acceptChallenge(fromUid) {
 let chatUnsub = null, lastChatSent = 0, chatFirst = true, chatSentTimes = [], lastChatText = "";
 // Wortfilter (EN / DE / RU): erkennt Leetspeak (sh1t, f.u.c.k), Wiederholungen (fuuuck), Akzente und auseinandergezogene Buchstaben (f u c k).
 // Starke Woerter werden auch mitten im Wort erkannt, kurze/mehrdeutige nur als ganzes Wort (damit "class" oder "Scunthorpe" nicht getroffen werden).
-const CHAT_BAD_WORDS = ["fuck","shit","bitch","nigg","fotze","hurensohn","wichser","arschloch","schlampe","motherfuck","asshole","faggot","whore","scheiss","missgeburt","kackbratze","wixx","pizd","blyad","blyat","pidor","pidar","хуй","хуе","хуя","пизд","бляд","блят","ебан","ебат","ебал","ебуч","мудак","залуп","пидор","пидар","шлюх","сучк"];
-const CHAT_BAD_WHOLE = ["ass","arse","dick","cock","cunt","pussy","slut","retard","retarded","arsch","fick","ficken","ficker","fickt","hure","nutte","spast","spasti","wichsen","fag","сука","суки","suka","suki","pizda","трахаться","трахать","трахнуть","трахну","трахни","трахаю","трахал","ебаться","ебать","хер"];
+const CHAT_BAD_WORDS = ["fuck","nigg","fotze","hurensohn","wichser","motherfuck","faggot","pizd","blyad","blyat","хуй","пизд","бляд"];
+const CHAT_BAD_WHOLE = ["cunt","retard","retarded","suka","pizda","сука"];
 const _CF_LEET = { "0": "o", "1": "i", "!": "i", "|": "i", "3": "e", "4": "a", "@": "a", "5": "s", "$": "s", "7": "t", "+": "t", "8": "b" };
 function _cfNorm(str) {
   const t = String(str).toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[̀-ͯ]/g, "");
