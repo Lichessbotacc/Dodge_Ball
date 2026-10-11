@@ -10529,7 +10529,7 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "🚩 Report":"🚩 Melden","✍️ New report":"✍️ Neuer Report","📋 All reports":"📋 Alle Reports","What happened? What did you do right before? (device / browser help too)":"Was ist passiert? Was hast du kurz davor gemacht? (Gerät / Browser hilft auch)","Describe the bug…":"Beschreibe den Bug…","📎 Add image / video":"📎 Bild / Video hinzufügen","up to 3 images + 1 video (max. 4 MB)":"bis zu 3 Bilder + 1 Video (max. 4 MB)","Send report":"Report senden","Please describe the bug.":"Bitte beschreibe den Bug.","Please wait a moment before sending another report.":"Bitte warte kurz, bevor du einen weiteren Report sendest.","Sending…":"Sende…","✅ Thank you! Your report was sent.":"✅ Danke! Dein Report wurde gesendet.","Only images or videos.":"Nur Bilder oder Videos.","Only 1 video allowed.":"Nur 1 Video erlaubt.","Video too large (max. 4 MB). Please send a shorter clip.":"Video zu groß (max. 4 MB). Bitte sende einen kürzeren Clip.","No reports yet.":"Noch keine Reports.",
+  "🚩 Report":"🚩 Melden","✍️ New report":"✍️ Neuer Report","📋 All reports":"📋 Alle Reports","What happened? What did you do right before? (device / browser help too)":"Was ist passiert? Was hast du kurz davor gemacht? (Gerät / Browser hilft auch)","Describe the bug…":"Beschreibe den Bug…","📎 Add image / video":"📎 Bild / Video hinzufügen","up to 3 images + 1 video (max. 5 MB)":"bis zu 3 Bilder + 1 Video (max. 5 MB)","Send report":"Report senden","Please describe the bug.":"Bitte beschreibe den Bug.","Please wait a moment before sending another report.":"Bitte warte kurz, bevor du einen weiteren Report sendest.","Sending…":"Sende…","✅ Thank you! Your report was sent.":"✅ Danke! Dein Report wurde gesendet.","Only images or videos.":"Nur Bilder oder Videos.","Only 1 video allowed.":"Nur 1 Video erlaubt.","Video too large (max. 5 MB). Please send a shorter clip.":"Video zu groß (max. 5 MB). Bitte sende einen kürzeren Clip.","No reports yet.":"Noch keine Reports.",
   "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Total:":"Gesamt:","Survived:":"Überlebt:",
   "ELO LIVE":"ELO LIVE","BEST TV":"BESTES TV","RANDOM TV":"ZUFALLS-TV","TARGET TV":"ZIEL-TV","▶ RESUME":"▶ WEITER",
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
@@ -12060,10 +12060,10 @@ async function modDeleteChatMsg(key) {
 // ═══════════════════════════════════════════════════════════════════
 //  REPORT BUG (Button unter News)
 //  Spieler: Text + bis zu 3 Bilder + 1 kurzes Video. Mod/Admin: sieht alle Reports (Tab "All reports").
-//  Bilder werden vor dem Senden verkleinert; Video max. 4 MB.
+//  Bilder werden vor dem Senden verkleinert; Video max. 5 MB.
 // ═══════════════════════════════════════════════════════════════════
 (function () {
-  const MAX_IMG = 3, MAX_VID_BYTES = 4 * 1024 * 1024, COOLDOWN = 120000;
+  const MAX_IMG = 3, MAX_VID_BYTES = 5 * 1024 * 1024, COOLDOWN = 120000;
   let files = [];          // { type, name, data }
   let reports = null, unsub = null, tab = "new";
   const $ = id => document.getElementById(id);
@@ -12105,7 +12105,7 @@ async function modDeleteChatMsg(key) {
           files.push({ type: "image/jpeg", name: f.name, data: await shrinkImage(f) });
         } else if (f.type.startsWith("video/")) {
           if (files.some(x => x.type.startsWith("video"))) { msg("Only 1 video allowed.", false); continue; }
-          if (f.size > MAX_VID_BYTES) { msg("Video too large (max. 4 MB). Please send a shorter clip.", false); continue; }
+          if (f.size > MAX_VID_BYTES) { msg("Video too large (max. 5 MB). Please send a shorter clip.", false); continue; }
           files.push({ type: f.type, name: f.name, data: await fileToDataURL(f) });
         } else msg("Only images or videos.", false);
       } catch (err) { msg("Could not read file.", false); }
@@ -12187,7 +12187,7 @@ async function modDeleteChatMsg(key) {
         + '<div style="font-size:13px;color:#aab2c5;margin-bottom:6px;">What happened? What did you do right before? (device / browser help too)</div>'
         + '<textarea id="bugText" maxlength="2000" rows="6" placeholder="Describe the bug…" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:8px;font-size:14px;resize:vertical;background:rgba(255,255,255,.05);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></textarea>'
         + '<div id="bugThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"></div>'
-        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label for="bugFile" style="cursor:pointer;padding:7px 12px;font-size:13px;border:1px solid rgba(255,255,255,.25);border-radius:8px;">📎 Add image / video</label><input id="bugFile" type="file" accept="image/*,video/*" multiple style="display:none;"><span style="font-size:11px;color:#8b93a6;">up to 3 images + 1 video (max. 4 MB)</span></div>'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label for="bugFile" style="cursor:pointer;padding:7px 12px;font-size:13px;border:1px solid rgba(255,255,255,.25);border-radius:8px;">📎 Add image / video</label><input id="bugFile" type="file" accept="image/*,video/*" multiple style="display:none;"><span style="font-size:11px;color:#8b93a6;">up to 3 images + 1 video (max. 5 MB)</span></div>'
         + '<div id="bugMsg" style="min-height:18px;font-size:13px;margin:8px 0;"></div>'
         + '<button id="bugSend" style="margin:0;padding:9px 20px;font-size:14px;">Send report</button></div>'
         + '<div id="bugAllPane" style="display:none;overflow-y:auto;margin-top:10px;"><div id="bugList" style="display:flex;flex-direction:column;gap:8px;"></div></div></div>';
