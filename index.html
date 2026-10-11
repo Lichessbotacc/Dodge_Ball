@@ -4894,6 +4894,14 @@ async function pushAccountToFirebase() {
       if (Math.abs(_diff) > MAX_ELO_DELTA_PER_GAME) onlineAccount.elo = _srvElo + Math.sign(_diff) * MAX_ELO_DELTA_PER_GAME;
     }
   } catch (e) {}
+  // Liga-Schutz: Die Regeln erlauben eine Aenderung von leagueTier nur mit frischem Zeitstempel (leagueAt) und max. +1 pro Woche.
+  let _lgAt = null, _createdAt = null;
+  try {
+    const _sv = await dbGet("players/" + myUid);
+    const _svTier = _sv ? (Number(_sv.leagueTier) || 0) : 0;
+    _createdAt = _sv ? (_sv.createdAt != null ? _sv.createdAt : null) : RPC.serverTimestamp();   // neuer Account: Erstellzeit vom Server (nicht faelschbar)
+    _lgAt = ((onlineAccount.leagueTier ?? 0) !== _svTier) ? RPC.serverTimestamp() : (_sv && _sv.leagueAt != null ? _sv.leagueAt : null);
+  } catch (e) { _lgAt = null; }
   await RPC.setOwnPlayer({
     uid: myUid,
     name: onlineAccount.name,
@@ -4919,6 +4927,8 @@ async function pushAccountToFirebase() {
     leagueWeek: onlineAccount.leagueWeek ?? null,
     leagueGroup: onlineAccount.leagueGroup ?? null,
     leagueLastResult: onlineAccount.leagueLastResult ?? null,
+    leagueAt: _lgAt,
+    createdAt: _createdAt,
     device: detectDeviceType(),
     updatedAt: Date.now()
   });
