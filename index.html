@@ -4418,16 +4418,20 @@ function leagueSortMembers(list) {
     (a.lastWinAt || Infinity) - (b.lastWinAt || Infinity) ||      // tie-break: whoever reached the wins earlier ranks higher
     (a.uid < b.uid ? -1 : 1));
 }
-function leagueZones(n, tier) {
+// Einmalige Aktion: In dieser Woche steigen in Silber die Top 5 JEDER Gruppe auf (ohne Mindest-Siege / Mindest-Gruppengroesse).
+const LEAGUE_SILVER_BOOST_WEEK = "2026-10-05";
+function _lgSilverBoost(tier, week) { return tier === 1 && (week || leagueWeekId()) === LEAGUE_SILVER_BOOST_WEEK; }
+function leagueZones(n, tier, week) {
+  if (_lgSilverBoost(tier, week)) return { up: Math.min(5, n), down: Math.min(LEAGUE_RELEGATE_BOTTOM, Math.max(0, Math.floor(n / 4)), Math.max(0, n - Math.min(5, n))) };
   const up   = (tier < LEAGUES.length - 1 && n >= LEAGUE_MIN_GROUP_PROMOTE)
     ? (tier === 0 ? Math.max(1, Math.min(LEAGUE_PROMOTE_TOP_BRONZE, Math.floor(n / 2)))
                   : Math.max(1, Math.min(LEAGUE_PROMOTE_TOP, Math.floor(n / 3)))) : 0;
   const down = tier > 0 ? Math.min(LEAGUE_RELEGATE_BOTTOM, Math.floor(n / 4)) : 0;
   return { up, down };
 }
-function leagueOutcome(rankIdx, n, wins, tier) {
-  const z = leagueZones(n, tier);
-  if (rankIdx < z.up && wins >= LEAGUE_MIN_WINS_PROMOTE) return "up";
+function leagueOutcome(rankIdx, n, wins, tier, week) {
+  const z = leagueZones(n, tier, week);
+  if (rankIdx < z.up && (wins >= LEAGUE_MIN_WINS_PROMOTE || _lgSilverBoost(tier, week))) return "up";
   if (z.down > 0 && rankIdx >= n - z.down) return "down";
   return "stay";
 }
@@ -4488,7 +4492,7 @@ async function leagueResolvePrevious() {
     const list = leagueSortMembers(Object.values(grp));
     size = list.length;
     const idx = list.findIndex(m => m.uid === myUid);
-    if (idx >= 0) { rank = idx + 1; wins = list[idx].wins || 0; outcome = leagueOutcome(idx, size, wins, tier); }
+    if (idx >= 0) { rank = idx + 1; wins = list[idx].wins || 0; outcome = leagueOutcome(idx, size, wins, tier, w); }
   }
   let newTier = tier;
   if (outcome === "up")   newTier = Math.min(LEAGUES.length - 1, tier + 1);
@@ -4660,7 +4664,7 @@ async function renderLeague() {
     // 4) Status
     let cls = "safe", title, text;
     if (myIdx < z.up) {
-      if (myWins >= LEAGUE_MIN_WINS_PROMOTE) { cls = "up"; title = "🟢 " + tr("You're in the promotion zone!"); text = tr("Keep your spot until Sunday and you move up."); }
+      if (myWins >= LEAGUE_MIN_WINS_PROMOTE || _lgSilverBoost(tier)) { cls = "up"; title = "🟢 " + tr("You're in the promotion zone!"); text = tr("Keep your spot until Sunday and you move up."); }
       else { cls = "up"; title = "🟡 " + tr("Almost there!"); text = (LEAGUE_MIN_WINS_PROMOTE - myWins) + " " + tr("more wins needed – promotion needs at least") + " " + LEAGUE_MIN_WINS_PROMOTE + " " + tr("Wins") + "."; }
     } else if (z.down > 0 && myIdx >= n - z.down) {
       cls = "down"; title = "🔴 " + tr("You're in the relegation zone!"); text = tr("Win a few matches to climb out before the week ends.");
@@ -12273,7 +12277,7 @@ async function leagueAdminResolveAll() {
             const p = players && players[m.uid];
             if (!p || m.uid === me) return;                                   // eigener Account wird von deinem normalen Client ausgewertet
             if (p.leagueWeek !== week || p.leagueGroup !== gid || (p.leagueTier || 0) !== tier) return;   // schon ausgewertet
-            const wins = m.wins || 0, outcome = leagueOutcome(idx, size, wins, tier);
+            const wins = m.wins || 0, outcome = leagueOutcome(idx, size, wins, tier, week);
             let nt = tier;
             if (outcome === "up")   nt = Math.min(LEAGUES.length - 1, tier + 1);
             if (outcome === "down") nt = Math.max(0, tier - 1);
