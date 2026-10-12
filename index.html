@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6937,7 +6938,7 @@ async function handleOnlineResult(winnerName, change) {
   showEloAnimation(won ? eloChange : -eloChange);
   const _eloRows = [
     { uid: myUid, name: dn(onlineAccount.name), delta: won ? eloChange : -eloChange, from: myOriginalElo, to: Math.round(onlineAccount.elo) },
-    { uid: oppUid, name: dn(oppName), delta: won ? -oppEloChange : oppEloChange, from: oppOriginalElo, to: onlineOpponent && Number.isFinite(Number(onlineOpponent.elo)) ? Math.round(onlineOpponent.elo) : oppOriginalElo }
+    { uid: oppUid, name: dn(oppName), delta: won ? -oppEloChange : oppEloChange, from: oppOriginalElo, to: onlineOpponent && Number.isFinite(Number(onlineOpponent.elo)) ? Math.round(onlineVsBot ? Math.max(100, onlineOpponent.elo + (won ? -oppEloChange : oppEloChange)) : onlineOpponent.elo) : oppOriginalElo }
   ];
   setTimeout(() => showWinnerOverlay(winnerName, won ? eloChange : -eloChange, _eloRows), 2600);
 
