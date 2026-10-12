@@ -12335,9 +12335,11 @@ async function leagueAdminFixSilverBoost() {
       list.slice(0, 5).forEach((m, idx) => {
         const p = players && players[m.uid]; if (!p) return;
         const lr = p.leagueLastResult;
-        if ((Number(p.leagueTier) || 0) !== 1 || p.leagueWeek) return;            // schon aufgestiegen oder bereits in neuer Gruppe
-        if (!lr || String(lr.week) !== week || lr.outcome === "up") return;
+        if ((Number(p.leagueTier) || 0) !== 1) return;                              // schon aufgestiegen (oder anderswo)
+        if (p.leagueWeek && p.leagueWeek !== week) return;                          // bereits in neuer Gruppe
+        if (lr && (String(lr.week) > week || (String(lr.week) === week && lr.outcome === "up"))) return;   // fehlendes/aelteres Ergebnis (z.B. abgelehnter Write) wird mitkorrigiert
         const b = "players/" + m.uid + "/";
+        if (p.leagueWeek === week) { up[b + "leagueWeek"] = null; up[b + "leagueGroup"] = null; }
         up[b + "leagueTier"] = 2;
         up[b + "leagueBest"] = Math.max(p.leagueBest || 0, 2);
         up[b + "leagueLastResult"] = { week, rank: idx + 1, size, wins: m.wins || 0, outcome: "up", from: 1, to: 2, group: gid };
