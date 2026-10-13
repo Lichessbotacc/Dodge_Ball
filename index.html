@@ -10054,6 +10054,7 @@ gameWrap.addEventListener("touchstart", e => {
     { id: "lightning", name: "Lightning",    col: "#7ee8ff", tier: 6, pm: 1,    sm: 1.15, info: "Chain lightning to more bricks for 30% damage." },
     { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blue bricks ×2, hex bricks ×25 damage." }
   ];
+  var CASH_BALL_MUL = 2;   // Cash-Ball: Kraft × aktuelles Steinleben, hier relativ zum vollen Leben des Steins (Leben-Skala dieses Spiels waere sonst viel zu gross). Nur Crit-Karte wirkt. Zahl = Feintuning (2 = doppelt so viel wie ein Schadens-Treffer gleicher Kraft)
   var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
   function BP(slot) { return slot === 1 ? 9.46 / 5 : 12.12 * Math.pow(2.424, slot - 2); }   // Basic Lv.5 = 9,46 und Splash Lv.1 = 12,12 (Screenshot); Rest geschätzt
   function baseCost(slot) { return slot === 1 ? 25 : UNLOCK[slot] / 3; }
@@ -10453,7 +10454,7 @@ gameWrap.addEventListener("touchstart", e => {
           b.hits++;
           var d = dmC[t.id]; if (M.crit > 0 && t.id !== "poison" && Math.random() < M.crit) d *= 1.5;
           if (t.id === "cash") {                    // Cash-Ball: kein Schaden, Geld = Kraft × aktuelles Steinleben
-            if (!r.gem) { var cg = d * r.hp * M.bc * (r.cash ? M.cbb : 1); earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
+            { var cg = d * (r.gem ? 1 : Math.min(1, r.hp / r.max)) * CASH_BALL_MUL; earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
             break;
           }
           if (t.id === "prop") d *= r.type === "h" ? 25 : r.type === "b" ? 2 : 1;
@@ -10595,11 +10596,11 @@ gameWrap.addEventListener("touchstart", e => {
       row.append(a, p, s); c.appendChild(row);
       var rm = document.createElement("button"); rm.type = "button"; rm.className = "b rmb"; rm.textContent = "✕ Remove ball"; rm.title = "Remove one ball of this type (no refund)";
       rm.addEventListener("click", function () {
-        var minOwn = id === "basic" ? 1 : 0; if (st.own <= minOwn) { toast(id === "basic" ? "You need at least 1 basic ball." : "Nothing to remove."); return; }
+        if (st.own <= 0) { toast("Nothing to remove."); return; }
         st.own--;
         for (var i = balls.length - 1; i >= 0; i--) { if (balls[i].t === t) { balls.splice(i, 1); break; } }
         var li = S.buyLog.lastIndexOf(id); if (li >= 0) S.buyLog.splice(li, 1);
-        if (st.own === 0 && id !== "basic") { st.slot = 0; S.order = S.order.filter(function (x) { return x !== id; }); S.offer = null; renderPanel(); }
+        updBalls();
         recalc(); save();
       });
       c.appendChild(rm); ballEls[id + "_rm"] = rm;
@@ -10637,7 +10638,7 @@ gameWrap.addEventListener("touchstart", e => {
       setBtn(e.a, "Ball +1 (" + st.own + "/" + maxOwn(t) + ")", full ? "Max" : "$" + fmt(cNew(t)), full || S.cash < cNew(t));
       var pm = st.pow >= powMax(t); setBtn(e.p, "Power Lv." + (st.pow + 1), pm ? "Max" : "$" + fmt(cPow(t)), pm || S.cash < cPow(t));
       var sm = st.spd >= SPD_MAX; setBtn(e.s, "Speed Lv." + (st.spd + 1), sm ? "Max" : "$" + fmt(cSpd(t)), sm || S.cash < cSpd(t));
-      var rmE = ballEls[id + "_rm"]; if (rmE) { rmE.disabled = st.own <= (id === "basic" ? 1 : 0); rmE.textContent = "✕ Remove ball (" + st.own + ")"; }
+      var rmE = ballEls[id + "_rm"]; if (rmE) { rmE.disabled = st.own <= 0; rmE.textContent = "✕ Remove ball (" + st.own + ")"; }
       var ok = (st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79);
       e.bp.style.display = (st.bp < 2 && st.spd >= (st.bp === 0 ? 39 : 79)) ? "" : "none"; e.bp.disabled = !ok;
     });
