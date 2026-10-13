@@ -9915,7 +9915,7 @@ gameWrap.addEventListener("touchstart", e => {
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Idle Brick Breaker</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Orbitron:wght@700;800&family=Sora:wght@400;600;700&display=swap">
 <style>
@@ -11000,6 +11000,14 @@ function idleBoardRender() {
     else ft.textContent = onlineAccount ? "" : "Log in to join the ranking";
   }
 }
+function idleNoZoom(w) {
+  const d = w.document, pd = e => e.preventDefault();
+  ["gesturestart", "gesturechange", "gestureend"].forEach(t => d.addEventListener(t, pd));
+  d.addEventListener("wheel", e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  d.addEventListener("touchmove", e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  d.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "0"].includes(e.key)) e.preventDefault(); });
+  let lt = 0; d.addEventListener("touchend", e => { const n = Date.now(); if (n - lt < 300) e.preventDefault(); lt = n; }, { passive: false });
+}
 async function openIdle() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   if (!idleCanPlay()) { try { leagueToast("🔒 Idle Brick Breaker opens in " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
@@ -11020,6 +11028,8 @@ async function openIdle() {
   const fr = document.createElement("iframe"); fr.style.cssText = "flex:1;width:100%;height:100%;min-width:0;border:0;background:#0b0f15;"; fr.setAttribute("title", "Idle Brick Breaker");
   fr.srcdoc = src;
   const wrap = idleSideBuild(fr);
+  ov.style.touchAction = "manipulation";
+  fr.addEventListener("load", () => { try { idleNoZoom(fr.contentWindow); } catch (e) {} });
   ov.append(bar, wrap.tabs, wrap.grid); document.body.appendChild(ov);
   window.__idleOpen = true; try { syncPresence(true); } catch (e) {}
   try { idleLiveStart(); } catch (e) {}
