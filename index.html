@@ -2168,6 +2168,7 @@ let _activatePoll = setInterval(() => {
 }, 150);
 
 async function onFirebaseAndAuthReady() {
+  startMenuPresenceListener();           // Spielerliste sofort laden (Rang-Tags im Chat brauchen sie), nicht erst nach den Account-Abfragen unten
   // CHANGED: we now have a real, server-verified uid (myUid) instead
   // of trusting a client-chosen name as the database key.
   if (onlineAccount) {
@@ -2188,7 +2189,7 @@ async function onFirebaseAndAuthReady() {
     await updatePlayerStatus("Idle in Menu");
     leagueResolvePrevious().catch(() => {});
   }
-  startMenuPresenceListener();
+  if (!menuPresenceUnsubscribe) startMenuPresenceListener();
 }
 
 // ─────────────────────────────────────────────
@@ -2275,7 +2276,7 @@ async function _presenceRescue(n) {
   else {
     try {
       const pd = await RPC.get("players");
-      if (pd) { window._lastPlayersData = pd; renderPresence(pd); try { startMenuPresenceListener(); } catch (e) {} return; }
+      if (pd) { window._lastPlayersData = pd; renderPresence(pd); try { recolorChatNames(); } catch (e) {} try { startMenuPresenceListener(); } catch (e) {} return; }
       why = "Connected, but the player list does not arrive.";
     } catch (e) { why = "Server error: " + (e.code || e.message); }
   }
@@ -2838,6 +2839,8 @@ function chatStyleName(el, uid) {
 }
 function recolorChatNames() {
   document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
+  // Rang-Tags haengen ebenfalls an den Spielerdaten, die meist erst NACH dem ersten Chat-Render ankommen -> neu zeichnen
+  try { if (typeof chatAll !== "undefined" && Object.keys(chatAll).length) renderChat(false); } catch (e) {}
 }
 
 // Rang-Tag im Chat: Top 5 der ELO-Rangliste (gleiche Regeln wie die Rangliste: mind. 1 Partie, ein Eintrag pro Name)
