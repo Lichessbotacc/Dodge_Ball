@@ -10283,7 +10283,7 @@ gameWrap.addEventListener("touchstart", e => {
   }
   function speedOf(t) {
     var st = S.balls[t.id], s = 60 * Math.min(8.5, 1.245 * Math.pow(st.spd + 1, 0.735)) * t.sm * M.spd * Math.pow(0.4, st.bp);
-    return Math.min(s, 800);
+    return s;
   }
   // Ball +1, Power und Speed kosten auf gleicher Stufe gleich viel (Stufe n = naechster Ball / naechstes Power-Level / naechstes Speed-Level).
   function cBase(t) { var st = S.balls[t.id]; return st.slot === 1 ? 510 / Math.pow(1.5, 8) : UNLOCK[st.slot] * 541 / 175 / 2.25; }   // Screenshot: Basic mit 8 Bällen $510, Splash mit 2 Bällen $541; +50 % pro Stufe
@@ -10430,7 +10430,7 @@ gameWrap.addEventListener("touchstart", e => {
     var i, k;
     BALLS.forEach(function (t) { spC[t.id] = speedOf(t); dmC[t.id] = dmgOf(t); });
     for (i = 0; i < balls.length; i++) {
-      var b = balls[i], t = b.t, sp = spC[t.id], n = Math.max(1, Math.ceil(sp * dt / 4)), h = dt / n, pierce = t.id === "pierce";
+      var b = balls[i], t = b.t, sp = spC[t.id], n = Math.min(400, Math.max(1, Math.ceil(sp * dt / 4))), h = dt / n, pierce = t.id === "pierce";
       // Absicherung: Ein Ball, der 12 s keinen Stein getroffen hat, bekommt einen kleinen Richtungsstoß, damit er nicht ewig in einer Schleife fliegt
       if (b.hits !== b.lh) { b.lh = b.hits; b.idle = 0; } else { b.idle = (b.idle || 0) + dt; if (b.idle > 12) { b.idle = 0; var ang = Math.atan2(b.vy, b.vx) + (Math.random() - .5) * 0.5; b.vx = Math.cos(ang); b.vy = Math.sin(ang); } }
       for (var s = 0; s < n; s++) {
@@ -10474,7 +10474,7 @@ gameWrap.addEventListener("touchstart", e => {
     }
     // Assassin-Ball (Basistempo aus der Karte, zählt nicht zum Ballmaximum)
     if (ass) {
-      var asp = Math.min(800, CM.ass.f(cl("ass")) * 42.5 * M.spd), an = Math.max(1, Math.ceil(asp * dt / 4)), ah = dt / an;
+      var asp = CM.ass.f(cl("ass")) * 42.5 * M.spd, an = Math.min(400, Math.max(1, Math.ceil(asp * dt / 4))), ah = dt / an;
       for (var u = 0; u < an; u++) {
         ass.x += ass.vx * asp * ah; ass.y += ass.vy * asp * ah;
         if (ass.x < 5 || ass.x > W - 5) { ass.vx = -ass.vx; ass.x = Math.max(5, Math.min(W - 5, ass.x)); }
@@ -11205,24 +11205,24 @@ function watchIdlePlayer(uid) {
   try { if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; } } catch (e) {}
   closeIdleWatch();
   const ov = document.createElement("div"); ov.id = "idleWatch";
-  ov.style.cssText = "position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72);";
+  ov.style.cssText = "position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;background:rgba(4,6,11,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);";
   const card = document.createElement("div");
-  card.style.cssText = "width:min(380px,94vw);max-height:96vh;display:flex;flex-direction:column;gap:6px;padding:10px;background:#0b0f15;border:1px solid #252e3d;border-top:3px solid #ff9f43;border-radius:14px;color:#e8edf5;font:600 13px var(--font-display),system-ui,sans-serif;box-shadow:0 20px 50px rgba(0,0,0,.6);";
+  card.style.cssText = "width:min(460px,96vw);max-height:96vh;display:flex;flex-direction:column;gap:10px;padding:14px;background:linear-gradient(180deg,rgba(22,28,42,.96),rgba(11,15,21,.98));border:1px solid rgba(255,255,255,.10);border-top:3px solid #00c8ff;border-radius:16px;color:#eaf2fb;font:600 14px Rajdhani,system-ui,sans-serif;box-shadow:0 24px 70px rgba(0,0,0,.6);";
   const head = document.createElement("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;";
-  const nameEl = document.createElement("span"); nameEl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"; nameEl.setAttribute("translate", "no");
+  const nameEl = document.createElement("span"); nameEl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 17px Rajdhani,sans-serif;letter-spacing:.06em;text-transform:uppercase;"; nameEl.setAttribute("translate", "no");
   { const pd = window._lastPlayersData && window._lastPlayersData[uid]; nameEl.textContent = "📺 " + (pd && pd.name ? dn(pd.name) : "Idle Brick Breaker"); }
-  const viewsEl = document.createElement("span"); viewsEl.style.cssText = "font-size:12px;opacity:.85;";
-  const x = document.createElement("button"); x.textContent = "✕"; x.style.cssText = "margin:0;padding:3px 10px;font-size:13px;";
+  const viewsEl = document.createElement("span"); viewsEl.style.cssText = "font-size:12px;color:#8b93a6;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:999px;padding:3px 10px;";
+  const x = document.createElement("button"); x.textContent = "✕"; x.style.cssText = "margin:0;padding:4px 11px;font-size:13px;background:transparent;border:1px solid rgba(255,255,255,.14);border-radius:8px;color:#8b93a6;";
   head.append(nameEl, viewsEl, x);
   const hud = document.createElement("div"); hud.style.cssText = "display:flex;justify-content:space-between;align-items:flex-end;gap:8px;";
   const hl = document.createElement("div"), money = document.createElement("div"), sub = document.createElement("div");
-  money.style.cssText = "font-size:21px;font-weight:700;color:#4fd69a;font-variant-numeric:tabular-nums;"; money.textContent = "$0";
-  sub.style.cssText = "font-size:11px;color:#8c97a9;font-weight:400;"; hl.append(money, sub);
-  const lvl = document.createElement("div"); lvl.style.cssText = "text-align:right;font-size:13px;";
+  money.style.cssText = "font:800 26px Orbitron,sans-serif;color:#00ff88;text-shadow:0 0 16px rgba(0,255,136,.3);font-variant-numeric:tabular-nums;line-height:1.1;"; money.textContent = "$0";
+  sub.style.cssText = "font-size:12px;color:#8b93a6;font-weight:500;margin-top:2px;"; hl.append(money, sub);
+  const lvl = document.createElement("div"); lvl.style.cssText = "text-align:right;font:700 13px Orbitron,sans-serif;padding:5px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(0,200,255,.22),rgba(183,139,255,.22));border:1px solid rgba(0,200,255,.4);white-space:nowrap;";
   hud.append(hl, lvl);
   const cv = document.createElement("canvas"); cv.width = 500; cv.height = 745;
-  cv.style.cssText = "width:min(100%,calc((100vh - 170px) * 500 / 745));width:min(100%,calc((100dvh - 170px) * 500 / 745));aspect-ratio:500/745;margin:0 auto;display:block;background:#06080d;border:1px solid #252e3d;border-radius:10px;";
-  const msg = document.createElement("div"); msg.style.cssText = "min-height:16px;font-size:12px;font-weight:400;color:#8c97a9;text-align:center;";
+  cv.style.cssText = "width:min(100%,calc((100vh - 190px) * 500 / 745));width:min(100%,calc((100dvh - 190px) * 500 / 745));aspect-ratio:500/745;margin:0 auto;display:block;background:#04060b;border:1px solid rgba(0,200,255,.25);border-radius:14px;box-shadow:0 0 30px rgba(0,200,255,.10);";
+  const msg = document.createElement("div"); msg.style.cssText = "min-height:0;font-size:12px;font-weight:500;color:#8b93a6;text-align:center;";
   card.append(head, hud, cv, msg); ov.appendChild(card); document.body.appendChild(ov);
   const st = { uid, ov, g: cv.getContext("2d"), layout: [], lid: null, bk: [], p: [], a: 0, from: [], to: [], t0: 0, dur: 600, lastBl: 0, gs: 0, lastT: null, lastChange: Date.now(), start: Date.now(), gone: false, goneT: 0, raf: 0, unsub: null, viewUnsub: null, shownMsg: "" };
   st.onKey = (e) => { if (e.key === "Escape") closeIdleWatch(); };
