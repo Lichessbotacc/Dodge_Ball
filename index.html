@@ -9976,6 +9976,19 @@ gameWrap.addEventListener("touchstart", e => {
   .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
   .gold { color:var(--gold); font-weight:700; text-shadow:0 0 10px rgba(255,210,74,.5); }
   table { width:100%; border-collapse:collapse; font-size:.9rem; } td { padding:6px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; font-weight:700; } tr:last-child td { border-bottom:0; }
+  .rmb { flex-direction:row; justify-content:center; align-items:center; font-size:.8rem; color:#ff8a8a; border-color:rgba(255,68,68,.35); padding:6px 10px; }
+  .rmb:not(:disabled):hover { border-color:#ff4444; background:rgba(255,68,68,.12); box-shadow:0 0 14px rgba(255,68,68,.2); }
+  @media (min-width:700px) {
+    body { font-size:17px; padding-inline:20px; }
+    main { max-width:720px; gap:14px; }
+    .hud { padding:16px 20px; } .money { font-size:2.3rem; } .sub { font-size:1rem; }
+    .lvlchip { font-size:1rem; padding:6px 14px; } .chip { font-size:.95rem; padding:4px 11px; }
+    canvas { width:min(100%, calc((100vh - 270px) * 500 / 745)); width:min(100%, calc((100dvh - 270px) * 500 / 745)); }
+    .tabs button { font-size:.95rem; padding:11px 0 9px; } .tabs button .ti { font-size:1.3rem; }
+    .card { padding:16px 18px; gap:10px; } .head b { font-size:1.05rem; }
+    .b { font-size:1.02rem; padding:11px 13px; } .b span { font-size:1rem; } .wide { font-size:1.05rem; } .rmb { font-size:.95rem; }
+    small, .mut { font-size:1rem; } td, table { font-size:1.05rem; } #toast { font-size:1.05rem; }
+  }
   ::-webkit-scrollbar { width:8px; } ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.15); border-radius:4px; }
 </style>
 </head>
@@ -10580,6 +10593,16 @@ gameWrap.addEventListener("touchstart", e => {
       var p = btn("Power", "", function () { if (S.cash >= cPow(t) && st.pow < powMax(t)) { S.cash -= cPow(t); st.pow++; S.c.pwBought++; } });
       var s = btn("Speed", "", function () { if (S.cash >= cSpd(t) && st.spd < SPD_MAX) { S.cash -= cSpd(t); st.spd++; S.c.spBought++; } });
       row.append(a, p, s); c.appendChild(row);
+      var rm = document.createElement("button"); rm.type = "button"; rm.className = "b rmb"; rm.textContent = "✕ Remove ball"; rm.title = "Remove one ball of this type (no refund)";
+      rm.addEventListener("click", function () {
+        var minOwn = id === "basic" ? 1 : 0; if (st.own <= minOwn) { toast(id === "basic" ? "You need at least 1 basic ball." : "Nothing to remove."); return; }
+        st.own--;
+        for (var i = balls.length - 1; i >= 0; i--) { if (balls[i].t === t) { balls.splice(i, 1); break; } }
+        var li = S.buyLog.lastIndexOf(id); if (li >= 0) S.buyLog.splice(li, 1);
+        if (st.own === 0 && id !== "basic") { st.slot = 0; S.order = S.order.filter(function (x) { return x !== id; }); S.offer = null; renderPanel(); }
+        recalc(); save();
+      });
+      c.appendChild(rm); ballEls[id + "_rm"] = rm;
       var bp = btn("Ball Prestige", "Power ×5 · Speed −60%", function () { if ((st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79)) { st.bp++; renderPanel(); } }, false, "pur");
       bp.classList.add("wide"); c.appendChild(bp);
       ballEls[id] = { a: a, p: p, s: s, bp: bp, st: c.querySelector(".st"), t: t };
@@ -10614,6 +10637,7 @@ gameWrap.addEventListener("touchstart", e => {
       setBtn(e.a, "Ball +1 (" + st.own + "/" + maxOwn(t) + ")", full ? "Max" : "$" + fmt(cNew(t)), full || S.cash < cNew(t));
       var pm = st.pow >= powMax(t); setBtn(e.p, "Power Lv." + (st.pow + 1), pm ? "Max" : "$" + fmt(cPow(t)), pm || S.cash < cPow(t));
       var sm = st.spd >= SPD_MAX; setBtn(e.s, "Speed Lv." + (st.spd + 1), sm ? "Max" : "$" + fmt(cSpd(t)), sm || S.cash < cSpd(t));
+      var rmE = ballEls[id + "_rm"]; if (rmE) { rmE.disabled = st.own <= (id === "basic" ? 1 : 0); rmE.textContent = "✕ Remove ball (" + st.own + ")"; }
       var ok = (st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79);
       e.bp.style.display = (st.bp < 2 && st.spd >= (st.bp === 0 ? 39 : 79)) ? "" : "none"; e.bp.disabled = !ok;
     });
@@ -10915,6 +10939,14 @@ const _IS = { unChat: null, unBoard: null, tim: null, rt: null, prev: {}, board:
 #idleOverlay .is-gap{text-align:center;color:#8b93a6;font-size:11px;padding:2px}
 #idleOverlay .is-ft{padding:8px 12px;border-top:1px solid rgba(255,255,255,.08);color:#8b93a6;font-size:12px;text-align:center}
 #idleOverlay .is-ft b{color:#ffd700;font-family:Orbitron,sans-serif}
+@media (min-width:981px){
+ #idleOverlay .is-p{font-size:15px}
+ #idleOverlay .is-h{font-size:18px;padding:11px 14px}
+ #idleOverlay .is-m b{font-size:16px} #idleOverlay .is-m i{font-size:11px}
+ #idleOverlay .is-in input,#idleOverlay .is-in button{font-size:15px;padding:10px 12px}
+ #idleOverlay .is-r{padding:10px 10px;grid-template-columns:34px 1fr auto 20px} #idleOverlay .is-r .nm{font-size:18px} #idleOverlay .is-r .vl{font-size:14px} #idleOverlay .is-r .rk{font-size:15px}
+ #idleOverlay .is-ft{font-size:14px}
+}
 @media (max-width:980px){
  #idleOverlay .is-tabs{display:flex}
  #idleOverlay .is-grid{display:block;padding:0}
