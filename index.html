@@ -11042,7 +11042,8 @@ function idleNoZoom(w) {
   d.addEventListener("wheel", e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
   d.addEventListener("touchmove", e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
   d.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "0"].includes(e.key)) e.preventDefault(); });
-  let lt = 0; d.addEventListener("touchend", e => { const n = Date.now(); if (n - lt < 300) e.preventDefault(); lt = n; }, { passive: false });
+  d.addEventListener("dblclick", pd);
+  const st = d.createElement("style"); st.textContent = "html,body,*{touch-action:manipulation;-webkit-touch-callout:none}"; d.head.appendChild(st);
 }
 async function openIdle() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
@@ -11066,6 +11067,9 @@ async function openIdle() {
   fr.srcdoc = src;
   const wrap = idleSideBuild(fr);
   ov.style.touchAction = "manipulation";
+  ov.addEventListener("dblclick", e => e.preventDefault());
+  ov.addEventListener("touchmove", e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  const _ovSt = document.createElement("style"); _ovSt.textContent = "#idleOverlay,#idleOverlay *{touch-action:manipulation;-webkit-touch-callout:none}"; ov.appendChild(_ovSt);
   fr.addEventListener("load", () => { try { idleNoZoom(fr.contentWindow); } catch (e) {} });
   ov.append(bar, wrap.tabs, wrap.grid); document.body.appendChild(ov);
   window.__idleOpen = true; try { syncPresence(true); } catch (e) {}
