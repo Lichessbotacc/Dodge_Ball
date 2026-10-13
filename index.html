@@ -1556,6 +1556,12 @@ function rpcArmMatchDisconnect(matchId, payload) {
 
 function rpcServerTimestamp() { return serverTimestamp(); }
 // Idle Brick Breaker: nur eigener Eintrag idleBoard/{uid} (Gesamtgeld)
+async function rpcSetIdleSave(json, tot) {
+  requireNotBanned();
+  const uid = requireUid();
+  json = String(json); if (json.length > 150000) throw new Error("Save too large.");
+  return set(ref(db, "idleSave/" + uid), { d: json, tot: Math.min(Number(tot) || 0, 1e300), ts: serverTimestamp() });
+}
 async function rpcSetIdleBoard(name, total, best) {
   requireNotBanned();
   const uid = requireUid();
@@ -2051,7 +2057,7 @@ window._dobRPC = {
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
-  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
+  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
@@ -10831,15 +10837,45 @@ function updIdleBtn() {
 setInterval(updIdleBtn, 15000); setTimeout(updIdleBtn, 500); setTimeout(updIdleBtn, 3000);
 
 let _idleLast = 0, _idleAt = 0;
+let _idleSaveAt = 0, _idleSaveTot = 0, _idleErrAt = 0;
+function idleCloudSave(force) {
+  try {
+    const f = document.querySelector("#idleOverlay iframe"), w = f && f.contentWindow;
+    if (!w || !w.__ib) return;
+    const S = w.__ib.S(), tot = Number(S.c.tot) || 0;
+    if (tot <= 0 || tot < _idleSaveTot) return;
+    const now = Date.now(); if (!force && now - _idleSaveAt < 30000) return;
+    _idleSaveAt = now;
+    const c = Object.assign({}, S); c.buyLog = [];
+    RPC.setIdleSave(JSON.stringify(c), tot).then(() => { _idleSaveTot = tot; }).catch(e => { console.warn("idle cloud save failed", e && (e.code || e.message)); });
+  } catch (e) {}
+}
 window.idleReport = function (total, best, force) {
   try {
     if (!idleUnlocked() || !fbReady || !myUid || !onlineAccount || window.__dobBanned || !window.__idleCfg || !window.__idleCfg.persist) return;
+    try { idleCloudSave(force); } catch (e) {}
     total = Number(total); if (!isFinite(total) || total <= 0 || total <= _idleLast) return;
     const now = Date.now(); if (!force && now - _idleAt < 60000) return;
     _idleAt = now; _idleLast = total;
-    RPC.setIdleBoard(onlineAccount.name, total, best).catch(e => { _idleLast = 0; console.warn("idle board write failed", e && (e.code || e.message)); });
+    RPC.setIdleBoard(onlineAccount.name, total, best).catch(e => {
+      _idleLast = 0; console.warn("idle board write failed", e && (e.code || e.message));
+      if (Date.now() - _idleErrAt > 120000) { _idleErrAt = Date.now(); try { leagueToast("⚠ Idle score not saved: " + ((e && (e.code || e.message)) || "error"), "#ff4444"); } catch (e2) {} }
+    });
   } catch (e) {}
 };
+
+// Cloud-Stand beim Oeffnen laden (Geraetewechsel): hoeherer Gesamtverdienst gewinnt
+async function idleCloudLoad() {
+  try {
+    if (!fbReady || !myUid || !onlineAccount) return;
+    const o = await RPC.get("idleSave/" + myUid);
+    if (!o || typeof o.d !== "string") return;
+    const cloud = JSON.parse(o.d); const ct = Number(cloud && cloud.c && cloud.c.tot) || 0;
+    let lt = 0; try { const l = JSON.parse(localStorage.getItem("idleBrickBreaker_v5") || "null"); lt = Number(l && l.c && l.c.tot) || 0; } catch (e) {}
+    _idleSaveTot = Math.max(_idleSaveTot, ct);
+    if (ct > lt && cloud.balls) { cloud.buyLog = cloud.buyLog || []; localStorage.setItem("idleBrickBreaker_v5", JSON.stringify(cloud)); }
+  } catch (e) { console.warn("idle cloud load failed", e && (e.code || e.message)); }
+}
 
 
 // ═══ IDLE: Global Idle Chat (links) + Live-Rangliste (rechts) ═══
@@ -11015,6 +11051,7 @@ async function openIdle() {
   const persist = idleUnlocked();
   window.__idleCfg = { persist };
   if (persist && fbReady && myUid) { try { const o = await RPC.get("idleBoard/" + myUid); _idleLast = Math.max(_idleLast, Number(o && o.total) || 0); } catch (e) {} }
+  if (persist) { try { await idleCloudLoad(); } catch (e) {} }
   const src = document.getElementById("idleSrc").textContent.replace(/<\\\/script>/g, "<" + "/script>");
   const ov = document.createElement("div"); ov.id = "idleOverlay";
   ov.style.cssText = "position:fixed;inset:0;z-index:8000;background:#0b0f15;display:flex;flex-direction:column;";
