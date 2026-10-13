@@ -1574,6 +1574,13 @@ async function rpcSendChat(name, text) {
   const uid = requireUid();
   return push(ref(db, "chat"), { uid, name, text: String(text).slice(0, 200), ts: Date.now() });
 }
+async function rpcSendIdleChat(name, text) {
+  const uid = requireUid(); requireNotBanned();
+  return push(ref(db, "idleChat"), { uid, name, text: String(text).slice(0, 200), ts: Date.now() });
+}
+function rpcOnIdleChat(cb) {
+  return onValue(query(ref(db, "idleChat"), limitToLast(50)), snap => cb(snap.val()));
+}
 function rpcOnChat(cb) {
   return onValue(query(ref(db, "chat"), limitToLast(50)), snap => cb(snap.val()));
 }
@@ -2055,7 +2062,7 @@ window._dobRPC = {
   setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
-  sendChat: rpcSendChat, onChat: rpcOnChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
+  sendChat: rpcSendChat, onChat: rpcOnChat, sendIdleChat: rpcSendIdleChat, onIdleChat: rpcOnIdleChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
 };
 // ═══ CLIENT-VERSION: nur die aktuellste Version darf schreiben ═══
 // Jeder Client traegt nach dem Login clientVer/{uid} = CLIENT_VER ein. Die Database Rules lassen JEDEN Schreibzugriff
@@ -10834,6 +10841,165 @@ window.idleReport = function (total, best, force) {
   } catch (e) {}
 };
 
+
+// ═══ IDLE: Global Idle Chat (links) + Live-Rangliste (rechts) ═══
+const _IS = { unChat: null, unBoard: null, tim: null, rt: null, prev: {}, board: null, msgs: null, sent: [], lastTxt: "", lastAt: 0 };
+(function () {
+  const st = document.createElement("style");
+  st.textContent = `
+#idleOverlay .is-tabs{display:none;gap:6px;padding:6px 10px;background:#0b0f15;border-bottom:1px solid #252e3d;flex:none}
+#idleOverlay .is-tabs button{flex:1;margin:0;padding:6px 4px;font:700 13px Rajdhani,sans-serif;text-transform:uppercase;letter-spacing:.06em;background:rgba(16,18,26,.85);color:#8b93a6;border:1px solid rgba(255,255,255,.10);border-radius:8px}
+#idleOverlay .is-tabs button.on{color:#00ff88;border-color:#00ff88}
+#idleOverlay .is-grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(210px,.85fr) minmax(0,1.75fr) minmax(190px,.9fr);gap:8px;padding:8px;background:#0b0f15}
+#idleOverlay .is-p{display:flex;flex-direction:column;min-height:0;background:rgba(16,18,26,.85);border:1px solid rgba(255,255,255,.10);border-radius:10px;overflow:hidden;color:#eaf2fb;font:13px Sora,sans-serif}
+#idleOverlay .is-chat{border-left:3px solid #00c8ff}
+#idleOverlay .is-lb{border-top:3px solid #ffd700}
+#idleOverlay .is-h{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font:700 15px Rajdhani,sans-serif;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.08)}
+#idleOverlay .is-h small{font:600 11px Sora,sans-serif;color:#8b93a6;text-transform:none;letter-spacing:0}
+#idleOverlay .is-msgs{flex:1;min-height:0;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+#idleOverlay .is-m{padding:4px 7px;border-radius:6px;word-break:break-word;line-height:1.35}
+#idleOverlay .is-m.me{background:rgba(0,200,255,.10)}
+#idleOverlay .is-m i{color:#8b93a6;font-style:normal;font-size:10px;margin-right:5px}
+#idleOverlay .is-m b{font-family:Rajdhani,sans-serif;font-size:14px;margin-right:4px}
+#idleOverlay .is-m .mn{color:#00c8ff;font-weight:700}
+#idleOverlay .is-m .dev{color:#ff4d6d;font-weight:700;font-size:11px;margin-right:4px}
+#idleOverlay .is-in{display:flex;gap:6px;padding:8px;border-top:1px solid rgba(255,255,255,.08)}
+#idleOverlay .is-in input{flex:1;min-width:0;margin:0;padding:7px 9px;font-size:13px}
+#idleOverlay .is-in button{margin:0;padding:7px 12px;font-size:13px}
+#idleOverlay .is-lock{padding:10px;color:#8b93a6;font-size:12px;text-align:center;border-top:1px solid rgba(255,255,255,.08)}
+#idleOverlay .is-rows{flex:1;min-height:0;overflow-y:auto;padding:6px}
+#idleOverlay .is-r{display:grid;grid-template-columns:30px 1fr auto 18px;align-items:center;gap:6px;padding:7px 8px;border-radius:7px;margin-bottom:3px;cursor:pointer}
+#idleOverlay .is-r .rk{font:700 13px Orbitron,sans-serif;color:#8b93a6}
+#idleOverlay .is-r .nm{font:700 15px Rajdhani,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#idleOverlay .is-r .vl{font:700 12px Orbitron,sans-serif;color:#00ff88}
+#idleOverlay .is-r .dl{font-size:10px}
+#idleOverlay .is-r.g1{background:rgba(255,215,0,.10)}
+#idleOverlay .is-r.g1 .rk{color:#ffd700}
+#idleOverlay .is-r.me{background:rgba(0,255,136,.10);box-shadow:inset 3px 0 0 #00ff88}
+#idleOverlay .is-gap{text-align:center;color:#8b93a6;font-size:11px;padding:2px}
+#idleOverlay .is-ft{padding:8px 12px;border-top:1px solid rgba(255,255,255,.08);color:#8b93a6;font-size:12px;text-align:center}
+#idleOverlay .is-ft b{color:#ffd700;font-family:Orbitron,sans-serif}
+@media (max-width:980px){
+ #idleOverlay .is-tabs{display:flex}
+ #idleOverlay .is-grid{display:block;padding:0}
+ #idleOverlay .is-grid>*{display:none;height:100%;border-radius:0}
+ #idleOverlay .is-grid>.show{display:flex}
+ #idleOverlay .is-grid>iframe.show{display:block}
+}`;
+  document.head.appendChild(st);
+})();
+function idleSideBuild(fr) {
+  const T = s => (typeof tr === "function" ? tr(s) : s);
+  const grid = document.createElement("div"); grid.className = "is-grid";
+  const chat = document.createElement("div"); chat.className = "is-p is-chat";
+  chat.innerHTML = '<div class="is-h"><span>💬 ' + T("Idle chat") + '</span><small id="isOnline"></small></div><div class="is-msgs" id="isMsgs"></div><div id="isInWrap"></div>';
+  const lb = document.createElement("div"); lb.className = "is-p is-lb";
+  lb.innerHTML = '<div class="is-h"><span>💰 ' + T("Total money") + '</span><small>live</small></div><div class="is-rows" id="isRows"></div><div class="is-ft" id="isFt"></div>';
+  fr.classList.add("show"); grid.append(chat, fr, lb);
+  const tabs = document.createElement("div"); tabs.className = "is-tabs";
+  const parts = [["💬 " + T("Chat"), chat], ["🎮 " + T("Game"), fr], ["💰 " + T("Ranking"), lb]];
+  const show = i => { parts.forEach((p, j) => { p[1].classList.toggle("show", j === i); tabs.children[j].classList.toggle("on", j === i); }); };
+  parts.forEach((p, i) => { const b = document.createElement("button"); b.textContent = p[0]; b.onclick = () => show(i); tabs.appendChild(b); });
+  show(1);
+  // Eingabe
+  const wrapIn = chat.querySelector("#isInWrap");
+  if (!onlineAccount) {
+    wrapIn.innerHTML = '<div class="is-lock">🔒 ' + T("Create an account to be able to write in the chat.") + '</div>';
+  } else {
+    wrapIn.innerHTML = '<div class="is-in"><input id="isInp" maxlength="200" autocomplete="off" placeholder="' + T("Write a message…") + '"><button id="isSend">' + T("Send") + '</button></div>';
+    const inp = wrapIn.querySelector("#isInp"), btn = wrapIn.querySelector("#isSend");
+    const send = async () => {
+      const raw = inp.value.trim(); if (!raw) return;
+      const blk = _modChatBlock(); if (blk) { try { challengeToast(blk, "#ff4444"); } catch (e) {} return; }
+      const now = Date.now();
+      if (now - _IS.lastAt < 1000) return;
+      _IS.sent = _IS.sent.filter(t => now - t < 10000);
+      if (_IS.sent.length >= 5) { try { challengeToast("Slow down a bit.", "#ffb020"); } catch (e) {} return; }
+      if (raw === _IS.lastTxt) return;
+      const f = chatFilterEx(raw); if (f.hit) chatFilterNotice();
+      _IS.lastAt = now; _IS.lastTxt = raw; _IS.sent.push(now); inp.value = "";
+      try { await RPC.sendIdleChat(onlineAccount.name, f.text.slice(0, 200)); } catch (e) { try { challengeToast("Could not send message.", "#ff4444"); } catch (e2) {} }
+    };
+    btn.onclick = send; inp.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  }
+  idleSideStart();
+  return { grid, tabs };
+}
+function idleSideStart() {
+  idleSideStop(true);
+  if (!fbReady || !RPC) return;
+  try { _IS.unChat = RPC.onIdleChat(d => { _IS.msgs = d; idleChatRender(); }); } catch (e) {}
+  try { _IS.unBoard = dbOn("idleBoard", d => { _IS.board = d || {}; idleBoardSchedule(); }); } catch (e) {}
+  _IS.tim = setInterval(() => { idleBoardRender(); }, 5000);   // eigene Zeile live aus dem Spiel
+  idleBoardRender();
+}
+function idleSideStop(keep) {
+  if (_IS.unChat) { try { _IS.unChat(); } catch (e) {} _IS.unChat = null; }
+  if (_IS.unBoard) { try { _IS.unBoard(); } catch (e) {} _IS.unBoard = null; }
+  if (_IS.tim) { clearInterval(_IS.tim); _IS.tim = null; }
+  if (_IS.rt) { clearTimeout(_IS.rt); _IS.rt = null; }
+  if (!keep) { _IS.prev = {}; _IS.board = null; _IS.msgs = null; }
+}
+function idleChatRender() {
+  const box = document.getElementById("isMsgs"); if (!box) return;
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  const arr = Object.values(_IS.msgs || {}).filter(m => m && m.text).sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-50);
+  box.textContent = "";
+  if (!arr.length) { const e = document.createElement("div"); e.className = "is-gap"; e.textContent = "No messages yet."; box.appendChild(e); }
+  const me = onlineAccount && String(onlineAccount.name).toLowerCase();
+  for (const m of arr) {
+    const row = document.createElement("div"); row.className = "is-m";
+    const mine = myUid && m.uid === myUid; if (mine) row.classList.add("me");
+    const tm = document.createElement("i"); const d = new Date(m.ts || 0); tm.textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    const nm = document.createElement("b"); nm.textContent = dn(m.name || "?"); nm.dataset.uid = m.uid || "";
+    try { chatStyleName(nm, m.uid); } catch (e) {}
+    row.append(tm);
+    if (m.name === "DarkOnBalls" || m.dev) { const dv = document.createElement("span"); dv.className = "dev"; dv.textContent = "[DEV]"; row.append(dv); }
+    row.append(nm);
+    String(m.text).split(/(@\w+)/g).forEach(part => {
+      if (!part) return;
+      if (/^@\w+$/.test(part)) { const s = document.createElement("span"); s.className = "mn"; s.textContent = part; row.append(s); }
+      else row.append(document.createTextNode(part));
+    });
+    box.appendChild(row);
+  }
+  const on = document.getElementById("isOnline"); if (on) { const n = new Set(arr.filter(m => Date.now() - (m.ts || 0) < 600000).map(m => m.uid)).size; on.textContent = n ? n + " active" : ""; }
+  if (near || !box._init) { box.scrollTop = box.scrollHeight; box._init = true; }
+}
+function idleBoardSchedule() { if (_IS.rt) return; _IS.rt = setTimeout(() => { _IS.rt = null; idleBoardRender(); }, 1500); }
+function idleBoardRender() {
+  const rowsEl = document.getElementById("isRows"); if (!rowsEl || !_IS.board) return;
+  const pl = window._lastPlayersData;
+  const mine = (() => { try { const f = document.querySelector("#idleOverlay iframe"); return Number(f.contentWindow.__ib.S().c.tot) || 0; } catch (e) { return 0; } })();
+  const list = Object.entries(_IS.board).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
+  if (myUid && onlineAccount && mine > 0) { const e = list.find(x => x.uid === myUid); if (e) { if (mine > e.total) e.total = mine; } else list.push({ uid: myUid, total: mine, ts: Date.now(), name: onlineAccount.name }); }
+  const rows = list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
+  rowsEl.textContent = "";
+  const mi = rows.findIndex(r => r.uid === myUid);
+  const idx = []; for (let i = 0; i < Math.min(5, rows.length); i++) idx.push(i);
+  if (mi >= 5) idx.push(mi);
+  let last = -1;
+  for (const i of idx) {
+    if (last >= 0 && i - last > 1) { const g = document.createElement("div"); g.className = "is-gap"; g.textContent = "⋮ " + (i - last - 1) + " players"; rowsEl.appendChild(g); }
+    last = i; const r = rows[i];
+    const row = document.createElement("div"); row.className = "is-r" + (i === 0 ? " g1" : "") + (r.uid === myUid ? " me" : "");
+    const rk = document.createElement("span"); rk.className = "rk"; rk.textContent = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = dn(r.name); try { chatStyleName(nm, r.uid); } catch (e) {}
+    const vl = document.createElement("span"); vl.className = "vl"; vl.textContent = "$" + idleFmt(r.total);
+    const dl = document.createElement("span"); dl.className = "dl";
+    const pv = _IS.prev[r.uid]; if (pv !== undefined && pv !== i) { dl.textContent = i < pv ? "▲" : "▼"; dl.style.color = i < pv ? "#00ff88" : "#ff4444"; }
+    row.append(rk, nm, vl, dl); row.onclick = () => { try { openOnlineProfile(r.uid); } catch (e) {} };
+    rowsEl.appendChild(row);
+  }
+  if (!rows.length) rowsEl.innerHTML = '<div class="is-gap">No Idle records yet</div>';
+  if (!_IS.pvT || Date.now() - _IS.pvT > 30000) { _IS.prev = {}; rows.forEach((r, i) => { _IS.prev[r.uid] = i; }); _IS.pvT = Date.now(); }
+  const ft = document.getElementById("isFt");
+  if (ft) {
+    if (mi > 0) ft.innerHTML = "Gap to #" + mi + ": <b></b>", ft.querySelector("b").textContent = "$" + idleFmt(rows[mi - 1].total - rows[mi].total);
+    else if (mi === 0) ft.textContent = "👑 You are #1";
+    else ft.textContent = onlineAccount ? "" : "Log in to join the ranking";
+  }
+}
 async function openIdle() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   if (!idleCanPlay()) { try { leagueToast("🔒 Idle Brick Breaker opens in " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
@@ -10851,9 +11017,10 @@ async function openIdle() {
   info.textContent = persist ? (onlineAccount ? "💾 Progress saved · counts for the 💰 Idle leaderboard" : "💾 Progress saved on this device · log in to join the leaderboard") : "🛡 Mod test – nothing is saved";
   const vn = document.createElement("span"); vn.id = "idleViewN"; vn.style.cssText = "margin-left:auto;font-size:12px;opacity:.9;";
   bar.append(home, info, vn);
-  const fr = document.createElement("iframe"); fr.style.cssText = "flex:1;width:100%;border:0;background:#0b0f15;"; fr.setAttribute("title", "Idle Brick Breaker");
+  const fr = document.createElement("iframe"); fr.style.cssText = "flex:1;width:100%;height:100%;min-width:0;border:0;background:#0b0f15;"; fr.setAttribute("title", "Idle Brick Breaker");
   fr.srcdoc = src;
-  ov.append(bar, fr); document.body.appendChild(ov);
+  const wrap = idleSideBuild(fr);
+  ov.append(bar, wrap.tabs, wrap.grid); document.body.appendChild(ov);
   window.__idleOpen = true; try { syncPresence(true); } catch (e) {}
   try { idleLiveStart(); } catch (e) {}
   home.onclick = () => closeIdle();
@@ -10865,6 +11032,7 @@ function closeIdle() {
     if (window.__idleCfg && window.__idleCfg.persist && w.__ib) { w.__ib.save(); const S = w.__ib.S(); window.idleReport(S.c.tot, S.best, true); }
   } catch (e) {}
   try { idleLiveStop(); } catch (e) {}
+  try { idleSideStop(); } catch (e) {}
   ov.remove(); window.__idleOpen = false; window.__idleCfg = null;
   try { syncPresence(true); } catch (e) {}
 }
@@ -11063,7 +11231,7 @@ const DICT = { de: {
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
   "🔒 Create an account to be able to write in the chat.":"🔒 Erstelle einen Account, um im Chat schreiben zu können.",
   "Create account":"Account erstellen","Send":"Senden","No messages yet.":"Noch keine Nachrichten.",
-  "🌐 Online":"🌐 Online","🎮 Offline":"🎮 Offline","⚙️ Settings":"⚙️ Einstellungen","⚔️ Online 1v1":"⚔️ Online 1v1",
+  "Idle chat":"Idle-Chat","Total money":"Gesamtgeld","Chat":"Chat","Game":"Spiel","Ranking":"Rangliste","Write a message…":"Nachricht schreiben…","🌐 Online":"🌐 Online","🎮 Offline":"🎮 Offline","⚙️ Settings":"⚙️ Einstellungen","⚔️ Online 1v1":"⚔️ Online 1v1",
   "📺 Best Online TV":"📺 Bestes Online-TV","🏆 Leaderboard":"🏆 Rangliste","← Back":"← Zurück",
   "Singleplayer":"Einzelspieler","Multiplayer (local)":"Mehrspieler (lokal)","AI Spectate":"KI zuschauen",
   "1vs1 Tournament":"1vs1-Turnier","🪙 Coin Hunt":"🪙 Münzjagd","⚙️ Offline Settings":"⚙️ Offline-Einstellungen",
