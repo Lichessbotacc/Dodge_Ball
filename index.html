@@ -10708,8 +10708,8 @@ gameWrap.addEventListener("touchstart", e => {
   }
   function tokenGain() { return Math.floor(tokenBase(S.wv) * M.prest); }
   function prBonusHtml() {
-    function x(v) { return "×" + (v >= 100 ? fmt(v) : v.toFixed(2)); }
-    return "<b>Active bonuses</b><br>Prestige reward (tokens): " + x(M.prest) + " · Stage-Bonus: " + x(M.sb) + " · Brick money: " + x(M.bc) + " · Power: " + x(M.pow) + " · Speed: " + x(M.spd) + " · Cash brick bonus: " + x(M.cbb) + " · Max balls: " + M.maxBalls;
+    var base = tokenBase(S.wv), m = M.prest, tot = tokenGain();
+    return "<b>Reward:</b> " + fmt(base) + " PT × " + (m >= 100 ? fmt(m) : m.toFixed(2)) + " (Prestige reward) = <b class='gold'>" + fmt(tot) + " PT</b>";
   }
   function renderPrestige() {
     var gain = tokenGain(), c = card("<div class='head'><b>Prestige</b><small>" + S.pCount + "× · " + fmt(S.tokens) + " PT</small></div><small>From $10.00M world value. Resets level, money, balls and perks. You keep cards, gems and badges. Current world value: $" + fmt(S.wv) + "</small>");
@@ -10774,7 +10774,7 @@ gameWrap.addEventListener("touchstart", e => {
   }
   function wakeLock() { try { if (S.wake && navigator.wakeLock) navigator.wakeLock.request("screen").catch(function () {}); } catch (e) {} }
   function hud() {
-    try { $("sc").textContent = fmt(0.7 * stageSum * M.sb); $("scx").textContent = M.sb > 1 ? "(Stage-Bonus ×" + (M.sb >= 100 ? fmt(M.sb) : M.sb.toFixed(2)) + ")" : ""; var pb = $("prbonus"); if (pb) pb.innerHTML = prBonusHtml(); } catch (e) {}
+    try { $("sc").textContent = fmt(0.7 * stageSum * M.sb); $("scx").textContent = M.sb > 1 ? "(" + fmt(0.7 * stageSum) + " × " + (M.sb >= 100 ? fmt(M.sb) : M.sb.toFixed(2)) + ")" : ""; var pb = $("prbonus"); if (pb) pb.innerHTML = prBonusHtml(); } catch (e) {}
     $("money").textContent = "$" + fmt(S.cash); $("rate").textContent = fmt(rate()); $("wv").textContent = fmt(S.wv);
     $("lvl").textContent = S.level; $("gl").textContent = S.goldStage ? " ★ Gold" : ""; $("gems").textContent = S.gems; $("ptv").textContent = fmt(S.tokens);
   }
