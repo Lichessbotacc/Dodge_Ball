@@ -10060,7 +10060,7 @@ gameWrap.addEventListener("touchstart", e => {
   function baseCost(slot) { return slot === 1 ? 25 : UNLOCK[slot] / 3; }
   function maxOwn(t) { return t.max || 50; }
   function powMax(t) { return t.powMax ? t.powMax - 1 : Infinity; }
-  var SPD_MAX = 98;
+  var SPD_MAX = Infinity;
 
   // ════════ Perks (Wiki: 11 Typen, max. 50 pro Welt) ════════
   var PK = [
@@ -10282,7 +10282,7 @@ gameWrap.addEventListener("touchstart", e => {
     return BP(st.slot) * t.pm * (st.pow + 1) * M.pow * Math.pow(5, st.bp) * (S.specBall === t.id ? M.spec : 1) * (rageT > 0 ? M.rage : 1);
   }
   function speedOf(t) {
-    var st = S.balls[t.id], s = 60 * Math.min(8.5, 1.245 * Math.pow(st.spd + 1, 0.735)) * t.sm * M.spd * Math.pow(0.4, st.bp);
+    var st = S.balls[t.id], s = 60 * 1.245 * Math.pow(st.spd + 1, 0.735) * t.sm * M.spd * Math.pow(0.4, st.bp);
     return s;
   }
   // Ball +1, Power und Speed kosten auf gleicher Stufe gleich viel (Stufe n = naechster Ball / naechstes Power-Level / naechstes Speed-Level).
