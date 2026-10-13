@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2269,7 +2268,7 @@ async function _presenceRescue(n) {
   else {
     try {
       const pd = await RPC.get("players");
-      if (pd) { window._lastPlayersData = pd; renderPresence(pd); try { recolorChatNames(); } catch (e) {} try { startMenuPresenceListener(); } catch (e) {} return; }
+      if (pd) { window._lastPlayersData = pd; renderPresence(pd); try { startMenuPresenceListener(); } catch (e) {} return; }
       why = "Connected, but the player list does not arrive.";
     } catch (e) { why = "Server error: " + (e.code || e.message); }
   }
@@ -2832,8 +2831,6 @@ function chatStyleName(el, uid) {
 }
 function recolorChatNames() {
   document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
-  // Rang-Tags haengen ebenfalls an den Spielerdaten, die meist erst NACH dem ersten Chat-Render ankommen -> neu zeichnen
-  try { if (typeof chatAll !== "undefined" && Object.keys(chatAll).length) renderChat(false); } catch (e) {}
 }
 
 // Rang-Tag im Chat: Top 5 der ELO-Rangliste (gleiche Regeln wie die Rangliste: mind. 1 Partie, ein Eintrag pro Name)
@@ -9913,56 +9910,67 @@ gameWrap.addEventListener("touchstart", e => {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Idle Brick Breaker</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Orbitron:wght@700;800&family=Sora:wght@400;600;700&display=swap">
 <style>
-  :root { --bg:#eef1f6; --panel:#ffffff; --fg:#141922; --muted:#5a6475; --line:#d9dfe9; --accent:#1c6bff; --accent-fg:#fff; --good:#10895a; --gold:#b07d00; --stage:#0a0c13; --off:#e8ecf3; --danger:#d23b4b; --pur:#8a3ffc; color-scheme:light; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0b0f15; --panel:#151a23; --fg:#e8edf5; --muted:#8c97a9; --line:#252e3d; --accent:#5b9bff; --accent-fg:#06101f; --good:#4fd69a; --gold:#ffd24a; --stage:#06080d; --off:#1a212e; --danger:#ff6b7a; --pur:#b78bff; color-scheme:dark; } }
-  :root[data-theme="dark"] { --bg:#0b0f15; --panel:#151a23; --fg:#e8edf5; --muted:#8c97a9; --line:#252e3d; --accent:#5b9bff; --accent-fg:#06101f; --good:#4fd69a; --gold:#ffd24a; --stage:#06080d; --off:#1a212e; --danger:#ff6b7a; --pur:#b78bff; color-scheme:dark; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 "Sora",system-ui,sans-serif; padding-inline:14px; padding-block:14px 40px; }
-  main { max-width:470px; margin-inline:auto; display:flex; flex-direction:column; gap:10px; position:relative; }
-  .hud { display:grid; grid-template-columns:1fr auto; gap:2px 12px; align-items:end; }
-  .money { font-size:1.75rem; font-weight:700; letter-spacing:-.02em; color:var(--good); font-variant-numeric:tabular-nums; }
-  .sub { color:var(--muted); font-size:.76rem; font-variant-numeric:tabular-nums; }
-  .r { text-align:right; } .gem { color:var(--accent); font-weight:600; }
-  canvas { width:min(100%, calc((100vh - 175px) * 500 / 745)); width:min(100%, calc((100dvh - 175px) * 500 / 745)); margin-inline:auto; aspect-ratio:500/745; background:var(--stage); border:1px solid var(--line); border-radius:12px; display:block; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
-  .tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
-  .tabs button { font:inherit; font-size:.68rem; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 0; cursor:pointer; position:relative; }
-  .tabs button[aria-pressed="true"] { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
-  .dot { position:absolute; top:3px; right:4px; width:7px; height:7px; border-radius:50%; background:var(--danger); }
-  .panel { display:flex; flex-direction:column; gap:8px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  :root { --bg:#070a11; --panel:rgba(22,28,42,.78); --panel2:rgba(255,255,255,.04); --fg:#eef3fb; --muted:#8a97ad; --line:rgba(255,255,255,.09); --accent:#00c8ff; --accent-fg:#031018; --good:#00ff88; --gold:#ffd24a; --stage:#04060b; --off:rgba(255,255,255,.05); --danger:#ff5468; --pur:#b78bff; color-scheme:dark; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { background:var(--bg); }
+  body { margin:0; color:var(--fg); font:14px/1.45 "Rajdhani","Sora",system-ui,sans-serif; font-weight:500; padding-inline:14px; padding-block:14px 48px; min-height:100vh;
+    background:radial-gradient(900px 500px at 15% -10%,rgba(0,200,255,.13),transparent 60%),radial-gradient(800px 500px at 100% 0%,rgba(183,139,255,.12),transparent 60%),var(--bg); background-attachment:fixed; }
+  main { max-width:480px; margin-inline:auto; display:flex; flex-direction:column; gap:12px; position:relative; }
+  .hud { display:grid; grid-template-columns:1fr auto; gap:8px 12px; align-items:center; padding:12px 14px; border-radius:16px; background:var(--panel); border:1px solid var(--line); backdrop-filter:blur(10px); box-shadow:0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06); }
+  .money { font-family:"Orbitron","Rajdhani",sans-serif; font-size:1.65rem; font-weight:800; letter-spacing:.01em; color:var(--good); text-shadow:0 0 18px rgba(0,255,136,.35); font-variant-numeric:tabular-nums; line-height:1.1; }
+  .sub { color:var(--muted); font-size:.82rem; font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+  .r { display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
+  .lvlchip { font-family:"Orbitron","Rajdhani",sans-serif; font-weight:700; font-size:.82rem; padding:4px 11px; border-radius:999px; background:linear-gradient(135deg,rgba(0,200,255,.22),rgba(183,139,255,.22)); border:1px solid rgba(0,200,255,.4); letter-spacing:.05em; }
+  .chips { display:flex; gap:6px; }
+  .chip { font-size:.8rem; font-weight:700; padding:3px 9px; border-radius:999px; background:var(--off); border:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .gem { color:var(--accent); font-weight:700; }
+  canvas { width:min(100%, calc((100vh - 235px) * 500 / 745)); width:min(100%, calc((100dvh - 235px) * 500 / 745)); margin-inline:auto; aspect-ratio:500/745; background:var(--stage); border:1px solid rgba(0,200,255,.25); border-radius:16px; display:block; touch-action:manipulation; user-select:none; -webkit-user-select:none; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 36px rgba(0,200,255,.12), 0 14px 40px rgba(0,0,0,.5); }
+  .tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; padding:5px; border-radius:14px; background:var(--panel); border:1px solid var(--line); position:sticky; bottom:8px; z-index:5; backdrop-filter:blur(12px); }
+  .tabs button { font:inherit; font-size:.78rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; background:transparent; color:var(--muted); border:1px solid transparent; border-radius:10px; padding:7px 0 6px; cursor:pointer; position:relative; display:flex; flex-direction:column; align-items:center; gap:1px; transition:background .15s,color .15s,transform .1s; }
+  .tabs button .ti { font-size:1.05rem; line-height:1.1; }
+  .tabs button:active { transform:scale(.96); }
+  .tabs button[aria-pressed="true"] { background:linear-gradient(135deg,var(--accent),#6d8bff); color:var(--accent-fg); box-shadow:0 4px 16px rgba(0,200,255,.3); }
+  .dot { position:absolute; top:3px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--danger); box-shadow:0 0 8px var(--danger); animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform:scale(1.35); opacity:.7; } }
+  .panel { display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; min-width:0; backdrop-filter:blur(8px); box-shadow:0 4px 18px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04); }
   .head { display:flex; align-items:center; gap:8px; justify-content:space-between; }
-  .head b { font-weight:600; display:flex; align-items:center; gap:7px; }
-  .sw { width:11px; height:11px; border-radius:50%; display:inline-block; }
-  .btns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
-  .btns2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
-  .b { font:inherit; font-size:.74rem; text-align:left; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:7px 8px; cursor:pointer; display:flex; flex-direction:column; gap:1px; min-width:0; }
-  .b span { color:var(--accent); font-weight:600; font-variant-numeric:tabular-nums; }
-  .b:disabled { background:var(--off); cursor:not-allowed; } .b:disabled span { color:var(--muted); }
-  .b:not(:disabled):hover { border-color:var(--accent); }
-  .b.pur { border-color:var(--pur); } .b.pur span { color:var(--pur); }
-  .b.on { border-color:var(--good); }
-  .wide { width:100%; flex-direction:row; justify-content:space-between; align-items:center; font-size:.82rem; }
-  small, .mut { color:var(--muted); font-size:.76rem; }
-  .bar { height:6px; background:var(--off); border-radius:4px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--accent); }
+  .head b { font-family:"Orbitron","Rajdhani",sans-serif; font-weight:700; font-size:.88rem; letter-spacing:.03em; display:flex; align-items:center; gap:8px; }
+  .sw { width:12px; height:12px; border-radius:50%; display:inline-block; box-shadow:0 0 10px currentColor, inset 0 0 0 1px rgba(255,255,255,.35); }
+  .btns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+  .btns2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+  .b { font:inherit; font-size:.86rem; font-weight:600; text-align:left; background:var(--panel2); color:var(--fg); border:1px solid var(--line); border-radius:11px; padding:8px 10px; cursor:pointer; display:flex; flex-direction:column; gap:1px; min-width:0; transition:border-color .15s, background .15s, transform .08s, box-shadow .15s; }
+  .b span { color:var(--accent); font-weight:700; font-variant-numeric:tabular-nums; font-size:.84rem; }
+  .b:disabled { background:var(--off); cursor:not-allowed; opacity:.62; } .b:disabled span { color:var(--muted); }
+  .b:not(:disabled):hover { border-color:var(--accent); background:rgba(0,200,255,.08); box-shadow:0 0 14px rgba(0,200,255,.15); }
+  .b:not(:disabled):active { transform:scale(.97); }
+  .b.pur { border-color:rgba(183,139,255,.5); } .b.pur span { color:var(--pur); }
+  .b.pur:not(:disabled):hover { background:rgba(183,139,255,.1); border-color:var(--pur); box-shadow:0 0 14px rgba(183,139,255,.2); }
+  .b.on { border-color:var(--good); box-shadow:0 0 12px rgba(0,255,136,.18); }
+  .wide { width:100%; flex-direction:row; justify-content:space-between; align-items:center; font-size:.9rem; }
+  small, .mut { color:var(--muted); font-size:.84rem; }
+  .bar { height:7px; background:var(--off); border-radius:5px; overflow:hidden; } .bar i { display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--pur)); border-radius:5px; }
   .lock { opacity:.85; }
-  .rar0 { border-left:3px solid var(--muted); } .rar1 { border-left:3px solid var(--accent); } .rar2 { border-left:3px solid var(--pur); }
+  .rar0 { border-left:3px solid var(--muted); } .rar1 { border-left:3px solid var(--accent); box-shadow:-6px 0 18px -10px rgba(0,200,255,.6); } .rar2 { border-left:3px solid var(--pur); box-shadow:-6px 0 18px -10px rgba(183,139,255,.7); }
   button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-  .ov { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
-  .modal { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; width:min(420px,100%); display:flex; flex-direction:column; gap:10px; }
-  .modal h2 { margin:0; font-size:1.1rem; }
-  #toast { min-height:1.2em; color:var(--good); font-size:.82rem; }
-  .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-  .gold { color:var(--gold); font-weight:600; }
-  table { width:100%; border-collapse:collapse; font-size:.8rem; } td { padding:4px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .ov { position:fixed; inset:0; background:rgba(2,4,9,.72); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; animation:fade .18s ease; }
+  .modal { background:linear-gradient(180deg,rgba(28,36,54,.98),rgba(16,21,33,.98)); border:1px solid rgba(0,200,255,.3); border-radius:18px; padding:18px; width:min(430px,100%); display:flex; flex-direction:column; gap:12px; box-shadow:0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(0,200,255,.1); animation:pop .2s ease; }
+  .modal h2 { margin:0; font-family:"Orbitron","Rajdhani",sans-serif; font-size:1.05rem; letter-spacing:.04em; }
+  @keyframes fade { from { opacity:0; } } @keyframes pop { from { opacity:0; transform:translateY(10px) scale(.97); } }
+  #toast { min-height:1.3em; color:var(--good); font-size:.92rem; font-weight:700; text-align:center; text-shadow:0 0 10px rgba(0,255,136,.3); }
+  .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .gold { color:var(--gold); font-weight:700; text-shadow:0 0 10px rgba(255,210,74,.5); }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; } td { padding:6px 0; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-variant-numeric:tabular-nums; font-weight:700; } tr:last-child td { border-bottom:0; }
+  ::-webkit-scrollbar { width:8px; } ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.15); border-radius:4px; }
 </style>
 </head>
 <body>
 <main>
   <div class="hud">
     <div><div class="money" id="money">$0</div><div class="sub">$<span id="rate">0</span>/s · World value $<span id="wv">0</span></div></div>
-    <div class="r"><div style="font-weight:600">Level <span id="lvl">1</span><span id="gl" class="gold"></span></div><div class="sub"><span class="gem" id="gems">0</span> 💎 · <span id="ptv">0</span> PT</div></div>
+    <div class="r"><div class="lvlchip">LEVEL <span id="lvl">1</span><span id="gl" class="gold"></span></div><div class="chips"><span class="chip"><span class="gem" id="gems">0</span> 💎</span><span class="chip"><span id="ptv">0</span> PT</span></div></div>
   </div>
   <canvas id="c" width="500" height="745"></canvas>
   <div id="toast"></div>
@@ -9976,6 +9984,7 @@ gameWrap.addEventListener("touchstart", e => {
   var W = 500, H = 745, COLS = 9, ROWS = 30, PITCH = 24.5, MX = 67.5, BW = (W - 2 * MX) / COLS, BH = 22, GAP = 2, FIELD_Y = 0, KEY = "idleBrickBreaker_v5", TAU = Math.PI * 2;
   function $(id) { return document.getElementById(id); }
   var cv = $("c"), cx = cv.getContext("2d");
+  var DPR = Math.min(3, window.devicePixelRatio || 1); cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);   // scharf auf Retina/Handy-Displays
   var S, M = {}, bricks = [], balls = [], pel = [], fx = [], ass = null, stageSum = 0, piT = 0, fireT = 0;
   var rageT = 0, rageCnt = 0, laserT = 0;
   var TAP = { id: "tap" }, BOOM = { id: "boom" };
@@ -10312,8 +10321,8 @@ gameWrap.addEventListener("touchstart", e => {
     if (b.bomb) explode(b.x + b.w / 2, b.y + b.h / 2, BW * 1.5 * M.splR, 0.6 * b.max, b, BOOM);
     if (!b.noClear && bricks.every(function (x) { return x.gem; })) clearLevel(); // Gem-Steine dürfen übrig bleiben (Wiki: man kann sie verpassen)
   }
-  function advance() {
-    S.level++; S.c.cleared++; S.gemProg = (S.gemProg || 0) + 1; if (S.gemProg >= 150) { S.gemProg = 0; if (S.gemPool < 3) S.gemPool++; } if (S.level > S.best) S.best = S.level;
+  function advance(noGem) {
+    S.level++; S.c.cleared++; if (!noGem) S.gemProg = (S.gemProg || 0) + 1; if (S.gemProg >= 150) { S.gemProg = 0; if (S.gemPool < 3) S.gemPool++; } if (S.level > S.best) S.best = S.level;
     if (S.level % 10 === 0) balls.forEach(function (b) { if (!b.hits) { b.x = W / 2; b.y = H / 2; } b.hits = 0; }); // Wiki: alle 10 Stages Ball ohne Treffer zurück in die Mitte
     while (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) S.pend = rollPerks();
   }
@@ -10323,8 +10332,8 @@ gameWrap.addEventListener("touchstart", e => {
     var now = Date.now(), dt = (now - lvlStart) / 1000; lvlStart = now; if (dt > 0.5 && dt < 3600) S.lvT = S.lvT ? S.lvT * 0.9 + dt * 0.1 : dt;
     advance(); layout();
     var guard = 0;
-    while (Math.random() < M.skip && guard++ < 200) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(); layout(); }
-    if (M.bh > 0 && Math.random() < 0.01) { for (var w = 0; w < M.bh; w++) advance(); layout(); S.c.skipped += M.bh; toast("Black Hole: +" + M.bh + " levels!"); }
+    while (Math.random() < M.skip && guard++ < 200) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(true); layout(); }
+    if (M.bh > 0 && Math.random() < 0.01) { for (var w = 0; w < M.bh; w++) advance(true); layout(); S.c.skipped += M.bh; toast("Black Hole: +" + M.bh + " levels!"); }
     checkAch(); renderTabs(); if (tab === "perks" || tab === "stats") renderPanel();
   }
   function explode(x0, y0, R, d, skip, ball) {
@@ -10472,6 +10481,7 @@ gameWrap.addEventListener("touchstart", e => {
 
   // ════════ Zeichnen ════════
   function draw() {
+    cx.setTransform(DPR, 0, 0, DPR, 0, 0);
     cx.clearRect(0, 0, W, H);
     if (S.goldStage) { cx.fillStyle = "rgba(255,200,40,.08)"; cx.fillRect(0, 0, W, H); }
     bricks.forEach(function (b) {
@@ -10488,7 +10498,17 @@ gameWrap.addEventListener("touchstart", e => {
       cx.fillText((b.cash ? "$ " : b.bomb ? "● " : b.gem ? "◆ " : "") + fmt(b.hp), b.x + b.w / 2, b.y + b.h / 2 + 3.2);
     });
     pel.forEach(function (p) { cx.fillStyle = "#ff7ad9"; cx.beginPath(); cx.arc(p.x, p.y, 2.5, 0, TAU); cx.fill(); });
-    balls.forEach(function (b) { cx.fillStyle = b.t.col; cx.beginPath(); cx.arc(b.x, b.y, 5, 0, TAU); cx.fill(); });
+    var _tr = !S.fxOff && balls.length <= 120;
+    balls.forEach(function (b) {
+      if (_tr) {   // Schweif: letzte Positionen, ausfadend
+        var T = b.tr || (b.tr = []); T.push(b.x, b.y); if (T.length > 12) T.splice(0, 2);
+        cx.strokeStyle = b.t.col; cx.lineCap = "round";
+        for (var q = 2; q < T.length; q += 2) { cx.globalAlpha = .06 + .3 * q / T.length; cx.lineWidth = 1.5 + 3 * q / T.length; cx.beginPath(); cx.moveTo(T[q - 2], T[q - 1]); cx.lineTo(T[q], T[q + 1]); cx.stroke(); }
+        cx.globalAlpha = 1;
+      } else if (b.tr) b.tr = null;
+      cx.fillStyle = b.t.col; cx.beginPath(); cx.arc(b.x, b.y, 5, 0, TAU); cx.fill();
+      cx.fillStyle = "rgba(255,255,255,.55)"; cx.beginPath(); cx.arc(b.x - 1.6, b.y - 1.7, 1.7, 0, TAU); cx.fill();   // Glanzpunkt
+    });
     if (ass) { cx.fillStyle = "#ff3355"; cx.beginPath(); cx.arc(ass.x, ass.y, 5, 0, TAU); cx.fill(); }
     for (var i = fx.length - 1; i >= 0; i--) {
       var f = fx[i]; f.t += f.ring ? .06 : .03; if (f.t >= 1) { fx.splice(i, 1); continue; }
@@ -10501,12 +10521,12 @@ gameWrap.addEventListener("touchstart", e => {
   }
 
   // ════════ UI ════════
-  var TABS = [["balls", "Balls"], ["cards", "Cards"], ["perks", "Perks"], ["prestige", "Prestige"], ["stats", "Stats"]], tab = "balls";
+  var TABS = [["balls", "Balls", "⚪"], ["cards", "Cards", "🃏"], ["perks", "Perks", "✨"], ["prestige", "Prestige", "🔥"], ["stats", "Stats", "📊"]], tab = "balls";
   var tabsEl = $("tabs"), panel = $("panel"), ballEls = {};
   function renderTabs() {
     tabsEl.innerHTML = "";
     TABS.forEach(function (x) {
-      var b = document.createElement("button"); b.type = "button"; b.textContent = x[1]; b.setAttribute("aria-pressed", tab === x[0] ? "true" : "false");
+      var b = document.createElement("button"); b.type = "button"; b.innerHTML = '<span class="ti">' + x[2] + '</span><span>' + x[1] + '</span>'; b.setAttribute("aria-pressed", tab === x[0] ? "true" : "false");
       var dot = (x[0] === "prestige" && S.wv >= 1e7) || (x[0] === "cards" && S.gems >= CARD_COST && Object.keys(S.cards).length === 0);
       if (dot) { var d = document.createElement("i"); d.className = "dot"; b.appendChild(d); }
       b.addEventListener("click", function () { tab = x[0]; renderTabs(); renderPanel(); }); tabsEl.appendChild(b);
@@ -10676,14 +10696,31 @@ gameWrap.addEventListener("touchstart", e => {
     var ac = card("<b>Achievements</b>");
     ACH.forEach(function (a) { var l = S.ach[a.id] || 0, nxt = a.th[Math.min(l, 9)], v = a.val(); ac.insertAdjacentHTML("beforeend", "<div><div class='head'><span>" + a.name + " · " + l + "/10</span><small>" + (l >= 10 ? "done" : fmt(v) + " / " + fmt(nxt) + " · " + (5 * (l + 1)) + " 💎") + "</small></div><div class='bar'><i style='width:" + (l >= 10 ? 100 : Math.min(100, v / nxt * 100)) + "%'></i></div></div>"); });
     panel.appendChild(ac);
-    var o = card('<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wk"> Keep screen on</label>');
+    var o = card('<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wk"> Keep screen on</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="fxo"> Reduce effects (no ball trails)</label>');
+    o.querySelector("#fxo").checked = !!S.fxOff; o.querySelector("#fxo").addEventListener("change", function () { S.fxOff = this.checked; save(); });
     o.querySelector("#wk").checked = !!S.wake; o.querySelector("#wk").addEventListener("change", function () { S.wake = this.checked; wakeLock(); save(); });
     var sv = btn("Save now", "", function () { save(); toast("Saved"); });
     var rs = btn("Delete everything", "", function () {
       if (!rs._a) { rs._a = true; rs.firstChild.textContent = "Really delete?"; setTimeout(function () { rs._a = false; rs.firstChild.textContent = "Delete everything"; }, 3000); return; }
       try { localStorage.removeItem(KEY); } catch (e) {} S = fresh(); recalc(); rebuildBalls(); layout(); earnLog = []; renderTabs(); renderPanel();
     });
-    var rr = document.createElement("div"); rr.className = "btns2"; rr.append(sv, rs); o.appendChild(rr); panel.appendChild(o);
+    var ex = btn("Export save", "", function () {
+      var txt = JSON.stringify(S);
+      try { navigator.clipboard.writeText(txt).then(function () { toast("Save copied to clipboard"); }, function () { window.prompt("Copy your save:", txt); }); } catch (e) { window.prompt("Copy your save:", txt); }
+    });
+    var im = btn("Import save", "", function () {
+      var txt = window.prompt("Paste your save here:"); if (!txt) return;
+      try {
+        if (txt.length > 3e6) throw 0;
+        var d = JSON.parse(txt); if (!d || typeof d !== "object" || !d.balls || typeof d.balls !== "object") throw 0;
+        var f = fresh(), n = Object.assign(f, d);
+        BALLS.forEach(function (t) { n.balls[t.id] = Object.assign(fresh().balls[t.id], d.balls[t.id] || {}); });
+        n.c = Object.assign(newC(), d.c || {});
+        ["cash", "wv", "gems", "tokens", "level", "best"].forEach(function (k) { if (!isFinite(n[k]) || n[k] < 0) n[k] = f[k]; });
+        S = n; S.seen = Date.now(); recalc(); rebuildBalls(); layout(); earnLog = []; save(); renderTabs(); renderPanel(); toast("Save imported");
+      } catch (e) { toast("Invalid save – nothing was changed"); }
+    });
+    var rr = document.createElement("div"); rr.className = "btns2"; rr.append(sv, rs, ex, im); o.appendChild(rr); panel.appendChild(o);
     panel.appendChild(note("Taken from the wiki: ball unlock costs, brick health (all level jumps), perks (values and all 50 levels), prestige badges, all 22 cards with values, thresholds, rarities and draw chances, ball abilities and limits, offline earnings, gem pool. From screenshots: prices and power of Basic and Splash, level layouts. Still estimated: prices and power at higher tiers and other balls, base speed, prestige tokens, laser behavior, slot prices of card slots 5 to 15. Shield bricks are still missing."));
   }
   function checkAch() {
@@ -10707,7 +10744,7 @@ gameWrap.addEventListener("touchstart", e => {
     var msg = "Welcome back! Earned offline: $" + fmt(g);
     if (M.iskip > 0 && S.lvT > 0) {
       var n = Math.min(1000, Math.floor(sec * M.iskip / S.lvT));
-      if (n > 0) { for (var i = 0; i < n; i++) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(); } layout(); msg += " · " + n + " levels skipped"; }
+      if (n > 0) { for (var i = 0; i < n; i++) { earn(0.7 * stageSum * M.sb); S.c.skipped++; advance(true); } layout(); msg += " · " + n + " levels skipped"; }
     }
     toast(msg);
   }
@@ -10723,7 +10760,8 @@ gameWrap.addEventListener("touchstart", e => {
   load(); recalc();
   var off0 = (Date.now() - (S.seen || Date.now())) / 1000;
   rebuildBalls(); layout(); away(off0); checkAch(); renderTabs(); renderPanel(); wakeLock();
-  document.addEventListener("visibilitychange", function () { if (!document.hidden) wakeLock(); });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) save(); else wakeLock(); });
+  window.addEventListener("pagehide", function () { save(); });
   // ════════ Live snapshot for spectators (pulled by the parent page, only while someone is watching) ════════
   var snapRef = null, snapLid = 0, lastH = {};
   function r1(v) { return Math.round(v * 10) / 10; }
