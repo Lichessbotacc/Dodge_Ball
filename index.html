@@ -10258,13 +10258,17 @@ gameWrap.addEventListener("touchstart", e => {
     var st = S.balls[t.id], s = 60 * Math.min(8.5, 1.245 * Math.pow(st.spd + 1, 0.735)) * t.sm * M.spd * Math.pow(0.4, st.bp);
     return Math.min(s, 800);
   }
-  function cNew(t) { var st = S.balls[t.id], b = st.slot === 1 ? 510 / Math.pow(1.5, 8) : UNLOCK[st.slot] * 541 / 175 / 2.25; return Math.ceil(b * Math.pow(1.5, st.own) * M.dNew); }   // Screenshot: Basic mit 8 Bällen $510, Splash mit 2 Bällen $541 (exakt); +50 % pro Ball geschätzt
-  function cPow(t) { var st = S.balls[t.id], b = st.slot === 1 ? 248 / Math.pow(1.3, 5) : UNLOCK[st.slot] * 285 / 175 / 1.3; return Math.ceil(b * Math.pow(1.3, st.pow + 1) * M.dPow); }
-  function cSpd(t) { var st = S.balls[t.id], b = st.slot === 1 ? 38.9 : UNLOCK[st.slot] * 1.7; return Math.ceil(b * Math.pow(1.35, st.spd + 1) * M.dSpd); }
+  // Ball +1, Power und Speed kosten auf gleicher Stufe gleich viel (Stufe n = naechster Ball / naechstes Power-Level / naechstes Speed-Level).
+  function cBase(t) { var st = S.balls[t.id]; return st.slot === 1 ? 510 / Math.pow(1.5, 8) : UNLOCK[st.slot] * 541 / 175 / 2.25; }   // Screenshot: Basic mit 8 Bällen $510, Splash mit 2 Bällen $541; +50 % pro Stufe
+  function cNew(t) { return Math.ceil(cBase(t) * Math.pow(1.5, S.balls[t.id].own) * M.dNew * PRICE); }
+  function cPow(t) { return Math.ceil(cBase(t) * Math.pow(1.5, S.balls[t.id].pow) * M.dPow * PRICE); }
+  function cSpd(t) { return Math.ceil(cBase(t) * Math.pow(1.5, S.balls[t.id].spd) * M.dSpd * PRICE); }
 
   // ════════ Geld ════════
+  var PACE = 1;     // Einnahmen-Tempo: 1 = normal, <1 = langsamer
+  var PRICE = 1.5;  // Preisfaktor fuer alle Geld-Preise (Baelle, Power, Speed, neue Ball-Slots): 1 = Original, 1.5 = 50 % teurer
   function earn(g) {
-    if (!(g > 0)) return; S.cash += g; S.wv += g; S.c.tot += g;
+    if (!(g > 0)) return; g *= PACE; S.cash += g; S.wv += g; S.c.tot += g;
     var sec = Math.floor(Date.now() / 1000);
     if (earnLog.length && earnLog[earnLog.length - 1][0] === sec) earnLog[earnLog.length - 1][1] += g; else earnLog.push([sec, g]);
   }
@@ -10569,7 +10573,7 @@ gameWrap.addEventListener("touchstart", e => {
       panel.appendChild(c);
     });
     if (S.order.length < 12) {
-      var slot = S.order.length + 1, cost = UNLOCK[slot], av = BALLS.filter(function (t) { return t.tier <= Math.min(slot, 7) && S.order.indexOf(t.id) < 0; });
+      var slot = S.order.length + 1, cost = Math.ceil(UNLOCK[slot] * PRICE), av = BALLS.filter(function (t) { return t.tier <= Math.min(slot, 7) && S.order.indexOf(t.id) < 0; });
       if (!S.offer || S.offer.slot !== slot) {      // Wiki/Store: pro Slot nur zwei zufällige Bälle zur Auswahl
         var pool = av.slice(), ids = []; while (ids.length < 2 && pool.length) ids.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
         S.offer = { slot: slot, ids: ids };
