@@ -11087,7 +11087,16 @@ function idleNoZoom(w) {
   d.addEventListener("dblclick", pd);
   const st = d.createElement("style"); st.textContent = "html,body,*{touch-action:manipulation;-webkit-touch-callout:none}"; d.head.appendChild(st);
 }
+const IDLE_CLOSED = true;   // true = Idle-Modus gesperrt (Umbau)
 async function openIdle() {
+  if (IDLE_CLOSED) {   // Idle-Modus gesperrt: Hinweis statt Spiel (Schalter oben auf false setzen zum Wiedereroeffnen)
+    if (document.getElementById("idleClosedBox")) return;
+    const cb = document.createElement("div"); cb.id = "idleClosedBox";
+    cb.style.cssText = "position:fixed;inset:0;z-index:9000;background:rgba(5,8,12,.82);display:flex;align-items:center;justify-content:center;padding:20px;";
+    cb.innerHTML = '<div style="max-width:360px;background:#121a26;border:1px solid #2a3a52;border-radius:14px;padding:24px;text-align:center;color:#e8edf5;font:500 15px/1.5 sans-serif;"><div style="font-size:38px;margin-bottom:8px">\u{1F6A7}</div><div style="font-weight:700;font-size:18px;margin-bottom:8px">Sorry, this game mode is being rebuilt</div><div style="opacity:.8;margin-bottom:16px">Idle Brick Breaker is temporarily closed. Check back soon!</div><button style="margin:0;padding:8px 22px;font-size:14px;">OK</button></div>';
+    cb.addEventListener("click", e => { if (e.target === cb || e.target.tagName === "BUTTON") cb.remove(); });
+    document.body.appendChild(cb); return;
+  }
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   if (!idleCanPlay()) { try { leagueToast("🔒 Idle Brick Breaker opens in " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
   if (document.getElementById("idleOverlay")) return;
