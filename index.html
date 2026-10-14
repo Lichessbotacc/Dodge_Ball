@@ -5208,6 +5208,9 @@ let onlineOpponent       = null;   // { uid, name, elo, ... }
 let onlineUnsubscribes   = [];
 let onlineSearchInterval = null;
 let onlineResultHandled  = false;
+// FIX (doppelter ELO-Abzug): jedes gestartete Online-Spiel darf GENAU EIN Ergebnis verrechnen (Sieg/Niederlage/Aufgabe).
+// Wird in startOnlineGame() gesetzt und beim Verrechnen verbraucht -> verspaetete Timer/Listener koennen nicht nochmal abziehen.
+let onlineRunActive      = false;
 let onlineIsHost         = false;
 let onlineVsBot          = false;
 let onlineTvUnsubscribe = null;
@@ -6000,11 +6003,12 @@ function cleanupOnline() {
   }
   if (fbReady && onlineMatchId) {
     const mk = readActiveMatchMarker();
-    const leftMidMatch = !onlineVsBot && !onlineResultHandled && mk && mk.id === onlineMatchId;
+    const leftMidMatch = !onlineVsBot && !onlineResultHandled && onlineRunActive && mk && mk.id === onlineMatchId;
     disarmOnlineDisconnect();
     if (leftMidMatch) {
       clearActiveMatchMarker();
       onlineResultHandled = true;
+      onlineRunActive = false;
       const loss = forfeitChange(false);
       applyForfeitLoss(loss, onlineOpponent && onlineOpponent.uid);
       pushAccountToFirebase().catch(() => {});
@@ -6017,6 +6021,7 @@ function cleanupOnline() {
   onlineRole          = null;
   onlineOpponent      = null;
   onlineResultHandled = false;
+  onlineRunActive     = false;
   onlineIsHost        = false;
   onlineVsBot         = false;
   document.getElementById("pingDisplay").style.display   = "none";
@@ -6408,6 +6413,7 @@ function startOnlineGame(matchData) {
   running = true;
   startTime = Date.now();
   onlineResultHandled = false;
+  onlineRunActive = true;
   campReset(); onlineMatchStatus = null;
   onlineSimTick = 0;
   myTrail = [];
@@ -6842,6 +6848,8 @@ function logEloGame(oppUid, d, isBot) {
 const _eloRoundsApplied = new Set();   // pro Runde darf die Elo nur EINMAL verrechnet werden (egal wie oft onlineResultHandled zurueckgesetzt wird)
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
+  if (!onlineRunActive) return;   // FIX: dieses Spiel wurde schon verrechnet (z.B. verspaeteter 4-s-Timer nach schnellem Rematch)
+  onlineRunActive = false;
   if (!onlineVsBot && onlineMatchId) {
     const _rk = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
     if (_eloRoundsApplied.has(_rk)) { onlineResultHandled = true; return; }
@@ -13013,7 +13021,17 @@ async function modDeleteChatMsg(key) {
               const isV = /^data:video\//.test(x.data), isI = /^data:image\//.test(x.data); if (!isV && !isI) return;
               const el = document.createElement(isV ? "video" : "img"); el.src = x.data; if (isV) el.controls = true;
               el.style.cssText = "max-width:100%;max-height:260px;border-radius:8px;border:1px solid rgba(255,255,255,.2);cursor:" + (isV ? "default" : "zoom-in") + ";";
-              if (isI) el.onclick = () => { const w = window.open(); if (w) { w.document.write('<body style="margin:0;background:#000"><img src="' + x.data + '" style="max-width:100%">'); } };
+              if (isI) el.onclick = () => {
+                // SECURITY (C-1): never build HTML from DB data. Validate the FULL data-URL shape and create the <img> via DOM.
+                if (!/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/=]+$/.test(x.data)) return;
+                const w = window.open();
+                if (w) {
+                  w.opener = null;   // the new tab must not be able to reach the admin session
+                  const wb = w.document.body; wb.style.cssText = "margin:0;background:#000";
+                  const im = w.document.createElement("img"); im.src = x.data; im.style.maxWidth = "100%";
+                  wb.appendChild(im);
+                }
+              };
               mm.appendChild(el);
             });
             b.style.display = "none";
@@ -13052,6 +13070,59 @@ async function modDeleteChatMsg(key) {
     ov.style.display = "flex";
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
   };
+})();
+</script>
+<!-- ADDED: Fullscreen toggle (button bottom-right + F key). Standalone, touches no other code. -->
+<script id="fullscreenToggle">
+(function () {
+  "use strict";
+  var de = document.documentElement;
+  var reqFS  = de.requestFullscreen  || de.webkitRequestFullscreen;
+  var exitFS = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!reqFS || !exitFS) return;   // e.g. iPhone Safari: no Fullscreen API -> no button
+
+  var style = document.createElement("style");
+  style.textContent =
+    "#fsToggleBtn{position:fixed;right:calc(10px + env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));" +
+    "z-index:40;width:36px;height:36px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;" +
+    "background:rgba(18,18,26,.65);color:#c9d1e3;border:1px solid rgba(255,255,255,.18);border-radius:10px;" +
+    "cursor:pointer;opacity:.55;transition:opacity .2s,border-color .2s,color .2s;-webkit-tap-highlight-color:transparent;}" +
+    "#fsToggleBtn:hover,#fsToggleBtn:focus-visible{opacity:1;color:#fff;border-color:rgba(0,255,136,.55);outline:none;}" +
+    "#fsToggleBtn svg{width:18px;height:18px;display:block;}";
+  document.head.appendChild(style);
+
+  var ICON_ENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+  var ICON_EXIT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>';
+
+  var btn = document.createElement("button");
+  btn.id = "fsToggleBtn";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Toggle fullscreen");
+  btn.title = "Fullscreen (F)";
+  document.body.appendChild(btn);
+
+  function isFS() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function sync() { btn.innerHTML = isFS() ? ICON_EXIT : ICON_ENTER; }
+  function toggle() {
+    try {
+      var p = isFS() ? exitFS.call(document) : reqFS.call(de);
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+    btn.blur();   // keep focus off the button so Space/Enter never re-trigger it mid-game
+  }
+
+  btn.addEventListener("click", toggle);
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("webkitfullscreenchange", sync);
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "f" && e.key !== "F") return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    var t = e.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;  // don't hijack typing (chat etc.)
+    e.preventDefault();
+    toggle();
+  });
+  sync();
 })();
 </script>
 </body>
