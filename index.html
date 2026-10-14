@@ -10056,7 +10056,7 @@ gameWrap.addEventListener("touchstart", e => {
     { id: "lightning", name: "Lightning",    col: "#7ee8ff", tier: 6, pm: 1,    sm: 1.15, info: "Chain lightning to more bricks for 30% damage." },
     { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blue bricks ×2, hex bricks ×25 damage." }
   ];
-  var CASH_BALL_MUL = 30;   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
+  var CASH_BALL_MUL = 50, CASH_BALL_CAP = 0.25;  // Zahlt pro Treffer Anteil (Kraft/Steinleben × MUL, max CAP) vom Steinwert   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
   var BALL_POWER_MUL = 0.6;   // globale Abschwaechung der Ball-Power (1 = Original)
   var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
   function BP(slot) { return slot === 1 ? 9.46 / 5 : 12.12 * Math.pow(2.424, slot - 2); }   // Basic Lv.5 = 9,46 und Splash Lv.1 = 12,12 (Screenshot); Rest geschätzt
@@ -10457,7 +10457,7 @@ gameWrap.addEventListener("touchstart", e => {
           b.hits++;
           var d = dmC[t.id]; if (M.crit > 0 && t.id !== "poison" && Math.random() < M.crit) d *= 1.5;
           if (t.id === "cash") {                    // Cash-Ball: kein Schaden, Geld = Kraft × aktuelles Steinleben
-            { var cg = d * (r.gem ? 1 : Math.max(0.5, Math.min(1, r.hp / r.max))) * CASH_BALL_MUL * Math.pow(M.bc, 0.86); earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
+            { var cg = r.gem ? d * CASH_BALL_MUL * Math.pow(M.bc, 0.86) : r.val * Math.min(CASH_BALL_CAP, d / r.max * CASH_BALL_MUL); earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
             break;
           }
           if (t.id === "prop") d *= r.type === "h" ? 25 : r.type === "b" ? 2 : 1;
