@@ -6548,10 +6548,11 @@ function startOnlineGame(matchData) {
       } catch(e) {}
     }
 
-    if (data.status === "done" && data.winner && !onlineResultHandled) {
+    const _staleRound = (Number(data.round) || 0) < onlineRound;   // Ergebnis einer frueheren Runde (nach Rematch) darf nicht nochmal zaehlen
+    if (data.status === "done" && data.winner && !onlineResultHandled && !_staleRound) {
       handleOnlineResult(data.winner, data.eloChange || 10);
     }
-    if (data.status === "abandoned" && !onlineResultHandled) {
+    if (data.status === "abandoned" && !onlineResultHandled && !_staleRound) {
       running = false;
       if (data.forfeitBy && data.forfeitBy === myUid) handleOnlineResult(oppName, data.eloChange || forfeitChange(false));   // I was the one who dropped out
       else handleOnlineResult(myName, data.eloChange || forfeitChange(true));                                              // opponent left / timed out
@@ -6838,8 +6839,14 @@ function logEloGame(oppUid, d, isBot) {
       .catch(e => console.warn("elo log failed", e));
   } catch (e) {}
 }
+const _eloRoundsApplied = new Set();   // pro Runde darf die Elo nur EINMAL verrechnet werden (egal wie oft onlineResultHandled zurueckgesetzt wird)
 async function handleOnlineResult(winnerName, change) {
   if (onlineResultHandled) return;
+  if (!onlineVsBot && onlineMatchId) {
+    const _rk = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
+    if (_eloRoundsApplied.has(_rk)) { onlineResultHandled = true; return; }
+    _eloRoundsApplied.add(_rk);
+  }
   onlineResultHandled = true;
   window._lastMatchSecs = Math.max(0, (Date.now() - startTime) / 1000);
   stopViewerCount();
