@@ -6675,11 +6675,16 @@ let onlinePending = [], onlineSeenSpawn = new Set(), onlineSpawnLog = [];
 // Wie frueher: 220 px Mindestabstand zu den Spielern, alle 1000 ms ein Ball. Nur der HOST waehlt den Spawn, der Gast bekommt ihn exakt uebermittelt.
 function makeHostSpawn() {
   const rng = onlineRng, q = v => Math.round(v * 1000) / 1000;
-  const r = q(15 + rng() * 20); let x = 0, y = 0, ok = false, n = 0;
-  while (!ok && n++ < 100) {
-    x = q(r + rng() * (W() - r * 2)); y = q(r + rng() * (H() - r * 2)); ok = true;
-    for (const p of players) { if (!p.alive) continue; if (Math.hypot(p.x - x, p.y - y) < p.radius + r + 220) { ok = false; break; } }
+  const r = q(15 + rng() * 20); let x = 0, y = 0, n = 0, bx = 0, by = 0, bd = -1;
+  const SAFE = 220 + 70;   // Reserve: Spawn wird SHARED_LEAD_MS vorher gewaehlt + Netzwerk-Verzoegerung des Gegners, trotzdem >= 220 px beim Erscheinen
+  while (n++ < 150) {
+    x = q(r + rng() * (W() - r * 2)); y = q(r + rng() * (H() - r * 2));
+    let worst = Infinity;   // kleinster Abstand (ueber den Mindestabstand hinaus) zu lebenden Spielern
+    for (const p of players) { if (!p.alive) continue; worst = Math.min(worst, Math.hypot(p.x - x, p.y - y) - p.radius - r); }
+    if (worst >= SAFE) { bd = worst; bx = x; by = y; break; }
+    if (worst > bd) { bd = worst; bx = x; by = y; }   // Fallback: bester bisher gefundener Platz statt letzter (ungueltiger) Versuch
   }
+  x = bx; y = by;
   const spd = 5 + rng() * 6, ang = rng() * Math.PI * 2;
   return { id: onlineRound * 100000 + (++onlineSpawnSeq), act: Math.round(srvNow() + SHARED_LEAD_MS), x, y, r, vx: q(Math.cos(ang) * spd * ONLINE_BALL_SPEED), vy: q(Math.sin(ang) * spd * ONLINE_BALL_SPEED) };
 }
