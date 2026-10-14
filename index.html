@@ -11051,8 +11051,8 @@ function idleBoardRender() {
   const rows = list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
   rowsEl.textContent = "";
   const mi = rows.findIndex(r => r.uid === myUid);
-  const idx = []; for (let i = 0; i < Math.min(5, rows.length); i++) idx.push(i);
-  if (mi >= 5) idx.push(mi);
+  const idx = []; for (let i = 0; i < Math.min(100, rows.length); i++) idx.push(i);
+  if (mi >= 100) idx.push(mi);
   let last = -1;
   for (const i of idx) {
     if (last >= 0 && i - last > 1) { const g = document.createElement("div"); g.className = "is-gap"; g.textContent = "⋮ " + (i - last - 1) + " players"; rowsEl.appendChild(g); }
