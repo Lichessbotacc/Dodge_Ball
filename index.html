@@ -10035,7 +10035,9 @@ gameWrap.addEventListener("touchstart", e => {
   var HT = [75, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2500, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 75000, 100000, 125000, 150000, 175000, 200000];
   var HV = [1.2, 1.25, 1.4, 1.5, 1.6, 1.7, 1.8, 2, 2.5, 2.5, 2.5, 3, 3, 3.5, 3.5, 4, 4, 4, 4, 4, 4, 4, 5, 6, 7, 8, 9];
   function cumMult(L) { var m = 1; for (var i = 0; i < HT.length && HT[i] <= L; i++) m *= HV[i]; return m; }
-  function health(L) { return Math.pow(L, 1.32) * cumMult(L); }
+  // Eigener Zusatz: ab Level 300 waechst das Leben zusaetzlich exponentiell (+0,3 % pro Level), damit es spaet nicht trivial wird
+  var HP_TAIL_START = 300, HP_TAIL_RATE = 0.003;
+  function health(L) { return Math.pow(L, 1.32) * cumMult(L) * (L > HP_TAIL_START ? Math.exp(Math.min(600, HP_TAIL_RATE * (L - HP_TAIL_START))) : 1); }
 
   // ════════ Bälle ════════
   // Freischaltkosten je Slot (Wiki): 2: 175 · 3: 7.5K · 4: 175K · 5: 15M · 6: 400B · 7: 10q · 8: 10s · 9: 100O · 10: 5aa · 11: 80ac · 12: 110ae
@@ -10055,6 +10057,7 @@ gameWrap.addEventListener("touchstart", e => {
     { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blue bricks ×2, hex bricks ×25 damage." }
   ];
   var CASH_BALL_MUL = 2;   // Cash-Ball: Kraft × aktuelles Steinleben, hier relativ zum vollen Leben des Steins (Leben-Skala dieses Spiels waere sonst viel zu gross). Nur Crit-Karte wirkt. Zahl = Feintuning (2 = doppelt so viel wie ein Schadens-Treffer gleicher Kraft)
+  var BALL_POWER_MUL = 0.6;   // globale Abschwaechung der Ball-Power (1 = Original)
   var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
   function BP(slot) { return slot === 1 ? 9.46 / 5 : 12.12 * Math.pow(2.424, slot - 2); }   // Basic Lv.5 = 9,46 und Splash Lv.1 = 12,12 (Screenshot); Rest geschätzt
   function baseCost(slot) { return slot === 1 ? 25 : UNLOCK[slot] / 3; }
@@ -10279,7 +10282,7 @@ gameWrap.addEventListener("touchstart", e => {
   }
   function dmgOf(t) {
     var st = S.balls[t.id];
-    return BP(st.slot) * t.pm * (st.pow + 1) * M.pow * Math.pow(5, st.bp) * (S.specBall === t.id ? M.spec : 1) * (rageT > 0 ? M.rage : 1);
+    return BALL_POWER_MUL * BP(st.slot) * t.pm * (st.pow + 1) * M.pow * Math.pow(5, st.bp) * (S.specBall === t.id ? M.spec : 1) * (rageT > 0 ? M.rage : 1);
   }
   function speedOf(t) {
     var st = S.balls[t.id], s = 60 * 1.245 * Math.pow(st.spd + 1, 0.735) * t.sm * M.spd * Math.pow(0.4, st.bp);
