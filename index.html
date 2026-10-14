@@ -13064,5 +13064,58 @@ async function modDeleteChatMsg(key) {
   };
 })();
 </script>
+<!-- ADDED: Fullscreen toggle (button bottom-right + F key). Standalone, touches no other code. -->
+<script id="fullscreenToggle">
+(function () {
+  "use strict";
+  var de = document.documentElement;
+  var reqFS  = de.requestFullscreen  || de.webkitRequestFullscreen;
+  var exitFS = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!reqFS || !exitFS) return;   // e.g. iPhone Safari: no Fullscreen API -> no button
+
+  var style = document.createElement("style");
+  style.textContent =
+    "#fsToggleBtn{position:fixed;right:calc(10px + env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));" +
+    "z-index:40;width:36px;height:36px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;" +
+    "background:rgba(18,18,26,.65);color:#c9d1e3;border:1px solid rgba(255,255,255,.18);border-radius:10px;" +
+    "cursor:pointer;opacity:.55;transition:opacity .2s,border-color .2s,color .2s;-webkit-tap-highlight-color:transparent;}" +
+    "#fsToggleBtn:hover,#fsToggleBtn:focus-visible{opacity:1;color:#fff;border-color:rgba(0,255,136,.55);outline:none;}" +
+    "#fsToggleBtn svg{width:18px;height:18px;display:block;}";
+  document.head.appendChild(style);
+
+  var ICON_ENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+  var ICON_EXIT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>';
+
+  var btn = document.createElement("button");
+  btn.id = "fsToggleBtn";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Toggle fullscreen");
+  btn.title = "Fullscreen (F)";
+  document.body.appendChild(btn);
+
+  function isFS() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function sync() { btn.innerHTML = isFS() ? ICON_EXIT : ICON_ENTER; }
+  function toggle() {
+    try {
+      var p = isFS() ? exitFS.call(document) : reqFS.call(de);
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+    btn.blur();   // keep focus off the button so Space/Enter never re-trigger it mid-game
+  }
+
+  btn.addEventListener("click", toggle);
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("webkitfullscreenchange", sync);
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "f" && e.key !== "F") return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    var t = e.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;  // don't hijack typing (chat etc.)
+    e.preventDefault();
+    toggle();
+  });
+  sync();
+})();
+</script>
 </body>
 </html>
