@@ -13013,7 +13013,17 @@ async function modDeleteChatMsg(key) {
               const isV = /^data:video\//.test(x.data), isI = /^data:image\//.test(x.data); if (!isV && !isI) return;
               const el = document.createElement(isV ? "video" : "img"); el.src = x.data; if (isV) el.controls = true;
               el.style.cssText = "max-width:100%;max-height:260px;border-radius:8px;border:1px solid rgba(255,255,255,.2);cursor:" + (isV ? "default" : "zoom-in") + ";";
-              if (isI) el.onclick = () => { const w = window.open(); if (w) { w.document.write('<body style="margin:0;background:#000"><img src="' + x.data + '" style="max-width:100%">'); } };
+              if (isI) el.onclick = () => {
+                // SECURITY (C-1): never build HTML from DB data. Validate the FULL data-URL shape and create the <img> via DOM.
+                if (!/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/=]+$/.test(x.data)) return;
+                const w = window.open();
+                if (w) {
+                  w.opener = null;   // the new tab must not be able to reach the admin session
+                  const wb = w.document.body; wb.style.cssText = "margin:0;background:#000";
+                  const im = w.document.createElement("img"); im.src = x.data; im.style.maxWidth = "100%";
+                  wb.appendChild(im);
+                }
+              };
               mm.appendChild(el);
             });
             b.style.display = "none";
