@@ -5934,7 +5934,7 @@ async function deleteAccount() {
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
   showScreen("onlineWait");
-  document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank (the Online Bot joins if nobody is free)…" : "Looking for an opponent…";
+  document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank…" : "Looking for an opponent…";
   // Erst nur "Looking for an opponent…"; nach 10s erscheint der kleine Bot-Hinweis
   { const bo = document.getElementById("botOffer"); if (bo) bo.style.display = "none"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = arenaSess ? "none" : ""; }
   if (onlineBotOfferTimeout) clearTimeout(onlineBotOfferTimeout);
@@ -6025,6 +6025,7 @@ function cleanupOnline() {
       RPC.updateMatch(onlineMatchId, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
     }
   }
+  if (onlineVsBot && onlineArenaId) { try { arenaBotRelease(onlineArenaId); } catch (e) {} }
   onlineMatchId       = null;
   onlineRole          = null;
   onlineOpponent      = null;
@@ -6134,16 +6135,24 @@ function playWithBotNow() {
 async function tryMatchmake() {
   if (onlineMatchId || !myUid) return;
   const queue = await dbGet("queue");
-  if (!queue) return;
-  const others = Object.entries(queue)
+  if (onlineMatchId) return;
+  if (!queue && !arenaSess) return;
+  const others = Object.entries(queue || {})
     .map(([uid, p]) => ({ uid, ...p }))
     .filter(p =>
       p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite") && (arenaSess ? p.arena === arenaSess.id : !p.arena)
     );
+  // Arena: der Online Bot steht in der Rangliste und ist immer ein Paarungs-Kandidat wie jeder andere Spieler
+  if (arenaSess && !arenaEnded() && !arenaBotIsBusy()) others.push({ uid: ONLINE_BOT_UID, name: "Online Bot", elo: onlineBotElo, ts: Date.now(), arena: arenaSess.id, aspect: screenAspect(), isBot: true });
   if (!others.length) return;
 
   if (arenaSess) { if (arenaEnded()) return; arenaSortOthers(others); } else others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
   const opp     = others[0];
+  if (opp.isBot) {
+    if (!(await arenaBotClaim(arenaSess.id))) return;   // jemand anderes war schneller -> naechster Versuch in 2 s
+    if (onlineMatchId) { arenaBotRelease(arenaSess.id); return; }
+    await startBotMatch(); return;
+  }
   const matchId = [myUid, opp.uid].sort().join("__VS__");
 
   const existing = await RPC.getMatch(matchId);
@@ -6965,7 +6974,7 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
   }
   logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
-  if (onlineArenaId) arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid);
+  if (onlineArenaId) { arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid); if (onlineVsBot) arenaRecordBot(onlineArenaId, !won, myOriginalElo); }
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -10924,6 +10933,60 @@ async function arenaEnsureEntry() {
   const e = { name: onlineAccount.name, score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: Date.now() };
   await RPC.setArenaEntry(id, e); arenaStandings[myUid] = e;
 }
+// ── Online Bot als normaler Arena-Spieler ──
+// Der Bot hat keinen eigenen Client: der jeweilige menschliche Gegner schreibt seinen Rangeintrag
+// (arenas/{id}/bot__online_bot) per Transaktion, damit parallele Spiele keine Punkte ueberschreiben.
+// ACHTUNG: dieser Pfad braucht eine Database-Rule (siehe Hinweis in der Antwort).
+async function arenaBotTx(aid, fn) {
+  const { ref, runTransaction, getDatabase } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+  const app = (await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js")).getApp();
+  return runTransaction(ref(getDatabase(app), "arenas/" + aid + "/" + ONLINE_BOT_UID), cur => fn(cur));
+}
+// Bot ist wie ein Mensch nur in EINEM Spiel gleichzeitig: Reservierung (busyBy/busyUntil) per Transaktion, 5 min Lease als Sicherheitsnetz
+const ARENA_BOT_LEASE = 300000;
+function arenaBotIsBusy() {
+  const b = arenaStandings[ONLINE_BOT_UID];
+  return !!(b && b.busyBy && b.busyBy !== myUid && Number(b.busyUntil) > arenaNow());
+}
+async function arenaBotClaim(aid) {
+  try {
+    const now = arenaNow();
+    const r = await arenaBotTx(aid, cur => {
+      cur = cur || { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: now };
+      if (cur.busyBy && cur.busyBy !== myUid && Number(cur.busyUntil) > now) return;   // Abbruch: Bot ist belegt
+      return Object.assign({}, cur, { busyBy: myUid, busyUntil: now + ARENA_BOT_LEASE });
+    });
+    return !!(r && r.committed);
+  } catch (e) { console.warn("arena bot claim failed (Rules?)", e && (e.code || e.message)); return false; }
+}
+async function arenaBotRelease(aid) {
+  if (!fbReady || !aid) return;
+  try {
+    await arenaBotTx(aid, cur => {
+      if (!cur || cur.busyBy !== myUid) return;
+      const n = Object.assign({}, cur); delete n.busyBy; delete n.busyUntil; return n;
+    });
+  } catch (e) {}
+}
+async function arenaEnsureBot(aid) {
+  try {
+    await arenaBotTx(aid, cur => cur || { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: Date.now() });
+  } catch (e) { console.warn("arena bot entry failed (Rules?)", e && (e.code || e.message)); }
+}
+async function arenaRecordBot(aid, botWon, humanElo) {
+  if (!fbReady || !aid) return;
+  try {
+    await arenaBotTx(aid, cur => {
+      cur = cur || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
+      const st = Number(cur.streak) || 0, pts = botWon ? (st >= 2 ? 4 : 2) : 0;
+      const r = { name: "Online Bot", score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (botWon ? 1 : 0),
+        streak: botWon ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(humanElo) || 1500), last: pts, ts: Date.now() };
+      // Reservierung freigeben (nur wenn sie von mir ist); fremde, noch gueltige Reservierung bleibt erhalten
+      if (cur.busyBy && cur.busyBy !== myUid && Number(cur.busyUntil) > arenaNow()) { r.busyBy = cur.busyBy; r.busyUntil = cur.busyUntil; }
+      return r;
+    });
+  } catch (e) { console.warn("arena bot result failed (Rules?)", e && (e.code || e.message)); }
+}
 async function arenaRecordResult(aid, won, oppElo, oppUid) {
   if (!fbReady || !myUid || !onlineAccount || !aid) return;
   if (arenaSess && arenaSess.id === aid) arenaSess.lastOpp = oppUid;
@@ -10966,11 +11029,7 @@ function arenaTick() {
     RPC.setOwnQueueEntry({ uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: now, arena: arenaSess.id, aspect: screenAspect() }).catch(() => {});
   }
   arenaRenderSearch();
-  // Der Online Bot ist immer in der Arena: findet sich nach 6 s kein Mensch, spielt er mit
-  if (!onlineMatchId) {
-    if (!arenaSess.waitAt) arenaSess.waitAt = now;
-    if (now - arenaSess.waitAt > 6000 && !arenaEnded()) { arenaSess.waitAt = 0; startBotMatch(); }
-  }
+  // Der Online Bot ist ein normaler Arena-Spieler: er wird in tryMatchmake() wie jeder Mensch nach Rang gepaart
 }
 async function arenaPlay() {
   if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
@@ -10982,7 +11041,7 @@ async function arenaPlay() {
   arenaSess = { id: inf.id, end: inf.end, lastOpp: null, qAt: Date.now(), unsub: null };
   arenaStandings = {};
   arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
-  try { await arenaEnsureEntry(); }
+  try { await arenaEnsureEntry(); await arenaEnsureBot(inf.id); }
   catch (e) { console.warn("arena join failed", e); try { leagueToast("Could not join the arena", "#ff4444"); } catch (x) {} arenaLeave(true); return; }
   closeArenaOv();
   enterOnlineQueue();
