@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -937,6 +938,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
           <button id="idleBtn" onclick="openIdle()">🧱 Idle Brick Breaker</button>
+          <button id="arenaBtn" onclick="openArena()">🏟 Hourly Arena</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
@@ -2048,7 +2050,14 @@ async function rpcSendAppeal(name, text) {
   return set(ref(db, "appeals/" + uid), { name: String(name || "").slice(0, 20) || "unknown", text, ts: serverTimestamp() });
 }
 async function rpcModRemoveAppeal(uid) { requireAdmin(); uid = String(uid || ""); if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) return; return remove(ref(db, "appeals/" + uid)); }
+async function rpcSetArenaEntry(aid, data) {
+  requireNotBanned();
+  const uid = requireUid();
+  if (!/^[0-9]{13}$/.test(String(aid))) throw new Error("Bad arena id.");
+  return set(ref(db, "arenas/" + aid + "/" + uid), data);
+}
 window._dobRPC = {
+  setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
@@ -5224,6 +5233,7 @@ let onlineBotOfferTimeout = null;   // zeigt nach 10s den Bot-Hinweis
 let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
 let onlineSimTick = 0;
 let onlineMatchStamp = 0;
+let arenaSess = null, onlineArenaId = null;   // Hourly Arena: aktive Sitzung / Arena-ID des laufenden Matches
 let onlineRound = 0, postUnsub = null, rematchSent = false, lastPostChat = 0;
 let onlineBallIv = null;
 
@@ -5572,6 +5582,7 @@ async function openOnlineProfile(uid) {
 //  ONLINE FLOW
 // ═══════════════════════════════════════════════
 function showScreen_onlineFlow() {
+  try { arenaLeave(true); } catch (e) {}
   if (!onlineAccount) showCreateAccount();
   else enterOnlineQueue();
 }
@@ -5924,14 +5935,14 @@ async function deleteAccount() {
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
   showScreen("onlineWait");
-  document.getElementById("onlineStatus").textContent = "Looking for an opponent…";
+  document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank…" : "Looking for an opponent…";
   // Erst nur "Looking for an opponent…"; nach 10s erscheint der kleine Bot-Hinweis
-  { const bo = document.getElementById("botOffer"); if (bo) bo.style.display = "none"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = ""; }
+  { const bo = document.getElementById("botOffer"); if (bo) bo.style.display = "none"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = arenaSess ? "none" : ""; }
   if (onlineBotOfferTimeout) clearTimeout(onlineBotOfferTimeout);
   onlineBotOfferTimeout = setTimeout(() => {
     onlineBotOfferTimeout = null;
     const w = document.getElementById("onlineWait"), bo = document.getElementById("botOffer");
-    if (!onlineMatchId && w && w.style.display === "flex" && bo) { bo.style.display = "flex"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = "none"; }
+    if (!arenaSess && !onlineMatchId && w && w.style.display === "flex" && bo) { bo.style.display = "flex"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = "none"; }
   }, 10000);
   loadSearchLeague();
   startSearchingOnline();
@@ -5939,6 +5950,7 @@ function enterOnlineQueue() {
 
 // Liga-Rangliste (eigene Wochen-Gruppe) waehrend der Gegnersuche: kompakt, Top 5 + eigener Platz
 async function loadSearchLeague() {
+  if (arenaSess) { try { arenaRenderSearch(); } catch (e) {} return; }
   const box = document.getElementById("searchLeague");
   if (!box) return;
   box.style.display = "none"; box.innerHTML = "";
@@ -5978,6 +5990,7 @@ async function loadSearchLeague() {
 }
 
 function cancelOnline() {
+  try { arenaLeave(true); } catch (e) {}
   cleanupOnline();
   showScreen("menu");
 }
@@ -6082,7 +6095,7 @@ async function startSearchingOnline() {
   onlineSearchStartTime = Date.now();
 
   await RPC.setOwnQueueEntry({
-    uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(),
+    uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), arena: arenaSess ? arenaSess.id : null,
     aspect: screenAspect()
   });
 
@@ -6097,12 +6110,13 @@ async function startSearchingOnline() {
   let ai = 0;
   onlineSearchInterval = setInterval(async () => {
     document.getElementById("onlineSearchAnim").textContent = anim[ai++ % 2];
+    if (arenaSess) arenaTick();
     try { await tryMatchmake(); } catch(e) { console.warn("matchmake error:", e); }
   }, 2000);
   setTimeout(() => tryMatchmake(), 600);
 
   onlineBotMatchTimeout = setTimeout(() => {
-    if (!onlineMatchId) startBotMatch();
+    if (!onlineMatchId && !arenaSess) startBotMatch();
   }, 30000);
 }
 // Knopf waehrend der Suche: sofort gegen den Online Bot spielen
@@ -6125,11 +6139,11 @@ async function tryMatchmake() {
   const others = Object.entries(queue)
     .map(([uid, p]) => ({ uid, ...p }))
     .filter(p =>
-      p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite")
+      p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite") && (arenaSess ? p.arena === arenaSess.id : !p.arena)
     );
   if (!others.length) return;
 
-  others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
+  if (arenaSess) { if (arenaEnded()) return; arenaSortOthers(others); } else others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
   const opp     = others[0];
   const matchId = [myUid, opp.uid].sort().join("__VS__");
 
@@ -6141,6 +6155,7 @@ async function tryMatchmake() {
     return;
   }
   if (existing && existing.status !== "done" && existing.status !== "abandoned") return;
+  if (arenaSess && myUid > opp.uid) return;   // Arena: nur die kleinere UID erstellt das Match (verhindert Doppel-Paarungen)
 
   const isP1   = myUid < opp.uid;
   const p1Uid  = isP1 ? myUid : opp.uid;
@@ -6158,6 +6173,7 @@ async function tryMatchmake() {
     createdAt: Date.now(),
     // Arena-Seitenverhältnis: der schmalere Bildschirm bestimmt, der andere bekommt nur kleine Ränder
     arena: Math.min(screenAspect(), Number(opp.aspect) || 16 / 9),
+    arenaId: arenaSess ? arenaSess.id : null,
     seed: Math.floor(Math.random() * 1000000)
   };
   try {
@@ -6290,6 +6306,8 @@ function joinMatch(matchId, opp, matchData) {
   onlineResultHandled = false;
   onlineVsBot         = false;
 
+  onlineArenaId = matchData.arenaId || null;
+  try { closeArenaOv(); } catch (e) {}
   onlineRound  = matchData.round || 0;
   onlineMatchStamp = Number(matchData.createdAt) || 0;
   onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
@@ -6947,6 +6965,7 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
   }
   logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
+  if (onlineArenaId && !onlineVsBot) arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid);
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -7311,8 +7330,9 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   rematchSent = false;
   const hideOverlay = () => { document.getElementById("winnerOverlay").style.display = "none"; };
   const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; btns.appendChild(b); return b; };
-  mk("🔄 Rematch", requestRematch).id = "rematchBtn";
-  mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
+  const _inArena = !!(onlineArenaId && !onlineVsBot && arenaSess);
+  if (_inArena) arenaWinnerButtons(btns, mk, hideOverlay); else mk("🔄 Rematch", requestRematch).id = "rematchBtn";
+  if (!_inArena) mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
   mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
 
   document.getElementById("postChat").style.display = "flex";
@@ -10864,6 +10884,197 @@ gameWrap.addEventListener("touchstart", e => {
 <\/script>
 </body>
 </html>
+</script>
+<script id="arenaMode">
+// ═══════════════════════════════════════════════
+//  HOURLY ARENA (wie Lichess)
+//  • Jede volle Stunde startet eine Arena (57 min). Beitritt jederzeit waehrend der Laufzeit.
+//  • Sieg = 2 Punkte, Niederlage = 0. Nach 2 Siegen in Folge zaehlt jeder weitere Sieg DOPPELT (4) bis zur ersten Niederlage (🔥).
+//  • Paarung automatisch mit Spielern aehnlichen Rangs, direkter Wiederholungs-Gegner wird vermieden.
+//  • Rangliste: Punkte, bei Gleichstand Performance (Ø Gegner-Elo + Siegbilanz).
+//  • Matches laufen ueber den normalen 1v1-Ablauf -> Elo, Weekly League, Statistiken zaehlen wie immer.
+// ═══════════════════════════════════════════════
+const ARENA_H = 3600000, ARENA_MS = 57 * 60000;
+let arenaStandings = {}, arenaNextT = null, arenaLobbyIv = null, arenaLobbyUnsub = null;
+function arenaNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
+function arenaInfo() {
+  const now = arenaNow(), s = Math.floor(now / ARENA_H) * ARENA_H;
+  return { id: String(s), start: s, end: s + ARENA_MS, running: now < s + ARENA_MS, nextStart: s + ARENA_H, now };
+}
+function arenaEnded() { return !arenaSess || arenaNow() >= arenaSess.end; }
+function arenaFmt(ms) { ms = Math.max(0, ms); const m = Math.floor(ms / 60000), s = Math.floor(ms % 60000 / 1000); return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0"); }
+function arenaPerf(e) { const g = Number(e.games) || 0, w = Number(e.wins) || 0; return g ? ((Number(e.oppSum) || 0) + 400 * (w - (g - w))) / g : 0; }
+function arenaSorted(data) {
+  return Object.entries(data || {}).filter(([u, e]) => e && e.name).map(([u, e]) => Object.assign({ uid: u }, e))
+    .sort((a, b) => (b.score || 0) - (a.score || 0) || arenaPerf(b) - arenaPerf(a) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()) || (a.uid < b.uid ? -1 : 1));
+}
+// Paarung: naechster Rang zuerst, letzter Gegner ganz hinten
+function arenaSortOthers(others) {
+  const list = arenaSorted(arenaStandings), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
+  const R = u => rk[u] === undefined ? list.length : rk[u], me = R(myUid);
+  others.sort((a, b) => Math.abs(R(a.uid) - me) - Math.abs(R(b.uid) - me) || Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo) || (a.uid < b.uid ? -1 : 1));
+  if (arenaSess && arenaSess.lastOpp && others.length > 1) {
+    const i = others.findIndex(o => o.uid === arenaSess.lastOpp);
+    if (i >= 0) others.push(others.splice(i, 1)[0]);
+  }
+}
+async function arenaEnsureEntry() {
+  const id = arenaSess.id, cur = await RPC.get("arenas/" + id + "/" + myUid);
+  if (cur) { arenaStandings[myUid] = cur; return; }
+  const e = { name: onlineAccount.name, score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: Date.now() };
+  await RPC.setArenaEntry(id, e); arenaStandings[myUid] = e;
+}
+async function arenaRecordResult(aid, won, oppElo, oppUid) {
+  if (!fbReady || !myUid || !onlineAccount || !aid) return;
+  if (arenaSess && arenaSess.id === aid) arenaSess.lastOpp = oppUid;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const cur = (await RPC.get("arenas/" + aid + "/" + myUid)) || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
+      const st = Number(cur.streak) || 0, pts = won ? (st >= 2 ? 4 : 2) : 0;
+      const e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
+        streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now() };
+      await RPC.setArenaEntry(aid, e);
+      arenaStandings[myUid] = e;
+      try { leagueToast("🏟 " + (won ? "+" + pts + " arena points" + (pts === 4 ? " 🔥" : "") : "0 arena points") + " · " + e.score + " total", won ? "#ffd700" : "#888"); } catch (x) {}
+      return;
+    } catch (err) { console.warn("arena result write failed", err && (err.code || err.message)); await new Promise(r => setTimeout(r, 1500)); }
+  }
+}
+function arenaRowsHtml(list, limit) {
+  let html = "", last = -1;
+  list.forEach((e, i) => {
+    if (!(i < limit || e.uid === myUid)) return;
+    if (last >= 0 && i - last > 1) html += '<div style="text-align:center;opacity:.5;font-size:12px;line-height:1;">⋮</div>';
+    last = i;
+    const me = e.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${(e.streak || 0) >= 2 ? " 🔥" : ""}<small>${e.games || 0} games · ${e.wins || 0} wins</small></span><span class="lg-wins">${e.score || 0}</span></div>`;
+  });
+  return html || '<div style="opacity:.7;text-align:center;padding:10px;font-size:13px;">No players yet</div>';
+}
+function arenaRenderSearch() {
+  const box = document.getElementById("searchLeague"); if (!box || !arenaSess) return;
+  const list = arenaSorted(arenaStandings), me = list.findIndex(e => e.uid === myUid);
+  box.style.display = "block";
+  box.innerHTML = `<div style="text-align:center;font-size:13px;margin-bottom:6px;color:#ffd700;">🏟 Hourly Arena · ${arenaFmt(arenaSess.end - arenaNow())} left${me >= 0 ? " · you are #" + (me + 1) : ""}</div><div class="lg-table" style="max-height:none;overflow:visible;">${arenaRowsHtml(list, 6)}</div>`;
+}
+function arenaTick() {
+  if (!arenaSess) return;
+  if (arenaEnded()) { arenaFinish(); return; }
+  const now = Date.now();
+  if (now - arenaSess.qAt > 20000 && !onlineMatchId) {   // Warteschlangen-Eintrag frisch halten
+    arenaSess.qAt = now;
+    RPC.setOwnQueueEntry({ uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: now, arena: arenaSess.id, aspect: screenAspect() }).catch(() => {});
+  }
+  arenaRenderSearch();
+}
+async function arenaPlay() {
+  if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
+  if (!fbReady || !myUid) { try { leagueToast("Not connected yet", "#ff8844"); } catch (e) {} return; }
+  const inf = arenaInfo();
+  if (!inf.running) { try { leagueToast("Next arena starts in " + arenaFmt(inf.nextStart - inf.now), "#ffd700"); } catch (e) {} return; }
+  if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  arenaLeave(true);
+  arenaSess = { id: inf.id, end: inf.end, lastOpp: null, qAt: Date.now(), unsub: null };
+  arenaStandings = {};
+  arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
+  try { await arenaEnsureEntry(); }
+  catch (e) { console.warn("arena join failed", e); try { leagueToast("Could not join the arena", "#ff4444"); } catch (x) {} arenaLeave(true); return; }
+  closeArenaOv();
+  enterOnlineQueue();
+}
+function arenaLeave() {
+  clearInterval(arenaNextT); arenaNextT = null;
+  if (arenaSess && arenaSess.unsub) { try { arenaSess.unsub(); } catch (e) {} }
+  arenaSess = null;
+}
+function arenaNext() {
+  if (!arenaSess) return;
+  closeArenaOv();
+  if (arenaEnded()) { arenaFinish(); return; }
+  cleanupOnline(); enterOnlineQueue();
+}
+function arenaWinnerButtons(btns, mk, hide) {
+  clearInterval(arenaNextT);
+  let n = 8;
+  const go = () => { clearInterval(arenaNextT); hide(); arenaNext(); };
+  const b = mk("▶ Next game (" + n + ")", () => go());
+  arenaNextT = setInterval(() => {
+    const wo = document.getElementById("winnerOverlay");
+    if (!arenaSess || !wo || wo.style.display === "none") { clearInterval(arenaNextT); return; }
+    if (--n <= 0) { go(); return; }
+    b.textContent = "▶ Next game (" + n + ")";
+  }, 1000);
+  mk("🏟 Standings", () => openArena());
+}
+async function arenaFinish() {
+  if (!arenaSess) return;
+  const id = arenaSess.id;
+  arenaLeave(true);
+  try { cleanupOnline(); } catch (e) {}
+  try { document.getElementById("winnerOverlay").style.display = "none"; showScreen("menu"); showMenuPage("menuOnline"); } catch (e) {}
+  arenaShowResult(id);
+}
+async function arenaShowResult(id) {
+  const old = document.getElementById("arenaResOv"); if (old) old.remove();
+  const ov = document.createElement("div"); ov.id = "arenaResOv";
+  ov.style.cssText = "position:fixed;inset:0;z-index:9100;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,.85);padding:14px;box-sizing:border-box;";
+  ov.innerHTML = '<div style="width:min(440px,96vw);max-height:92vh;overflow-y:auto;background:#0d0f16;border:1px solid #ffd700;border-radius:16px;padding:18px;color:#eaf2fb;text-align:center;"><div style="font-size:42px;">🏟</div><div style="font:800 24px var(--font-display);color:#ffd700;">Arena finished</div><div class="arR" style="margin:10px 0;">Loading…</div><button class="arX" style="margin:4px;">OK</button></div>';
+  document.body.appendChild(ov);
+  ov.querySelector(".arX").onclick = () => ov.remove();
+  try {
+    const list = arenaSorted(await RPC.get("arenas/" + id)), me = list.findIndex(e => e.uid === myUid);
+    ov.querySelector(".arR").innerHTML = (me >= 0 ? `<div style="margin-bottom:8px;">Your result: <b>#${me + 1}</b> of ${list.length} · <b>${list[me].score}</b> pts · ${list[me].wins}/${list[me].games} wins</div>` : "") + '<div class="lg-table" style="max-height:44vh;">' + arenaRowsHtml(list, 10) + '</div>';
+    try { SFX.play("win"); } catch (e) {}
+  } catch (e) { ov.querySelector(".arR").textContent = "Could not load the results."; }
+}
+function closeArenaOv() {
+  const ov = document.getElementById("arenaOv"); if (ov) ov.remove();
+  if (arenaLobbyIv) { clearInterval(arenaLobbyIv); arenaLobbyIv = null; }
+  if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} arenaLobbyUnsub = null; }
+}
+function openArena() {
+  try { if (fbReady) ensureSrvOffset(); } catch (e) {}
+  closeArenaOv();
+  const ov = document.createElement("div"); ov.id = "arenaOv";
+  ov.style.cssText = "position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,.82);padding:14px;box-sizing:border-box;";
+  ov.innerHTML = '<div style="width:min(480px,96vw);max-height:92vh;display:flex;flex-direction:column;gap:10px;background:#0d0f16;border:1px solid #2a3142;border-top:3px solid #ffd700;border-radius:16px;padding:16px;color:#eaf2fb;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font:800 20px var(--font-display);">🏟 Hourly Arena</b><button class="aoX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
+    + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
+    + '<div class="aoT lg-table" style="max-height:44vh;overflow-y:auto;"></div>'
+    + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
+    + '<button class="aoB" style="margin:0;"></button></div>';
+  document.body.appendChild(ov);
+  ov.querySelector(".aoX").onclick = closeArenaOv;
+  ov.addEventListener("click", e => { if (e.target === ov) closeArenaOv(); });
+  let subId = null, data = {};
+  const render = () => {
+    if (!ov.isConnected) return;
+    const inf = arenaInfo();
+    if (fbReady && subId !== inf.id) {
+      subId = inf.id; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
+      arenaLobbyUnsub = dbOn("arenas/" + inf.id, d => { data = d || {}; render(); });
+    }
+    const list = arenaSorted(data);
+    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
+    ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
+    const b = ov.querySelector(".aoB");
+    b.disabled = !inf.running;
+    b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : "▶ Join & play";
+    b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
+  };
+  ov.querySelector(".aoX").onclick = closeArenaOv;
+  arenaLobbyIv = setInterval(render, 1000);
+  render();
+}
+function arenaBtnUpd() {
+  const b = document.getElementById("arenaBtn"); if (!b) return;
+  const i = arenaInfo(), t = i.running ? "🟢 live · " + Math.ceil((i.end - i.now) / 60000) + " min left" : "⏳ starts in " + Math.ceil((i.nextStart - i.now) / 60000) + " min";
+  const key = "arena|" + t; if (b.dataset.k === key) return; b.dataset.k = key;
+  b.textContent = "🏟 Hourly Arena";
+  const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = t; b.appendChild(sm);
+}
+setInterval(arenaBtnUpd, 10000); setTimeout(arenaBtnUpd, 600); setTimeout(arenaBtnUpd, 3000);
+window.openArena = openArena;
 </script>
 <script id="idleMode">
 // ═══════════════════════════════════════════════
