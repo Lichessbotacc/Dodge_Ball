@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5935,7 +5934,7 @@ async function deleteAccount() {
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
   showScreen("onlineWait");
-  document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank…" : "Looking for an opponent…";
+  document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank (the Online Bot joins if nobody is free)…" : "Looking for an opponent…";
   // Erst nur "Looking for an opponent…"; nach 10s erscheint der kleine Bot-Hinweis
   { const bo = document.getElementById("botOffer"); if (bo) bo.style.display = "none"; const bh = document.getElementById("botHint"); if (bh) bh.style.display = arenaSess ? "none" : ""; }
   if (onlineBotOfferTimeout) clearTimeout(onlineBotOfferTimeout);
@@ -6225,6 +6224,7 @@ async function startBotMatch() {
   RPC.removeOwnQueueEntry().catch(() => {});
 
   onlineVsBot    = true;
+  onlineArenaId  = arenaSess ? arenaSess.id : null;   // Arena: Bot-Spiele zaehlen mit
   onlineMatchId  = "BOT__" + Date.now();
   onlineRole     = "p1";
   onlineIsHost   = true;
@@ -6965,7 +6965,7 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
   }
   logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
-  if (onlineArenaId && !onlineVsBot) arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid);
+  if (onlineArenaId) arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid);
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -7330,7 +7330,7 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   rematchSent = false;
   const hideOverlay = () => { document.getElementById("winnerOverlay").style.display = "none"; };
   const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; btns.appendChild(b); return b; };
-  const _inArena = !!(onlineArenaId && !onlineVsBot && arenaSess);
+  const _inArena = !!(onlineArenaId && arenaSess);
   if (_inArena) arenaWinnerButtons(btns, mk, hideOverlay); else mk("🔄 Rematch", requestRematch).id = "rematchBtn";
   if (!_inArena) mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
   mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
@@ -10966,6 +10966,11 @@ function arenaTick() {
     RPC.setOwnQueueEntry({ uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: now, arena: arenaSess.id, aspect: screenAspect() }).catch(() => {});
   }
   arenaRenderSearch();
+  // Der Online Bot ist immer in der Arena: findet sich nach 6 s kein Mensch, spielt er mit
+  if (!onlineMatchId) {
+    if (!arenaSess.waitAt) arenaSess.waitAt = now;
+    if (now - arenaSess.waitAt > 6000 && !arenaEnded()) { arenaSess.waitAt = 0; startBotMatch(); }
+  }
 }
 async function arenaPlay() {
   if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
@@ -10991,6 +10996,7 @@ function arenaNext() {
   if (!arenaSess) return;
   closeArenaOv();
   if (arenaEnded()) { arenaFinish(); return; }
+  arenaSess.waitAt = 0;
   cleanupOnline(); enterOnlineQueue();
 }
 function arenaWinnerButtons(btns, mk, hide) {
