@@ -6236,7 +6236,7 @@ async function startBotMatch() {
   onlineArenaId  = arenaSess ? arenaSess.id : null;   // Arena: Bot-Spiele zaehlen mit
   onlineMatchId  = "BOT__" + Date.now();
   try { closeArenaOv(); } catch (e) {}
-  try { if (arenaSess) arenaWriteState("game"); } catch (e) {}
+  try { if (arenaSess) arenaWriteState("game", ONLINE_BOT_UID); } catch (e) {}
   onlineRole     = "p1";
   onlineIsHost   = true;
 
@@ -6319,7 +6319,7 @@ function joinMatch(matchId, opp, matchData) {
 
   onlineArenaId = matchData.arenaId || null;
   try { closeArenaOv(); } catch (e) {}
-  try { if (arenaSess) arenaWriteState("game"); } catch (e) {}
+  try { if (arenaSess) arenaWriteState("game", opp && opp.uid); } catch (e) {}
   onlineRound  = matchData.round || 0;
   onlineMatchStamp = Number(matchData.createdAt) || 0;
   onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
@@ -10922,10 +10922,18 @@ function arenaSorted(data) {
     .sort((a, b) => (b.score || 0) - (a.score || 0) || arenaPerf(b) - arenaPerf(a) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()) || (a.uid < b.uid ? -1 : 1));
 }
 // Status eines Spielers wie bei Lichess: paused (⏸), game (⚔️ spielt gerade), search (wartet auf Paarung)
-function arenaStatus(e) {
+// Wer gerade gegen wen spielt: Eintrag mit st="game" und opp=<Gegner-UID> -> beide gelten als "spielt"
+function arenaPlayingSet(list) {
+  const now = arenaNow(), set = new Set();
+  (list || []).forEach(e => { if (e.st === "game" && e.opp && now - (Number(e.hb) || 0) <= 480000) set.add(e.opp); });
+  return set;
+}
+function arenaStatus(e, playing) {
   const now = arenaNow(), hb = Number(e.hb) || Number(e.ts) || 0;
-  if (e.uid === ONLINE_BOT_UID) return (e.busyBy && Number(e.busyUntil) > now) ? "game" : "search";
+  const oppOfGame = !!(playing && playing.has(e.uid));
+  if (e.uid === ONLINE_BOT_UID) return ((e.busyBy && Number(e.busyUntil) > now) || oppOfGame) ? "game" : "search";
   if (e.st === "paused") return "paused";
+  if (oppOfGame) return "game";
   if (e.st === "game") return now - hb > 480000 ? "paused" : "game";    // Match laeuft max. ~8 min
   return now - hb > 90000 ? "paused" : "search";                          // kein Lebenszeichen -> als pausiert/weg markiert
 }
@@ -10935,26 +10943,30 @@ async function arenaMyTx(aid, fn) {
   return runTransaction(ref(getDatabase(app), "arenas/" + aid + "/" + myUid), cur => fn(cur));
 }
 // eigenen Status (search / game / paused) + Lebenszeichen schreiben
-async function arenaWriteState(st) {
+async function arenaWriteState(st, oppUid) {
   if (!fbReady || !myUid || !onlineAccount || !arenaSess) return;
   const aid = arenaSess.id;
   try {
     await arenaMyTx(aid, cur => {
       if (!cur) return;
-      return Object.assign({}, cur, { st: st, hb: arenaNow(), elo: Math.round(onlineAccount.elo) });
+      const n = Object.assign({}, cur, { st: st, hb: arenaNow(), elo: Math.round(onlineAccount.elo) });
+      if (st === "game" && oppUid) n.opp = String(oppUid); else delete n.opp;
+      return n;
     });
   } catch (e) { console.warn("arena state write failed", e && (e.code || e.message)); }
 }
+function arenaSave() { try { if (arenaSess) localStorage.setItem("arenaSessV1", JSON.stringify({ id: arenaSess.id, paused: !!arenaSess.paused })); } catch (e) {} }
+function arenaUnsave() { try { localStorage.removeItem("arenaSessV1"); } catch (e) {} }
 function arenaPause() {
   if (!arenaSess || arenaEnded()) return;
-  arenaSess.paused = true;
+  arenaSess.paused = true; arenaSave();
   arenaWriteState("paused");
   if (!onlineMatchId) { cleanupOnline(); try { showScreen("onlineWait"); } catch (e) {} }   // Suche stoppen; laufendes Spiel wird noch beendet
   openArena();
 }
 function arenaResume() {
   if (!arenaSess || arenaEnded()) return;
-  arenaSess.paused = false; arenaSess.waitAt = 0;
+  arenaSess.paused = false; arenaSess.waitAt = 0; arenaSave();
   arenaWriteState("search");
   if (!onlineMatchId) { cleanupOnline(); enterOnlineQueue(); }
   openArena();
@@ -10992,7 +11004,7 @@ async function arenaBotTx(aid, fn) {
   return runTransaction(ref(getDatabase(app), "arenas/" + aid + "/" + ONLINE_BOT_UID), cur => fn(cur));
 }
 // Bot ist wie ein Mensch nur in EINEM Spiel gleichzeitig: Reservierung (busyBy/busyUntil) per Transaktion, 5 min Lease als Sicherheitsnetz
-const ARENA_BOT_LEASE = 300000;
+const ARENA_BOT_LEASE = 240000;
 function arenaBotIsBusy() {
   const b = arenaStandings[ONLINE_BOT_UID];
   return !!(b && b.busyBy && b.busyBy !== myUid && Number(b.busyUntil) > arenaNow());
@@ -11056,12 +11068,13 @@ async function arenaRecordResult(aid, won, oppElo, oppUid) {
 }
 function arenaRowsHtml(list, limit) {
   let html = "", last = -1;
+  const playing = arenaPlayingSet(list);
   list.forEach((e, i) => {
     if (!(i < limit || e.uid === myUid)) return;
     if (last >= 0 && i - last > 1) html += '<div style="text-align:center;opacity:.5;font-size:12px;line-height:1;">⋮</div>';
     last = i;
     const me = e.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-    const stt = arenaStatus(e), paused = stt === "paused";
+    const stt = arenaStatus(e, playing), paused = stt === "paused";
     const sheet = String(e.sh || "").split("").map(c => '<span style="color:' + (c === "W" ? "#4ade80" : "#f87171") + ';">●</span>').join("");
     html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;${paused ? "opacity:.45;" : ""}" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${e.elo ? ' <span style="opacity:.55;font-size:12px;font-weight:400;">' + Math.round(e.elo) + '</span>' : ""}${(e.streak || 0) >= 2 ? " 🔥" : ""}${paused ? " ⏸" : stt === "game" ? " ⚔️" : ""}<small>${e.games || 0} ${(e.games || 0) === 1 ? "game" : "games"} · ${e.wins || 0} ${(e.wins || 0) === 1 ? "win" : "wins"}${paused ? " · paused" : ""} ${sheet}</small></span><span class="lg-wins" style="font-family:var(--font-body,system-ui,sans-serif);font-variant-numeric:tabular-nums;">${e.score || 0}</span></div>`;
   });
@@ -11097,10 +11110,12 @@ async function arenaPlay() {
   arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
   try { await arenaEnsureEntry(); await arenaEnsureBot(inf.id); }
   catch (e) { console.warn("arena join failed", e); try { leagueToast("Could not join the arena", "#ff4444"); } catch (x) {} arenaLeave(true); return; }
+  arenaSave();
   enterOnlineQueue();
   openArena();
 }
 function arenaLeave() {
+  arenaUnsave();
   clearInterval(arenaNextT); arenaNextT = null;
   if (arenaSess && arenaSess.unsub) { try { arenaSess.unsub(); } catch (e) {} }
   arenaSess = null;
@@ -11127,7 +11142,7 @@ function arenaWinnerButtons(btns, mk, hide) {
   }, 1000);
   mk("⏸ Pause", () => {
     clearInterval(arenaNextT);
-    if (arenaSess) { arenaSess.paused = true; arenaWriteState("paused"); }
+    if (arenaSess) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); }
     hide(); arenaNext();   // arenaNext erkennt die Pause: keine neue Suche, Turnier-Ansicht oeffnet sich
   });
 }
@@ -11162,11 +11177,11 @@ function openArena() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   closeArenaOv();
   const ov = document.createElement("div"); ov.id = "arenaOv";
-  ov.style.cssText = "position:fixed;inset:0;z-index:9000;display:flex;align-items:stretch;justify-content:center;background:radial-gradient(circle at 50% 20%,#15151f,#08080c 75%);box-sizing:border-box;";
-  ov.innerHTML = '<div style="width:min(560px,100vw);height:100%;display:flex;flex-direction:column;gap:10px;border-top:3px solid #ffd700;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));box-sizing:border-box;color:#eaf2fb;overflow-y:auto;">'
+  ov.style.cssText = "position:fixed;inset:0;z-index:9000;overflow:hidden;touch-action:pan-y;display:flex;align-items:stretch;justify-content:center;background:radial-gradient(circle at 50% 20%,#15151f,#08080c 75%);box-sizing:border-box;";
+  ov.innerHTML = '<div style="width:min(560px,100vw);height:100%;display:flex;flex-direction:column;gap:10px;border-top:3px solid #ffd700;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));box-sizing:border-box;color:#eaf2fb;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain;min-height:0;max-height:100%;">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font:800 20px var(--font-display);">🏟 Hourly Arena</b><button class="aoX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
     + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
-    + '<div class="aoT lg-table" style="flex:1;min-height:120px;max-height:none;overflow-y:auto;"></div>'
+    + '<div class="aoT lg-table" style="flex:none;min-height:120px;max-height:none;overflow:visible;"></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
     + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff6666;">✖ Leave arena</button></div>';
   document.body.appendChild(ov);
@@ -11185,7 +11200,7 @@ function openArena() {
     const nPaused = list.filter(e => arenaStatus(e) === "paused").length, nGames = Math.floor(list.reduce((a, e) => a + (Number(e.games) || 0), 0) / 2);
     const mineState = arenaSess ? (arenaSess.paused ? " · ⏸ You are paused" : (!onlineMatchId ? " · 🔎 Searching opponent…" : "")) : "";
     ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (nPaused ? " (" + nPaused + " paused)" : "") + " · " + nGames + " games" + mineState : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
-    ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
+    ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 200);
     const b = ov.querySelector(".aoB");
     b.disabled = !inf.running;
     b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
@@ -11209,6 +11224,24 @@ function arenaBtnUpd() {
   b.textContent = "🏟 Hourly Arena";
   const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = t; b.appendChild(sm);
 }
+let arenaRestoreTried = false;
+async function arenaRestoreTick() {
+  if (arenaRestoreTried || arenaSess || !fbReady || !myUid || !onlineAccount) return;
+  let sv = null; try { sv = JSON.parse(localStorage.getItem("arenaSessV1") || "null"); } catch (e) {}
+  if (!sv) { arenaRestoreTried = true; return; }
+  const inf = arenaInfo();
+  if (!sv.id || sv.id !== inf.id || !inf.running) { arenaUnsave(); arenaRestoreTried = true; return; }
+  const menu = document.getElementById("menu");
+  if (!menu || menu.style.display === "none" || inMatchOrSurvival()) return;     // erst wenn man im Menue ist
+  arenaRestoreTried = true;
+  if (!sv.paused) { arenaPlay(); return; }
+  arenaSess = { id: inf.id, end: inf.end, lastOpp: null, qAt: Date.now(), unsub: null, paused: true };
+  arenaStandings = {};
+  arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
+  try { await arenaEnsureEntry(); await arenaEnsureBot(inf.id); } catch (e) { arenaLeave(true); return; }
+  if (arenaSess) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); openArena(); }
+}
+setInterval(arenaRestoreTick, 2500);
 setInterval(arenaBtnUpd, 10000); setTimeout(arenaBtnUpd, 600); setTimeout(arenaBtnUpd, 3000);
 window.openArena = openArena;
 </script>
