@@ -7345,7 +7345,8 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   const _inArena = !!(onlineArenaId && arenaSess);
   if (_inArena) arenaWinnerButtons(btns, mk, hideOverlay); else mk("🔄 Rematch", requestRematch).id = "rematchBtn";
   if (!_inArena) mk("🔍 New Opponent", () => { hideOverlay(); cleanupOnline(); enterOnlineQueue(); });
-  mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
+  if (!_inArena) mk("🏠 Home", () => { hideOverlay(); exitToMenu(); });
+  { const hb = document.getElementById("homeBtn"); if (hb && _inArena) hb.style.display = "none"; }   // Turnier: kein Home-Knopf nach der Runde
 
   document.getElementById("postChat").style.display = "flex";
   document.getElementById("winnerOverlay").classList.remove("nochat");
@@ -11062,7 +11063,7 @@ function arenaRowsHtml(list, limit) {
     const me = e.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
     const stt = arenaStatus(e), paused = stt === "paused";
     const sheet = String(e.sh || "").split("").map(c => '<span style="color:' + (c === "W" ? "#4ade80" : "#f87171") + ';">●</span>').join("");
-    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;${paused ? "opacity:.45;" : ""}" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${e.elo ? ' <span style="opacity:.55;font-size:12px;font-weight:400;">' + Math.round(e.elo) + '</span>' : ""}${(e.streak || 0) >= 2 ? " 🔥" : ""}${paused ? " ⏸" : stt === "game" ? " ⚔️" : ""}<small>${e.games || 0} games · ${e.wins || 0} wins${paused ? " · paused" : ""} ${sheet}</small></span><span class="lg-wins">${e.score || 0}</span></div>`;
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;${paused ? "opacity:.45;" : ""}" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${e.elo ? ' <span style="opacity:.55;font-size:12px;font-weight:400;">' + Math.round(e.elo) + '</span>' : ""}${(e.streak || 0) >= 2 ? " 🔥" : ""}${paused ? " ⏸" : stt === "game" ? " ⚔️" : ""}<small>${e.games || 0} ${(e.games || 0) === 1 ? "game" : "games"} · ${e.wins || 0} ${(e.wins || 0) === 1 ? "win" : "wins"}${paused ? " · paused" : ""} ${sheet}</small></span><span class="lg-wins" style="font-family:var(--font-body,system-ui,sans-serif);font-variant-numeric:tabular-nums;">${e.score || 0}</span></div>`;
   });
   return html || '<div style="opacity:.7;text-align:center;padding:10px;font-size:13px;">No players yet</div>';
 }
@@ -11117,14 +11118,18 @@ function arenaWinnerButtons(btns, mk, hide) {
   clearInterval(arenaNextT);
   let n = 5;
   const go = () => { clearInterval(arenaNextT); hide(); arenaNext(); };
-  const b = mk("▶ Next game (" + n + ")", () => go());
+  const b = mk("🏟 Back to tournament (" + n + ")", () => go());
   arenaNextT = setInterval(() => {
     const wo = document.getElementById("winnerOverlay");
     if (!arenaSess || !wo || wo.style.display === "none") { clearInterval(arenaNextT); return; }
     if (--n <= 0) { go(); return; }
-    b.textContent = "▶ Next game (" + n + ")";
+    b.textContent = "🏟 Back to tournament (" + n + ")";
   }, 1000);
-  mk("🏟 Standings", () => openArena());
+  mk("⏸ Pause", () => {
+    clearInterval(arenaNextT);
+    if (arenaSess) { arenaSess.paused = true; arenaWriteState("paused"); }
+    hide(); arenaNext();   // arenaNext erkennt die Pause: keine neue Suche, Turnier-Ansicht oeffnet sich
+  });
 }
 async function arenaFinish() {
   if (!arenaSess) return;
@@ -11183,7 +11188,7 @@ function openArena() {
     ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
     const b = ov.querySelector(".aoB");
     b.disabled = !inf.running;
-    b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : "▶ Join & play";
+    b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
     b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
     const lv = ov.querySelector(".aoL");
     lv.style.display = arenaSess ? "" : "none";
