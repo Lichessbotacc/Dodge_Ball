@@ -858,6 +858,27 @@ body.mode-tv #homeBtn:hover{transform:none;}
 .lg-cel-box button{margin-top:16px;}
 @media (hover:hover) and (pointer:fine){.pr-row:hover{background:rgba(255,255,255,0.08);}}
 .pr-row,.lb-row,.lg-row,#chatMessages b[data-uid]{-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+
+/* ── EINE Menue-Seite: alle Modi + Settings + Invite sofort sichtbar (2 Spalten, kompakt) ── */
+#menuOnline{flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:stretch;gap:8px;width:min(480px,92vw);}
+#menuOnline > button{flex:1 1 calc(50% - 4px);min-width:0;margin:0;padding:11px 8px;font-size:15px;letter-spacing:.5px;white-space:nowrap;}
+#menuOnline > #dailyBtn{flex-basis:100%;}
+#menuOnline > #socialBar{flex-basis:100%;margin-top:6px;gap:8px;}
+#menuOnline .socialLink{padding:4px 12px 4px 6px;font-size:12px;}
+#menuTopRight{position:absolute;top:10px;right:12px;display:flex;gap:6px;z-index:5;}
+#menuTopRight > button{position:static!important;margin:0!important;padding:8px 14px;font-size:13px;white-space:nowrap;}
+@media (min-width:981px){
+  #menu{padding-top:64px;padding-bottom:16px;}
+  #menu h1{font-size:46px;margin-bottom:12px;}
+}
+@media (min-width:981px) and (max-height:700px){
+  #menuOnline > button{padding:8px 6px;font-size:14px;}
+  #menu h1{font-size:38px;margin-bottom:8px;}
+}
+@media (max-width:720px){
+  #menuTopRight{position:static;order:-3;flex-wrap:wrap;justify-content:center;}
+  #menuTopRight > button{padding:7px 10px;font-size:11px;}
+}
 </style>
 </head>
 <body>
@@ -886,9 +907,11 @@ body.mode-tv #homeBtn:hover{transform:none;}
     </div>
 
          <div id="menu">
+      <div id="menuTopRight">
       <button id="accountBtn" onclick="openAccountScreen()">👤 Log in / Sign up</button>
       <button id="newsBtn" onclick="openNews()">📰 News<span class="newsDot" id="newsDot"></span></button>
       <button id="bugBtn" onclick="openBugReport()">🚩 Report</button>
+      </div>
       <!-- LINKS: Global Chat -->
       <div id="chatPanel" style="width:320px;height:400px;display:flex;flex-direction:column;background:linear-gradient(160deg, rgba(16,18,26,0.75), rgba(8,9,14,0.8));border:1px solid rgba(255,255,255,0.1);border-left:3px solid var(--neon-cyan);padding:12px;border-radius:12px;font-size:13px;text-align:left;flex-shrink:0;box-shadow:0 10px 26px rgba(0,0,0,0.35);backdrop-filter:blur(8px);">
         <b>💬 Global Chat</b>
@@ -905,7 +928,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <!-- CENTER: main menu -->
       <div style="display: flex; flex-direction: column; align-items: center; flex-shrink: 0;">
         <h1>DarkOnBalls</h1>
-        <div id="menuMain" class="menuPage">
+        <div id="menuMain" class="menuPage" style="display:none">
           <button onclick="showMenuPage('menuOnline')">🌐 Online</button>
           <button onclick="showMenuPage('menuOffline')" style="display:none" id="btnOfflineMenu">🎮 Offline</button> <!-- Offline vorübergehend ausgeblendet: style="display:none" entfernen zum Einblenden -->
           <button onclick="openSettings()">⚙️ Settings</button>
@@ -931,7 +954,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
             </a>
           </div>
         </div>
-        <div id="menuOnline" class="menuPage" style="display:none">
+        <div id="menuOnline" class="menuPage">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
           <button onclick="startSurvival()">🏝 Survival</button>
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
@@ -941,7 +964,8 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
           <button onclick="showLeagueScreen()">🏅 Weekly League</button>
           <button onclick="showScreen('leaderboardScreen');lbShowTab('elo')">🏆 Leaderboard</button>
-          <button onclick="showMenuPage('menuMain')">← Back</button>
+          <button onclick="openSettings()">⚙️ Settings</button>
+          <button onclick="inviteFriends()">🔗 Invite friends</button>
           <div id="socialBar">
             <a class="socialLink patronLink" href="#" onclick="openPatronInfo();return false;" title="Support the game &amp; get a glowing ball" aria-label="Patron"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">💎</span><span>Patron</span></a>
             <a id="linkWhatsApp" class="socialLink" href="https://chat.whatsapp.com/HA0w5ZkjAt9I5xlHOcFLLh?mode=gi_t" target="_blank" rel="noopener noreferrer" title="Join our WhatsApp group" aria-label="WhatsApp">
@@ -5462,6 +5486,7 @@ const ALL_SCREENS = [
 ];
 
 function showMenuPage(id) {
+  if (id === "menuMain") id = "menuOnline";   // eine Seite fuer alles: Settings, Invite und alle Modi
   ["menuMain","menuOnline","menuOffline"].forEach(p => { const el = document.getElementById(p); if (el) el.style.display = (p === id) ? "flex" : "none"; });
 }
 function updateChatLock() {
