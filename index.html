@@ -1617,10 +1617,14 @@ async function rpcRenameChatMessages(uid, newName) {
 async function rpcSaveSurvival(time, replayStr, name) {
   requireNotBanned();
   const uid = requireUid();
-  return update(ref(db), {
-    ["survival/" + uid]: { name: String(name), time: Number(time), ts: Date.now() },
-    ["survivalReplays/" + uid]: (replayStr && String(replayStr).length <= 3900000) ? String(replayStr) : null   // null = altes Replay entfernen (nur Top 5 behalten Replays)
-  });
+  // FIX: Rekord und Replay werden NICHT mehr in einem atomaren Write gespeichert. Vorher hat ein abgelehntes/zu grosses Replay
+  // (oder eine Regel dafuer) den ganzen Write und damit auch die Rekordzeit verworfen -> "meine Runs werden nicht gespeichert".
+  // Zeitstempel kommt jetzt vom Server (die Uhr mancher Handys geht falsch und scheiterte an der Zeit-Pruefung der Rules).
+  await set(ref(db, "survival/" + uid), { name: String(name), time: Number(time), ts: serverTimestamp() });
+  try {
+    if (replayStr && String(replayStr).length <= 3900000) await set(ref(db, "survivalReplays/" + uid), String(replayStr));
+    else await remove(ref(db, "survivalReplays/" + uid));   // kein Replay = altes entfernen (nur Top 5 behalten Replays)
+  } catch (e) { console.warn("survival replay not saved (record is saved)", e); }
 }
 // Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
 async function rpcSaveDaily(day, time, name, ch) {
@@ -1628,7 +1632,7 @@ async function rpcSaveDaily(day, time, name, ch) {
   const uid = requireUid();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
   ch = Number(ch); if (!Number.isInteger(ch) || ch < 0 || ch > 500) throw new Error("Bad mode.");
-  return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: Date.now(), ch });
+  return set(ref(db, "daily/" + day + "/" + uid), { name: String(name), time: Number(time), ts: serverTimestamp(), ch });
 }
 // Daily-Replay: nur eigener Knoten dailyReplays/{uid}/{YYYY-MM-DD}
 async function rpcSaveDailyReplay(day, str) {
@@ -2201,6 +2205,7 @@ async function onFirebaseAndAuthReady() {
 
     await updatePlayerStatus("Idle in Menu");
     leagueResolvePrevious().catch(() => {});
+    setTimeout(() => { try { flushPendingRuns(); } catch (e) {} }, 3000);
   }
   startMenuPresenceListener();
 }
@@ -3571,6 +3576,84 @@ function countModeRun(field) {
     } catch (e) { console.warn("run count sync failed", e); }
   });
 }
+// ═══ ROBUSTES SPEICHERN von Survival-/Daily-Runs ═══
+// - wartet auf die Firebase-Sitzung und gleicht myUid mit der ECHTEN Auth-UID ab (myUid war nur ein Schnappschuss)
+// - wiederholt kurzzeitig fehlgeschlagene Writes
+// - merkt sich nicht gespeicherte Runs in localStorage und sendet sie spaeter automatisch nach (nur fuer dasselbe Konto)
+const PENDING_KEY = "dobPendingRuns";
+function _pendRead() { try { const a = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function _pendWrite(a) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(a.slice(-20))); } catch (e) {} }
+function pendAdd(e) {
+  e.id = Date.now() + "_" + Math.random().toString(36).slice(2, 7); e.at = Date.now(); e.tries = 0;
+  const a = _pendRead().filter(x => !(x.type === e.type && x.name === e.name && x.key === e.key && Number(x.t) <= Number(e.t)));   // nur die beste Zeit je Ziel
+  a.push(e); _pendWrite(a);
+}
+function _saveErrText(e) {
+  let c = String((e && (e.code || e.message)) || e || "");
+  try { if (onlineAccount && window._dobAuth && !window._dobAuth.isPasswordAccount() && deviceHasAccount()) c = "session expired - log in again"; } catch (x) {}
+  return c.slice(0, 60);
+}
+async function _saveReady() {
+  if (!onlineAccount) throw new Error("no account");
+  const t0 = Date.now();
+  while (Date.now() - t0 < 6000 && !(window.dobIsReady && window.dobIsReady() && window._dobRPC)) await new Promise(r => setTimeout(r, 200));
+  try { _tryActivate(); } catch (e) {}
+  const u = window.dobMyUid && window.dobMyUid();
+  if (!u || !window._dobRPC) throw new Error("not connected");
+  RPC = window._dobRPC; myUid = u;   // an die echte Auth-Sitzung angleichen
+  return u;
+}
+async function _withRetry(fn, tries) {
+  let err;
+  for (let i = 0; i < (tries || 3); i++) {
+    try { return await fn(); }
+    catch (e) {
+      err = e;
+      if (/permission_denied/i.test(String((e && (e.code || e.message)) || e)) && i >= 1) break;   // nach 2 Versuchen: echte Ablehnung
+      await new Promise(r => setTimeout(r, 700 + i * 1000));
+    }
+  }
+  throw err;
+}
+let _pendBusy = false;
+async function flushPendingRuns() {
+  if (_pendBusy || !onlineAccount || survivalActive) return;
+  const mine = _pendRead().filter(x => x && x.name === onlineAccount.name);
+  if (!mine.length) return;
+  _pendBusy = true;
+  try {
+    await _saveReady();
+    for (const e of mine) {
+      let drop = false;
+      try {
+        if (Date.now() - e.at > 2 * 86400000 || (e.tries || 0) >= 6) drop = true;
+        else if (e.type === "surv") {
+          const old = await dbGet("survival/" + myUid);
+          if (!(old && Number(old.time) >= e.t)) await RPC.saveSurvival(e.t, null, onlineAccount.name);
+          drop = true;
+        } else if (e.type === "daily") {
+          if (e.key !== dailyKeyNow()) drop = true;   // alte Tage zaehlen nicht mehr
+          else if (_dailyPicksLoaded) {
+            if (dailyIdxFor(e.key) !== e.ch) drop = true;   // Modus wurde geaendert -> Lauf zaehlt nicht
+            else {
+              const old = await dbGet("daily/" + e.key + "/" + myUid);
+              const oldValid = old && (_dEntryIdx(old) === null || _dEntryIdx(old) === e.ch);
+              if (!(oldValid && Number(old.time) >= e.t)) await RPC.saveDaily(e.key, e.t, onlineAccount.name, e.ch);
+              drop = true;
+            }
+          }
+        } else drop = true;
+      } catch (err) {
+        console.warn("pending run retry failed", err);
+        _pendWrite(_pendRead().map(x => x.id === e.id ? Object.assign(x, { tries: (x.tries || 0) + 1 }) : x));
+      }
+      if (drop) _pendWrite(_pendRead().filter(x => x.id !== e.id));
+    }
+  } catch (e) { /* noch nicht verbunden: spaeter nochmal */ }
+  finally { _pendBusy = false; }
+}
+setInterval(() => { try { flushPendingRuns(); } catch (e) {} }, 45000);
+window.addEventListener("online", () => setTimeout(() => { try { flushPendingRuns(); } catch (e) {} }, 1500));
 async function endSurvival(camped) {
   if (!survivalActive) return;
   const lostConn = camped === "disconnect";
@@ -3594,20 +3677,25 @@ async function endSurvival(camped) {
   _survInfo = null;
   setTimeout(() => renderSurvivalResult(t, camped), 900);
   if (_dailyKey) { await _endDaily(t, camped, rec); return; }
-  let best = 0, isRecord = false, saved = true;
+  let best = 0, isRecord = false, saved = true, queued = false;
   try {
-    if (fbReady && myUid && onlineAccount) {
-      const old = await dbGet("survival/" + myUid);
+    if (onlineAccount) {   // FIX: vorher wurde bei fehlender Verbindung/UID stillschweigend NICHTS gespeichert und trotzdem "gespeichert" angezeigt
+      await _saveReady();
+      const old = await _withRetry(() => dbGet("survival/" + myUid));
       best = (old && Number(old.time)) || 0;
       if (t > best && t >= 1) {
         let keepRep = true;
         try { const svAll = (await RPC.get("survival")) || {}; keepRep = Object.entries(svAll).filter(([u, v]) => u !== myUid && (Number(v && v.time) || 0) > t).length < REPLAY_TOP_SURV; } catch (e) {}
-        await RPC.saveSurvival(t, keepRep ? JSON.stringify(rec) : null, onlineAccount.name);
+        const _rs = keepRep ? JSON.stringify(rec) : null;
+        await _withRetry(() => RPC.saveSurvival(t, _rs, onlineAccount.name));
         isRecord = true; best = t;
       }
     }
-  } catch (e) { saved = false; window._lastSaveErr = String((e && (e.code || e.message)) || e).slice(0, 60); console.warn("survival save failed", e); }
-  _survInfo = { best, isRecord, saved };
+  } catch (e) {
+    saved = false; window._lastSaveErr = _saveErrText(e); console.warn("survival save failed", e);
+    if (onlineAccount && t >= 1) { pendAdd({ type: "surv", name: onlineAccount.name, key: "", t }); queued = true; }
+  }
+  _survInfo = { best, isRecord, saved, queued };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
 // ── Replay-Aufbewahrung: Survival nur Top 5, Daily nur Top 3 (pro Modus ueber alle Tage + Top 3 von heute) ──
@@ -3732,23 +3820,24 @@ async function watchDailyReplay(day, uid, label) {
 }
 async function _endDaily(t, camped, rec) {
   if (_dailyTest) { _survInfo = { daily: true, key: dailyKeyNow(), best: t, isRecord: false, saved: true, top: [], rank: 0, test: true }; if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped); return; }
-  const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0;
+  const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0, queuedD = false;
   try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}   // nur Notfall-Wert (offline/Gast)
   try {
-    if (fbReady && myUid && onlineAccount) {
+    if (onlineAccount) {
+      await _saveReady();   // FIX: wartet auf die Sitzung / echte UID statt still nichts zu speichern
       await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);   // Modus nochmal pruefen: wurde er waehrend des Laufs geaendert, zaehlt der Lauf nicht
       if (_dailyRunIdx !== null && dailyIdxFor(key) !== _dailyRunIdx) {
         _survInfo = { lost: true, stale: true, daily: true, key, best: 0, isRecord: false, saved: true, top: [], rank: 0 };
         if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
         return;
       }
-      const old = await dbGet("daily/" + key + "/" + myUid);
+      const old = await _withRetry(() => dbGet("daily/" + key + "/" + myUid));
       // Eintrag von einem ANDEREN Modus (Daily wurde im Lauf des Tages geaendert) zaehlt nicht mehr -> Daily-Runs sind zurueckgesetzt, neuer Lauf ueberschreibt ihn
       const oldValid = old && (_dEntryIdx(old) === null || _dEntryIdx(old) === _dailyRunIdx);
       best = (oldValid && Number(old.time)) || 0;   // Datenbank ist massgeblich: wurden die Zeiten geloescht, zaehlt die alte lokale Bestzeit nicht mehr
       if (!oldValid) { try { localStorage.removeItem("dobDaily"); } catch (e) {} }
       if (t > best && t >= 1) {
-        await RPC.saveDaily(key, t, onlineAccount.name, _dailyRunIdx); isRecord = true; best = t;
+        await _withRetry(() => RPC.saveDaily(key, t, onlineAccount.name, _dailyRunIdx)); isRecord = true; best = t;
         try {   // Replay nur speichern, wenn der Lauf zu den Top 3 gehoert
           const [dAll, plAll] = await Promise.all([RPC.get("daily"), RPC.get("players")]);
           if (dailyKeepSet(dAll, plAll, dailyKeyNow()).has(myUid + "|" + key)) await RPC.saveDailyReplay(key, JSON.stringify(rec));
@@ -3757,13 +3846,16 @@ async function _endDaily(t, camped, rec) {
         dailyCleanup(true);
       }
     } else if (t > best) { isRecord = true; best = t; }
-  } catch (e) { saved = false; window._lastSaveErr = String((e && (e.code || e.message)) || e).slice(0, 60); if (t > best) { isRecord = true; best = t; } console.warn("daily save failed", e); }
+  } catch (e) {
+    saved = false; isRecord = false; window._lastSaveErr = _saveErrText(e); console.warn("daily save failed", e);
+    if (onlineAccount && t >= 1) { pendAdd({ type: "daily", name: onlineAccount.name, key, t, ch: _dailyRunIdx }); queuedD = true; }
+  }
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
   try {
     const all = await dbGet("daily/" + key);
     if (all) { const arr = Object.entries(all).filter(([u, v]) => _dEntryIdx(v) === null || _dEntryIdx(v) === _dailyRunIdx).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).sort(_tcmpT); top = arr.slice(0, 10); rank = arr.findIndex(x => x.u === myUid) + 1; }
   } catch (e) {}
-  _survInfo = { daily: true, key, best, isRecord, saved, top, rank };
+  _survInfo = { daily: true, key, best, isRecord, saved, top, rank, queued: queuedD };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
 function renderSurvivalResult(t, camped) {
@@ -3776,8 +3868,8 @@ function renderSurvivalResult(t, camped) {
   const i = _survInfo;
   if (i && i.isRecord && !i._snd) { i._snd = 1; setTimeout(() => SFX.play("record"), 350); }
   const dly = i && i.daily;
-  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online)")
-    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)" + (window._lastSaveErr ? " [" + window._lastSaveErr + "]" : "") + "." :
+  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online" + (window._lastSaveErr ? ": " + window._lastSaveErr : "") + (i.queued ? " – will retry automatically" : "") + ")")
+    : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)" + (window._lastSaveErr ? " [" + window._lastSaveErr + "]" : "") + (i.queued ? " – will retry automatically." : ".") :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
     + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
@@ -5821,6 +5913,7 @@ async function loginAccount() {
     RPC.onDisconnectSetOwnStatus({ status: "offline" });
     await updatePlayerStatus("Idle in Menu");
     startMenuPresenceListener();
+    setTimeout(() => { try { flushPendingRuns(); } catch (e) {} }, 1500);
 
     showScreen("menu");
   } catch(e) {
