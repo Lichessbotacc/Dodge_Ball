@@ -6236,6 +6236,7 @@ async function startBotMatch() {
   onlineArenaId  = arenaSess ? arenaSess.id : null;   // Arena: Bot-Spiele zaehlen mit
   onlineMatchId  = "BOT__" + Date.now();
   try { closeArenaOv(); } catch (e) {}
+  try { if (arenaSess) arenaWriteState("game"); } catch (e) {}
   onlineRole     = "p1";
   onlineIsHost   = true;
 
@@ -6318,6 +6319,7 @@ function joinMatch(matchId, opp, matchData) {
 
   onlineArenaId = matchData.arenaId || null;
   try { closeArenaOv(); } catch (e) {}
+  try { if (arenaSess) arenaWriteState("game"); } catch (e) {}
   onlineRound  = matchData.round || 0;
   onlineMatchStamp = Number(matchData.createdAt) || 0;
   onlineRole   = (myUid === matchData.p1uid) ? "p1" : "p2";
@@ -10918,16 +10920,54 @@ function arenaSorted(data) {
   return Object.entries(data || {}).filter(([u, e]) => e && e.name).map(([u, e]) => Object.assign({ uid: u }, e))
     .sort((a, b) => (b.score || 0) - (a.score || 0) || arenaPerf(b) - arenaPerf(a) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()) || (a.uid < b.uid ? -1 : 1));
 }
+// Status eines Spielers wie bei Lichess: paused (⏸), game (⚔️ spielt gerade), search (wartet auf Paarung)
+function arenaStatus(e) {
+  const now = arenaNow(), hb = Number(e.hb) || Number(e.ts) || 0;
+  if (e.uid === ONLINE_BOT_UID) return (e.busyBy && Number(e.busyUntil) > now) ? "game" : "search";
+  if (e.st === "paused") return "paused";
+  if (e.st === "game") return now - hb > 480000 ? "paused" : "game";    // Match laeuft max. ~8 min
+  return now - hb > 90000 ? "paused" : "search";                          // kein Lebenszeichen -> als pausiert/weg markiert
+}
+async function arenaMyTx(aid, fn) {
+  const { ref, runTransaction, getDatabase } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+  const app = (await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js")).getApp();
+  return runTransaction(ref(getDatabase(app), "arenas/" + aid + "/" + myUid), cur => fn(cur));
+}
+// eigenen Status (search / game / paused) + Lebenszeichen schreiben
+async function arenaWriteState(st) {
+  if (!fbReady || !myUid || !onlineAccount || !arenaSess) return;
+  const aid = arenaSess.id;
+  try {
+    await arenaMyTx(aid, cur => {
+      if (!cur) return;
+      return Object.assign({}, cur, { st: st, hb: arenaNow(), elo: Math.round(onlineAccount.elo) });
+    });
+  } catch (e) { console.warn("arena state write failed", e && (e.code || e.message)); }
+}
+function arenaPause() {
+  if (!arenaSess || arenaEnded()) return;
+  arenaSess.paused = true;
+  arenaWriteState("paused");
+  if (!onlineMatchId) { cleanupOnline(); try { showScreen("onlineWait"); } catch (e) {} }   // Suche stoppen; laufendes Spiel wird noch beendet
+  openArena();
+}
+function arenaResume() {
+  if (!arenaSess || arenaEnded()) return;
+  arenaSess.paused = false; arenaSess.waitAt = 0;
+  arenaWriteState("search");
+  if (!onlineMatchId) { cleanupOnline(); enterOnlineQueue(); }
+  openArena();
+}
 // Der Online Bot steht immer in der Liste, solange die Arena laeuft (auch bevor sein Datenbank-Eintrag existiert)
 function arenaWithBot(data) {
   data = data || {};
   if (data[ONLINE_BOT_UID] && data[ONLINE_BOT_UID].name) return data;
   if (!arenaInfo().running) return data;
-  return Object.assign({}, data, { [ONLINE_BOT_UID]: { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 } });
+  return Object.assign({}, data, { [ONLINE_BOT_UID]: { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, elo: Math.round(Number(onlineBotElo) || 1500), st: "search" } });
 }
 // Paarung: naechster Rang zuerst, letzter Gegner ganz hinten
 function arenaSortOthers(others) {
-  const list = arenaSorted(arenaWithBot(arenaStandings)), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
+  const list = arenaSorted(arenaWithBot(arenaStandings)).filter(e => e.uid === myUid || arenaStatus(e) !== "paused"), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
   const R = u => rk[u] === undefined ? list.length : rk[u], me = R(myUid);
   others.sort((a, b) => Math.abs(R(a.uid) - me) - Math.abs(R(b.uid) - me) || Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo) || (a.uid < b.uid ? -1 : 1));
   if (arenaSess && arenaSess.lastOpp && others.length > 1) {
@@ -10937,8 +10977,8 @@ function arenaSortOthers(others) {
 }
 async function arenaEnsureEntry() {
   const id = arenaSess.id, cur = await RPC.get("arenas/" + id + "/" + myUid);
-  if (cur) { arenaStandings[myUid] = cur; return; }
-  const e = { name: onlineAccount.name, score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: Date.now() };
+  if (cur) { arenaStandings[myUid] = cur; if (arenaSess) arenaSess.paused = false; arenaWriteState("search"); return; }
+  const e = { name: onlineAccount.name, score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, sh: "", st: "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo), ts: Date.now() };
   await RPC.setArenaEntry(id, e); arenaStandings[myUid] = e;
 }
 // ── Online Bot als normaler Arena-Spieler ──
@@ -10978,7 +11018,7 @@ async function arenaBotRelease(aid) {
 }
 async function arenaEnsureBot(aid) {
   try {
-    await arenaBotTx(aid, cur => cur || { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, ts: Date.now() });
+    await arenaBotTx(aid, cur => cur || { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, sh: "", elo: Math.round(Number(onlineBotElo) || 1500), ts: Date.now() });
   } catch (e) { console.warn("arena bot entry failed (Rules?)", e && (e.code || e.message)); }
 }
 async function arenaRecordBot(aid, botWon, humanElo) {
@@ -10988,7 +11028,8 @@ async function arenaRecordBot(aid, botWon, humanElo) {
       cur = cur || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
       const st = Number(cur.streak) || 0, pts = botWon ? (st >= 2 ? 4 : 2) : 0;
       const r = { name: "Online Bot", score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (botWon ? 1 : 0),
-        streak: botWon ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(humanElo) || 1500), last: pts, ts: Date.now() };
+        streak: botWon ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(humanElo) || 1500), last: pts, ts: Date.now(),
+        sh: (String(cur.sh || "") + (botWon ? "W" : "L")).slice(-12), elo: Math.round(Number(onlineBotElo) || 1500) };
       // Reservierung freigeben (nur wenn sie von mir ist); fremde, noch gueltige Reservierung bleibt erhalten
       if (cur.busyBy && cur.busyBy !== myUid && Number(cur.busyUntil) > arenaNow()) { r.busyBy = cur.busyBy; r.busyUntil = cur.busyUntil; }
       return r;
@@ -11003,7 +11044,8 @@ async function arenaRecordResult(aid, won, oppElo, oppUid) {
       const cur = (await RPC.get("arenas/" + aid + "/" + myUid)) || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
       const st = Number(cur.streak) || 0, pts = won ? (st >= 2 ? 4 : 2) : 0;
       const e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
-        streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now() };
+        streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now(),
+        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-12), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo) };
       await RPC.setArenaEntry(aid, e);
       arenaStandings[myUid] = e;
       try { leagueToast("🏟 " + (won ? "+" + pts + " arena points" + (pts === 4 ? " 🔥" : "") : "0 arena points") + " · " + e.score + " total", won ? "#ffd700" : "#888"); } catch (x) {}
@@ -11018,7 +11060,9 @@ function arenaRowsHtml(list, limit) {
     if (last >= 0 && i - last > 1) html += '<div style="text-align:center;opacity:.5;font-size:12px;line-height:1;">⋮</div>';
     last = i;
     const me = e.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
-    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${(e.streak || 0) >= 2 ? " 🔥" : ""}<small>${e.games || 0} games · ${e.wins || 0} wins</small></span><span class="lg-wins">${e.score || 0}</span></div>`;
+    const stt = arenaStatus(e), paused = stt === "paused";
+    const sheet = String(e.sh || "").split("").map(c => '<span style="color:' + (c === "W" ? "#4ade80" : "#f87171") + ';">●</span>').join("");
+    html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;${paused ? "opacity:.45;" : ""}" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${e.elo ? ' <span style="opacity:.55;font-size:12px;font-weight:400;">' + Math.round(e.elo) + '</span>' : ""}${(e.streak || 0) >= 2 ? " 🔥" : ""}${paused ? " ⏸" : stt === "game" ? " ⚔️" : ""}<small>${e.games || 0} games · ${e.wins || 0} wins${paused ? " · paused" : ""} ${sheet}</small></span><span class="lg-wins">${e.score || 0}</span></div>`;
   });
   return html || '<div style="opacity:.7;text-align:center;padding:10px;font-size:13px;">No players yet</div>';
 }
@@ -11034,6 +11078,7 @@ function arenaTick() {
   const now = Date.now();
   if (now - arenaSess.qAt > 20000 && !onlineMatchId) {   // Warteschlangen-Eintrag frisch halten
     arenaSess.qAt = now;
+    if (!arenaSess.paused) arenaWriteState("search");
     RPC.setOwnQueueEntry({ uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: now, arena: arenaSess.id, aspect: screenAspect() }).catch(() => {});
   }
   arenaRenderSearch();
@@ -11064,6 +11109,7 @@ function arenaNext() {
   closeArenaOv();
   if (arenaEnded()) { arenaFinish(); return; }
   arenaSess.waitAt = 0;
+  if (arenaSess.paused) { cleanupOnline(); try { showScreen("onlineWait"); } catch (e) {} openArena(); return; }
   cleanupOnline(); enterOnlineQueue();
   openArena();   // zurueck in die Turnier-Ansicht, Suche laeuft schon
 }
@@ -11117,7 +11163,7 @@ function openArena() {
     + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
     + '<div class="aoT lg-table" style="flex:1;min-height:120px;max-height:none;overflow-y:auto;"></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
-    + '<button class="aoB" style="margin:0;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff6666;">✖ Leave arena</button></div>';
+    + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff6666;">✖ Leave arena</button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = closeArenaOv;
   ov.addEventListener("click", e => { if (e.target === ov) closeArenaOv(); });
@@ -11125,12 +11171,15 @@ function openArena() {
   const render = () => {
     if (!ov.isConnected) return;
     const inf = arenaInfo();
+    if (arenaSess && arenaEnded()) { arenaFinish(); return; }
     if (fbReady && subId !== inf.id) {
       subId = inf.id; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
       arenaLobbyUnsub = dbOn("arenas/" + inf.id, d => { data = d || {}; render(); });
     }
     const list = arenaSorted(arenaWithBot(data));
-    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (arenaSess && !onlineMatchId ? " · 🔎 Searching opponent…" : "") : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
+    const nPaused = list.filter(e => arenaStatus(e) === "paused").length, nGames = Math.floor(list.reduce((a, e) => a + (Number(e.games) || 0), 0) / 2);
+    const mineState = arenaSess ? (arenaSess.paused ? " · ⏸ You are paused" : (!onlineMatchId ? " · 🔎 Searching opponent…" : "")) : "";
+    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (nPaused ? " (" + nPaused + " paused)" : "") + " · " + nGames + " games" + mineState : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
     ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
     const b = ov.querySelector(".aoB");
     b.disabled = !inf.running;
@@ -11138,6 +11187,10 @@ function openArena() {
     b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
     const lv = ov.querySelector(".aoL");
     lv.style.display = arenaSess ? "" : "none";
+    const pb = ov.querySelector(".aoP");
+    pb.style.display = arenaSess ? "" : "none";
+    pb.textContent = arenaSess && arenaSess.paused ? "▶ Resume" : "⏸ Pause";
+    pb.onclick = () => { if (arenaSess && arenaSess.paused) arenaResume(); else arenaPause(); };
     lv.onclick = () => { closeArenaOv(); cancelOnline(); };
   };
   ov.querySelector(".aoX").onclick = closeArenaOv;
