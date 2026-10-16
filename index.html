@@ -10917,9 +10917,16 @@ function arenaSorted(data) {
   return Object.entries(data || {}).filter(([u, e]) => e && e.name).map(([u, e]) => Object.assign({ uid: u }, e))
     .sort((a, b) => (b.score || 0) - (a.score || 0) || arenaPerf(b) - arenaPerf(a) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()) || (a.uid < b.uid ? -1 : 1));
 }
+// Der Online Bot steht immer in der Liste, solange die Arena laeuft (auch bevor sein Datenbank-Eintrag existiert)
+function arenaWithBot(data) {
+  data = data || {};
+  if (data[ONLINE_BOT_UID] && data[ONLINE_BOT_UID].name) return data;
+  if (!arenaInfo().running) return data;
+  return Object.assign({}, data, { [ONLINE_BOT_UID]: { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 } });
+}
 // Paarung: naechster Rang zuerst, letzter Gegner ganz hinten
 function arenaSortOthers(others) {
-  const list = arenaSorted(arenaStandings), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
+  const list = arenaSorted(arenaWithBot(arenaStandings)), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
   const R = u => rk[u] === undefined ? list.length : rk[u], me = R(myUid);
   others.sort((a, b) => Math.abs(R(a.uid) - me) - Math.abs(R(b.uid) - me) || Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo) || (a.uid < b.uid ? -1 : 1));
   if (arenaSess && arenaSess.lastOpp && others.length > 1) {
@@ -11016,7 +11023,7 @@ function arenaRowsHtml(list, limit) {
 }
 function arenaRenderSearch() {
   const box = document.getElementById("searchLeague"); if (!box || !arenaSess) return;
-  const list = arenaSorted(arenaStandings), me = list.findIndex(e => e.uid === myUid);
+  const list = arenaSorted(arenaWithBot(arenaStandings)), me = list.findIndex(e => e.uid === myUid);
   box.style.display = "block";
   box.innerHTML = `<div style="text-align:center;font-size:13px;margin-bottom:6px;color:#ffd700;">🏟 Hourly Arena · ${arenaFmt(arenaSess.end - arenaNow())} left${me >= 0 ? " · you are #" + (me + 1) : ""}</div><div class="lg-table" style="max-height:none;overflow:visible;">${arenaRowsHtml(list, 6)}</div>`;
 }
@@ -11119,7 +11126,7 @@ function openArena() {
       subId = inf.id; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
       arenaLobbyUnsub = dbOn("arenas/" + inf.id, d => { data = d || {}; render(); });
     }
-    const list = arenaSorted(data);
+    const list = arenaSorted(arenaWithBot(data));
     ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
     ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
     const b = ov.querySelector(".aoB");
