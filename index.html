@@ -11042,7 +11042,7 @@ async function arenaRecordBot(aid, botWon, humanElo) {
       const st = Number(cur.streak) || 0, pts = botWon ? (st >= 2 ? 4 : 2) : 0;
       const r = { name: "Online Bot", score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (botWon ? 1 : 0),
         streak: botWon ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(humanElo) || 1500), last: pts, ts: Date.now(),
-        sh: (String(cur.sh || "") + (botWon ? "W" : "L")).slice(-12), elo: Math.round(Number(onlineBotElo) || 1500) };
+        sh: (String(cur.sh || "") + (botWon ? "W" : "L")).slice(-40), elo: Math.round(Number(onlineBotElo) || 1500) };
       // Reservierung freigeben (nur wenn sie von mir ist); fremde, noch gueltige Reservierung bleibt erhalten
       if (cur.busyBy && cur.busyBy !== myUid && Number(cur.busyUntil) > arenaNow()) { r.busyBy = cur.busyBy; r.busyUntil = cur.busyUntil; }
       return r;
@@ -11058,7 +11058,7 @@ async function arenaRecordResult(aid, won, oppElo, oppUid) {
       const st = Number(cur.streak) || 0, pts = won ? (st >= 2 ? 4 : 2) : 0;
       const e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
         streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now(),
-        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-12), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo) };
+        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-40), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo) };
       await RPC.setArenaEntry(aid, e);
       arenaStandings[myUid] = e;
       try { leagueToast("🏟 " + (won ? "+" + pts + " arena points" + (pts === 4 ? " 🔥" : "") : "0 arena points") + " · " + e.score + " total", won ? "#ffd700" : "#888"); } catch (x) {}
@@ -11075,7 +11075,10 @@ function arenaRowsHtml(list, limit) {
     last = i;
     const me = e.uid === myUid, medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
     const stt = arenaStatus(e, playing), paused = stt === "paused";
-    const sheet = String(e.sh || "").split("").map(c => '<span style="color:' + (c === "W" ? "#4ade80" : "#f87171") + ';">●</span>').join("");
+    // Ergebnis-Punkte: genau ein Punkt pro Spiel. Spiele ohne gespeichertes Ergebnis (aeltere Version) = grauer Punkt, max. 30 sichtbar
+    const g = Number(e.games) || 0, shAll = String(e.sh || "").slice(-30), unk = Math.min(Math.max(0, g - String(e.sh || "").length), 30 - shAll.length);
+    const sheet = (g > 30 ? '<span style="opacity:.5;">…</span>' : "") + '<span style="color:#6b7280;opacity:.6;">' + "●".repeat(Math.max(0, unk)) + '</span>'
+      + shAll.split("").map(c => '<span style="color:' + (c === "W" ? "#4ade80" : "#f87171") + ';">●</span>').join("");
     html += `<div class="lg-row ${me ? "me" : ""}" style="--lc:#ffd700;padding:7px 12px;${paused ? "opacity:.45;" : ""}" onclick="openOnlineProfile('${escapeHtml(e.uid)}')"><span class="lg-rank">${medal}</span><span class="lg-name">${escapeHtml(dn(e.name))}${e.elo ? ' <span style="opacity:.55;font-size:12px;font-weight:400;">' + Math.round(e.elo) + '</span>' : ""}${(e.streak || 0) >= 2 ? " 🔥" : ""}${paused ? " ⏸" : stt === "game" ? " ⚔️" : ""}<small>${e.games || 0} ${(e.games || 0) === 1 ? "game" : "games"} · ${e.wins || 0} ${(e.wins || 0) === 1 ? "win" : "wins"}${paused ? " · paused" : ""} ${sheet}</small></span><span class="lg-wins" style="font-family:var(--font-body,system-ui,sans-serif);font-variant-numeric:tabular-nums;">${e.score || 0}</span></div>`;
   });
   return html || '<div style="opacity:.7;text-align:center;padding:10px;font-size:13px;">No players yet</div>';
