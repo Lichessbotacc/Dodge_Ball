@@ -6235,6 +6235,7 @@ async function startBotMatch() {
   onlineVsBot    = true;
   onlineArenaId  = arenaSess ? arenaSess.id : null;   // Arena: Bot-Spiele zaehlen mit
   onlineMatchId  = "BOT__" + Date.now();
+  try { closeArenaOv(); } catch (e) {}
   onlineRole     = "p1";
   onlineIsHost   = true;
 
@@ -11050,8 +11051,8 @@ async function arenaPlay() {
   arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
   try { await arenaEnsureEntry(); await arenaEnsureBot(inf.id); }
   catch (e) { console.warn("arena join failed", e); try { leagueToast("Could not join the arena", "#ff4444"); } catch (x) {} arenaLeave(true); return; }
-  closeArenaOv();
   enterOnlineQueue();
+  openArena();
 }
 function arenaLeave() {
   clearInterval(arenaNextT); arenaNextT = null;
@@ -11064,10 +11065,11 @@ function arenaNext() {
   if (arenaEnded()) { arenaFinish(); return; }
   arenaSess.waitAt = 0;
   cleanupOnline(); enterOnlineQueue();
+  openArena();   // zurueck in die Turnier-Ansicht, Suche laeuft schon
 }
 function arenaWinnerButtons(btns, mk, hide) {
   clearInterval(arenaNextT);
-  let n = 8;
+  let n = 5;
   const go = () => { clearInterval(arenaNextT); hide(); arenaNext(); };
   const b = mk("▶ Next game (" + n + ")", () => go());
   arenaNextT = setInterval(() => {
@@ -11082,6 +11084,7 @@ async function arenaFinish() {
   if (!arenaSess) return;
   const id = arenaSess.id;
   arenaLeave(true);
+  try { closeArenaOv(); } catch (e) {}
   try { cleanupOnline(); } catch (e) {}
   try { document.getElementById("winnerOverlay").style.display = "none"; showScreen("menu"); showMenuPage("menuOnline"); } catch (e) {}
   arenaShowResult(id);
@@ -11089,7 +11092,7 @@ async function arenaFinish() {
 async function arenaShowResult(id) {
   const old = document.getElementById("arenaResOv"); if (old) old.remove();
   const ov = document.createElement("div"); ov.id = "arenaResOv";
-  ov.style.cssText = "position:fixed;inset:0;z-index:9100;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,.85);padding:14px;box-sizing:border-box;";
+  ov.style.cssText = "position:fixed;inset:0;z-index:9100;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 20%,#15151f,#08080c 75%);padding:14px;box-sizing:border-box;";
   ov.innerHTML = '<div style="width:min(440px,96vw);max-height:92vh;overflow-y:auto;background:#0d0f16;border:1px solid #ffd700;border-radius:16px;padding:18px;color:#eaf2fb;text-align:center;"><div style="font-size:42px;">🏟</div><div style="font:800 24px var(--font-display);color:#ffd700;">Arena finished</div><div class="arR" style="margin:10px 0;">Loading…</div><button class="arX" style="margin:4px;">OK</button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".arX").onclick = () => ov.remove();
@@ -11108,13 +11111,13 @@ function openArena() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   closeArenaOv();
   const ov = document.createElement("div"); ov.id = "arenaOv";
-  ov.style.cssText = "position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;background:rgba(3,3,6,.82);padding:14px;box-sizing:border-box;";
-  ov.innerHTML = '<div style="width:min(480px,96vw);max-height:92vh;display:flex;flex-direction:column;gap:10px;background:#0d0f16;border:1px solid #2a3142;border-top:3px solid #ffd700;border-radius:16px;padding:16px;color:#eaf2fb;">'
+  ov.style.cssText = "position:fixed;inset:0;z-index:9000;display:flex;align-items:stretch;justify-content:center;background:radial-gradient(circle at 50% 20%,#15151f,#08080c 75%);box-sizing:border-box;";
+  ov.innerHTML = '<div style="width:min(560px,100vw);height:100%;display:flex;flex-direction:column;gap:10px;border-top:3px solid #ffd700;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));box-sizing:border-box;color:#eaf2fb;overflow-y:auto;">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font:800 20px var(--font-display);">🏟 Hourly Arena</b><button class="aoX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
     + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
-    + '<div class="aoT lg-table" style="max-height:44vh;overflow-y:auto;"></div>'
+    + '<div class="aoT lg-table" style="flex:1;min-height:120px;max-height:none;overflow-y:auto;"></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
-    + '<button class="aoB" style="margin:0;"></button></div>';
+    + '<button class="aoB" style="margin:0;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff6666;">✖ Leave arena</button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = closeArenaOv;
   ov.addEventListener("click", e => { if (e.target === ov) closeArenaOv(); });
@@ -11127,12 +11130,15 @@ function openArena() {
       arenaLobbyUnsub = dbOn("arenas/" + inf.id, d => { data = d || {}; render(); });
     }
     const list = arenaSorted(arenaWithBot(data));
-    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
+    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (arenaSess && !onlineMatchId ? " · 🔎 Searching opponent…" : "") : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
     ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 20);
     const b = ov.querySelector(".aoB");
     b.disabled = !inf.running;
     b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : "▶ Join & play";
     b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
+    const lv = ov.querySelector(".aoL");
+    lv.style.display = arenaSess ? "" : "none";
+    lv.onclick = () => { closeArenaOv(); cancelOnline(); };
   };
   ov.querySelector(".aoX").onclick = closeArenaOv;
   arenaLobbyIv = setInterval(render, 1000);
