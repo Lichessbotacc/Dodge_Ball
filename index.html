@@ -11304,7 +11304,7 @@ function openArena() {
     + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
     + '<div class="aoT lg-table" style="flex:none;min-height:120px;max-height:none;overflow:visible;"></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
-    + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff6666;">✖ Leave arena</button></div>';
+    + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = closeArenaOv;
   ov.addEventListener("click", e => { if (e.target === ov) closeArenaOv(); });
@@ -11326,13 +11326,10 @@ function openArena() {
     b.disabled = !inf.running;
     b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
     b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
-    const lv = ov.querySelector(".aoL");
-    lv.style.display = arenaSess ? "" : "none";
     const pb = ov.querySelector(".aoP");
     pb.style.display = arenaSess ? "" : "none";
     pb.textContent = arenaSess && arenaSess.paused ? "▶ Resume" : "⏸ Pause";
     pb.onclick = () => { if (arenaSess && arenaSess.paused) arenaResume(); else arenaPause(); };
-    lv.onclick = () => { closeArenaOv(); cancelOnline(); };
   };
   ov.querySelector(".aoX").onclick = closeArenaOv;
   arenaLobbyIv = setInterval(render, 1000);
