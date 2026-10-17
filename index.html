@@ -11499,7 +11499,7 @@ function openArena() {
     + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = arenaLeaveView;
-  ov.addEventListener("click", e => { if (e.target === ov) arenaLeaveView(); });
+  // (kein Schliessen/Verlassen mehr per Tipp neben die Ansicht - auf breiten Bildschirmen fuehrte jeder Tipp in den leeren Bereich ins Menue)
   let subId = null, data = {}, chatSub = null;
   const cbox = ov.querySelector(".aoC"), cm = ov.querySelector(".aoCM"), ci = ov.querySelector(".aoCI");
   const sendIt = () => arenaChatSendFrom(ci, chatSub);
