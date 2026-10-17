@@ -1587,6 +1587,13 @@ async function rpcSetIdleSave(json, tot) {
   json = String(json); if (json.length > 150000) throw new Error("Save too large.");
   return set(ref(db, "idleSave/" + uid), { d: json, tot: Math.min(Number(tot) || 0, 1e300), ts: serverTimestamp() });
 }
+// Neustart: eigenen alten Idle-Stand loeschen (Leaderboard-Eintrag + Cloud-Save), damit alle bei 0 anfangen
+async function rpcRemoveIdleOld() {
+  requireNotBanned();
+  const uid = requireUid();
+  await remove(ref(db, "idleBoard/" + uid));
+  try { await remove(ref(db, "idleSave/" + uid)); } catch (e) {}
+}
 async function rpcSetIdleBoard(name, total, best) {
   requireNotBanned();
   const uid = requireUid();
@@ -2093,7 +2100,7 @@ window._dobRPC = {
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
-  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
+  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard, removeIdleOld: rpcRemoveIdleOld, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
@@ -11366,10 +11373,12 @@ window.openArena = openArena;
 <script id="idleMode">
 // ═══════════════════════════════════════════════
 //  IDLE BRICK BREAKER (Modus)
-//  Gesperrt bis Mittwoch 14.10.2026 00:00 Uhr deutscher Zeit (Mod darf vorher testen, ohne dass etwas gespeichert wird).
+//  Gesperrt bis Montag 19.10.2026 00:00 Uhr deutscher Zeit (Mod darf vorher testen, ohne dass etwas gespeichert wird). Alle starten bei 0 (Neustart/Season).
 //  Leaderboard: idleBoard/{uid} = { name, total, best, ts }  (siehe Database Rules in der Antwort)
 // ═══════════════════════════════════════════════
-const IDLE_UNLOCK_AT = Date.UTC(2026, 9, 13, 22, 0, 0);   // Mi 14.10.2026 00:00 Europe/Berlin (MESZ = UTC+2)
+const IDLE_UNLOCK_AT = Date.UTC(2026, 9, 18, 22, 0, 0);   // Mo 19.10.2026 00:00 Europe/Berlin (MESZ = UTC+2)
+const IDLE_SEASON = "2026-10-19";   // neue Season: alte lokale Staende werden geloescht; aendern = nochmal alle auf 0
+function idleFresh(ts) { return Number(ts) >= IDLE_UNLOCK_AT; }   // nur Eintraege ab Neustart zaehlen (alte Cloud-Staende/Leaderboard-Zeilen werden ignoriert)
 function idleNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
 function idleUnlocked() { return idleNow() >= IDLE_UNLOCK_AT; }
 function idleCanPlay() { return idleUnlocked() || _modIsAdminSafe(); }
@@ -11420,7 +11429,7 @@ async function idleCloudLoad() {
   try {
     if (!fbReady || !myUid || !onlineAccount) return;
     const o = await RPC.get("idleSave/" + myUid);
-    if (!o || typeof o.d !== "string") return;
+    if (!o || typeof o.d !== "string" || !idleFresh(o.ts)) return;
     const cloud = JSON.parse(o.d); const ct = Number(cloud && cloud.c && cloud.c.tot) || 0;
     let lt = 0; try { const l = JSON.parse(localStorage.getItem("idleBrickBreaker_v5") || "null"); lt = Number(l && l.c && l.c.tot) || 0; } catch (e) {}
     _idleSaveTot = Math.max(_idleSaveTot, ct);
@@ -11566,7 +11575,7 @@ function idleBoardRender() {
   const rowsEl = document.getElementById("isRows"); if (!rowsEl || !_IS.board) return;
   const pl = window._lastPlayersData;
   const mine = (() => { try { const f = document.querySelector("#idleOverlay iframe"); return Number(f.contentWindow.__ib.S().c.tot) || 0; } catch (e) { return 0; } })();
-  const list = Object.entries(_IS.board).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
+  const list = Object.entries(_IS.board).filter(([u, r]) => idleFresh(r && r.ts)).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
   if (myUid && onlineAccount && mine > 0) { const e = list.find(x => x.uid === myUid); if (e) { if (mine > e.total) e.total = mine; } else list.push({ uid: myUid, total: mine, ts: Date.now(), name: onlineAccount.name }); }
   const rows = list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
   rowsEl.textContent = "";
@@ -11604,7 +11613,7 @@ function idleNoZoom(w) {
   d.addEventListener("dblclick", pd);
   const st = d.createElement("style"); st.textContent = "html,body,*{touch-action:manipulation;-webkit-touch-callout:none}"; d.head.appendChild(st);
 }
-const IDLE_CLOSED = true;   // true = Idle-Modus gesperrt (Umbau)
+const IDLE_CLOSED = false;   // true = Idle-Modus komplett gesperrt (Umbau); false = oeffnet automatisch am IDLE_UNLOCK_AT
 async function openIdle() {
   if (IDLE_CLOSED && !_modIsAdminSafe()) {   // Idle-Modus gesperrt (nur Mods/Admins duerfen zum Testen rein): Hinweis statt Spiel (Schalter oben auf false setzen zum Wiedereroeffnen)
     if (document.getElementById("idleClosedBox")) return;
@@ -11619,7 +11628,8 @@ async function openIdle() {
   if (document.getElementById("idleOverlay")) return;
   const persist = idleUnlocked();
   window.__idleCfg = { persist };
-  if (persist && fbReady && myUid) { try { const o = await RPC.get("idleBoard/" + myUid); _idleLast = Math.max(_idleLast, Number(o && o.total) || 0); } catch (e) {} }
+  if (persist) { try { if (localStorage.getItem("idleSeason") !== IDLE_SEASON) { localStorage.removeItem("idleBrickBreaker_v5"); localStorage.setItem("idleSeason", IDLE_SEASON); _idleLast = 0; _idleSaveTot = 0; } } catch (e) {} }
+  if (persist && fbReady && myUid) { try { const o = await RPC.get("idleBoard/" + myUid); if (o && !idleFresh(o.ts)) { await RPC.removeIdleOld(); _idleLast = 0; _idleSaveTot = 0; } else _idleLast = Math.max(_idleLast, Number(o && o.total) || 0); } catch (e) {} }
   if (persist) { try { await idleCloudLoad(); } catch (e) {} }
   const src = document.getElementById("idleSrc").textContent.replace(/<\\\/script>/g, "<" + "/script>");
   const ov = document.createElement("div"); ov.id = "idleOverlay";
@@ -11825,6 +11835,7 @@ async function loadIdleBoard() {
     if (my !== _lbToken) return;
     t.innerHTML = head;
     const rows = Object.entries(ib || {})
+      .filter(([uid, r]) => idleFresh(r && r.ts))
       .filter(([uid]) => !pl || pl[uid])
       .map(([uid, r]) => ({ uid, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
       .filter(r => r.total > 0)
