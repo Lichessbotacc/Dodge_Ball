@@ -1143,7 +1143,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <div id="winnerCols">
         <div id="winnerLeft">
       <div id="postChat" style="display:none;flex-direction:column;width:340px;max-width:90vw;margin-top:18px;background:rgba(16,18,26,0.8);border:1px solid var(--line);border-left:3px solid var(--neon-cyan);border-radius:12px;padding:10px;font-size:13px;">
-        <b>💬 Chat with opponent <span style="color:#8b93a6;font-weight:400;">(not saved)</span></b>
+        <b id="postChatTitle">💬 Chat with opponent <span style="color:#8b93a6;font-weight:400;">(not saved)</span></b>
         <div id="postChatMsgs" style="height:110px;overflow-y:auto;margin:6px 0;display:flex;flex-direction:column;gap:4px;"></div>
         <div style="display:flex;gap:6px;">
           <input type="text" id="postChatInput" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:7px 9px;font-size:13px;">
@@ -1611,6 +1611,29 @@ async function rpcSetIdleBoard(name, total, best) {
 async function rpcSendChat(name, text) {
   const uid = requireUid();
   return push(ref(db, "chat"), { uid, name, text: String(text).slice(0, 200), ts: Date.now() });
+}
+// Arena-Chat: arenaChat/<Arena-ID>/<Nachricht>; jede Nachricht traegt das Arena-Ende ("end"), danach darf jeder sie loeschen
+const ARENA_CHAT_OFF = 57 * 60000;
+async function rpcSendArenaChat(aid, name, text) {
+  const uid = requireUid(); requireNotBanned();
+  if (!/^\d{13}$/.test(String(aid))) throw new Error("Bad arena id.");
+  return push(ref(db, "arenaChat/" + aid), { uid, name, text: String(text).slice(0, 200), ts: serverTimestamp(), end: Number(aid) + ARENA_CHAT_OFF });
+}
+function rpcOnArenaChat(aid, cb) {
+  if (!/^\d{13}$/.test(String(aid))) return () => {};
+  return onValue(query(ref(db, "arenaChat/" + aid), limitToLast(60)), snap => cb(snap.val()));
+}
+// Loescht alle Chats beendeter Arenen (laeuft bei jedem Client; doppelt loeschen schadet nicht)
+async function rpcCleanupArenaChat() {
+  requireUid();
+  const all = (await get(ref(db, "arenaChat"))).val(); if (!all) return 0;
+  const keys = [];
+  for (const [aid, msgs] of Object.entries(all)) {
+    if (!/^\d{13}$/.test(aid) || Number(aid) + ARENA_CHAT_OFF > Date.now() - 10000) continue;
+    for (const mid of Object.keys(msgs || {})) keys.push("arenaChat/" + aid + "/" + mid);
+  }
+  for (let i = 0; i < keys.length; i += 100) { const part = {}; keys.slice(i, i + 100).forEach(k => { part[k] = null; }); await update(ref(db), part); }
+  return keys.length;
 }
 async function rpcSendIdleChat(name, text) {
   const uid = requireUid(); requireNotBanned();
@@ -2111,7 +2134,7 @@ window._dobRPC = {
   setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
-  sendChat: rpcSendChat, onChat: rpcOnChat, sendIdleChat: rpcSendIdleChat, onIdleChat: rpcOnIdleChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
+  sendChat: rpcSendChat, onChat: rpcOnChat, sendIdleChat: rpcSendIdleChat, sendArenaChat: rpcSendArenaChat, onArenaChat: rpcOnArenaChat, cleanupArenaChat: rpcCleanupArenaChat, onIdleChat: rpcOnIdleChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
 };
 // ═══ CLIENT-VERSION: nur die aktuellste Version darf schreiben ═══
 // Jeder Client traegt nach dem Login clientVer/{uid} = CLIENT_VER ein. Die Database Rules lassen JEDEN Schreibzugriff
@@ -2237,6 +2260,7 @@ async function onFirebaseAndAuthReady() {
     await updatePlayerStatus("Idle in Menu");
     leagueResolvePrevious().catch(() => {});
     setTimeout(() => { try { flushPendingRuns(); } catch (e) {} }, 3000);
+    setTimeout(() => { try { RPC.cleanupArenaChat().catch(() => {}); } catch (e) {} }, 6000);   // Chats beendeter Arenen loeschen
   }
   startMenuPresenceListener();
 }
@@ -7477,9 +7501,10 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   document.getElementById("postChat").style.display = "flex";
   document.getElementById("winnerOverlay").classList.remove("nochat");
   document.getElementById("postChatMsgs").innerHTML = "";
+  if (_inArena) arenaPostChatAttach(); else arenaPostChatDetach(true);   // Arena: Turnier-Chat statt Chat mit dem Gegner
   botChatToken++;
   window._botChatBotWon = eloChange < 0;
-  if (onlineVsBot) botPostChatStart(eloChange < 0, window._lastMatchSecs);
+  if (onlineVsBot && !_inArena) botPostChatStart(eloChange < 0, window._lastMatchSecs);
   document.getElementById("winnerOverlay").style.display = "flex";
 
   if (!onlineVsBot && fbReady && onlineMatchId) {
@@ -7504,6 +7529,7 @@ function requestRematch() {
 
 function handlePostMatch(d) {
   if (!d) return;
+  if (!(onlineArenaId && arenaSess)) {   // in der Arena zeigt dieses Feld den Turnier-Chat
   const box = document.getElementById("postChatMsgs");
   box.innerHTML = "";
   const list = d.postChat ? Object.values(d.postChat).sort((x, y) => (x.ts || 0) - (y.ts || 0)) : [];
@@ -7521,6 +7547,7 @@ function handlePostMatch(d) {
     box.appendChild(row);
   }
   box.scrollTop = box.scrollHeight;
+  }
 
   const rb = document.getElementById("rematchBtn");
   const oppRole = onlineRole === "p1" ? "p2" : "p1";
@@ -7559,6 +7586,7 @@ function handlePostMatch(d) {
 
 function sendPostChat() {
   const inp = document.getElementById("postChatInput");
+  if (onlineArenaId && arenaSess) { arenaChatSendFrom(inp, arenaSess.id); return; }   // Arena: Nachricht geht in den Turnier-Chat
   const text = inp.value.trim();
   if (onlineVsBot) {
     if (!text || Date.now() - lastPostChat < 600) return;
@@ -11285,6 +11313,51 @@ function arenaTick() {
   arenaRenderSearch();
   // Der Online Bot ist ein normaler Arena-Spieler: er wird in tryMatchmake() wie jeder Mensch nach Rang gepaart
 }
+// ═══ ARENA-CHAT (Turnier-Ansicht + nach jedem Match; wird nach der Arena geloescht) ═══
+let arenaChatTimes = [], arenaChatLastText = "", arenaChatLastAt = 0, arenaOvChatUn = null, arenaPostChatUn = null, arenaPostChatTitleHtml = null;
+function arenaChatFill(box, msgs) {
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  const arr = Object.values(msgs || {}).filter(m => m && m.text).sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-60);
+  box.textContent = "";
+  if (!arr.length) { const e = document.createElement("div"); e.style.cssText = "color:#8b93a6;font-size:12px;"; e.textContent = "No messages yet."; box.appendChild(e); return; }
+  for (const m of arr) {
+    const row = document.createElement("div");
+    const nm = document.createElement("b"); nm.setAttribute("translate", "no"); nm.textContent = dn(m.name || "?") + ": "; nm.dataset.uid = m.uid || "";
+    try { chatStyleName(nm, m.uid); } catch (e) {}
+    if (m.uid) { nm.style.cursor = "pointer"; nm.onclick = () => { try { openOnlineProfile(m.uid); } catch (e) {} }; }
+    const tx = document.createElement("span"); tx.setAttribute("translate", "no"); tx.textContent = chatFilter(m.text); tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+    row.append(nm, tx); box.appendChild(row);
+  }
+  if (near || !box._init) { box.scrollTop = box.scrollHeight; box._init = true; }
+}
+async function arenaChatSendFrom(inp, aid) {
+  const text = inp.value.trim(); if (!text || !aid) return;
+  if (!onlineAccount) { try { showCreateAccount(); } catch (e) {} return; }
+  if (typeof _modChatBlock === "function" && _modChatBlock()) { try { _modChatLock(); } catch (e) {} return; }
+  if (!fbReady) return;
+  const now = Date.now();
+  arenaChatTimes = arenaChatTimes.filter(t => now - t < 10000);
+  if (arenaChatTimes.length >= 5) { inp.placeholder = "Slow down…"; return; }          // max. 5 Nachrichten / 10 s
+  let clean = text.replace(/[\u0000-\u001f\u200b-\u200f\u202a-\u202e]/g, "").replace(/\s{3,}/g, "  ").slice(0, 200);
+  if (!clean.trim()) return;
+  if (clean === arenaChatLastText && now - arenaChatLastAt < 15000) return;             // gleiche Nachricht nicht wiederholen
+  { const f = chatFilterEx(clean); clean = f.text; if (f.hit) chatFilterNotice(); }
+  arenaChatLastText = clean; arenaChatLastAt = now; arenaChatTimes.push(now); inp.value = "";
+  try { await RPC.sendArenaChat(aid, onlineAccount.name, clean); }
+  catch (e) { console.warn("arena chat failed", e); if (/permission/i.test(String(e && (e.code || e.message || e)))) inp.placeholder = "New accounts can chat after 2 hours"; }
+}
+function arenaPostChatAttach() {
+  arenaPostChatDetach(false);
+  const t = document.getElementById("postChatTitle");
+  if (t) { if (arenaPostChatTitleHtml === null) arenaPostChatTitleHtml = t.innerHTML; t.innerHTML = '💬 Arena chat <span style="color:#8b93a6;font-weight:400;">(deleted after the arena)</span>'; }
+  const box = document.getElementById("postChatMsgs"); if (!box || !arenaSess) return;
+  box._init = false;
+  try { arenaPostChatUn = RPC.onArenaChat(arenaSess.id, d => { const b = document.getElementById("postChatMsgs"); if (b && arenaSess) arenaChatFill(b, d); }); } catch (e) {}
+}
+function arenaPostChatDetach(restore) {
+  if (arenaPostChatUn) { try { arenaPostChatUn(); } catch (e) {} arenaPostChatUn = null; }
+  if (restore) { const t = document.getElementById("postChatTitle"); if (t && arenaPostChatTitleHtml !== null) t.innerHTML = arenaPostChatTitleHtml; }
+}
 // ═══ VORAB-BEITRITT (ab :57, wenn die letzte Arena vorbei ist) ═══
 // Man meldet sich fuer die naechste volle Stunde an. Der Eintrag liegt schon in arenas/<naechste ID>; die Suche startet automatisch um :00.
 let arenaPreT = null, arenaPreHb = 0;
@@ -11339,6 +11412,7 @@ async function arenaPlay() {
 function arenaLeave() {
   arenaUnsave();
   try { clearInterval(arenaPreT); } catch (e) {} arenaPreT = null;
+  try { arenaPostChatDetach(true); } catch (e) {}
   clearInterval(arenaNextT); arenaNextT = null;
   if (arenaSess && arenaSess.unsub) { try { arenaSess.unsub(); } catch (e) {} }
   arenaSess = null;
@@ -11373,6 +11447,7 @@ async function arenaFinish() {
   if (!arenaSess) return;
   const id = arenaSess.id;
   arenaLeave(true);
+  setTimeout(() => { try { RPC.cleanupArenaChat().catch(() => {}); } catch (e) {} }, 12000);   // Arena-Chat loeschen
   try { closeArenaOv(); } catch (e) {}
   try { cleanupOnline(); } catch (e) {}
   try { document.getElementById("winnerOverlay").style.display = "none"; showScreen("menu"); showMenuPage("menuOnline"); } catch (e) {}
@@ -11393,6 +11468,7 @@ async function arenaShowResult(id) {
 }
 function closeArenaOv() {
   const ov = document.getElementById("arenaOv"); if (ov) ov.remove();
+  if (arenaOvChatUn) { try { arenaOvChatUn(); } catch (e) {} arenaOvChatUn = null; }
   if (arenaLobbyIv) { clearInterval(arenaLobbyIv); arenaLobbyIv = null; }
   if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} arenaLobbyUnsub = null; }
 }
@@ -11418,12 +11494,16 @@ function openArena() {
     + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font:800 20px var(--font-display);">🏟 Hourly Arena</b><button class="aoX" style="margin:0;padding:4px 10px;font-size:14px;">✕</button></div>'
     + '<div class="aoS" style="font-size:14px;color:#ffd700;"></div>'
     + '<div class="aoT lg-table" style="flex:none;min-height:120px;max-height:none;overflow:visible;"></div>'
+    + '<div class="aoC" style="flex:none;display:none;flex-direction:column;gap:6px;background:#12141c;border:0.5px solid #2a2e3c;border-left:3px solid #00c8ff;border-radius:10px;padding:8px;"><b style="font-size:13px;">💬 Arena chat <span style="color:#8b93a6;font-weight:400;font-size:11px;">(deleted after the arena)</span></b><div class="aoCM" style="height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;font-size:13px;"></div><div style="display:flex;gap:6px;"><input class="aoCI" type="text" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:7px 9px;font-size:13px;"><button class="aoCS" style="margin:0;padding:7px 12px;font-size:13px;">Send</button></div></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
     + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = arenaLeaveView;
   ov.addEventListener("click", e => { if (e.target === ov) arenaLeaveView(); });
-  let subId = null, data = {};
+  let subId = null, data = {}, chatSub = null;
+  const cbox = ov.querySelector(".aoC"), cm = ov.querySelector(".aoCM"), ci = ov.querySelector(".aoCI");
+  const sendIt = () => arenaChatSendFrom(ci, chatSub);
+  ov.querySelector(".aoCS").onclick = sendIt; ci.addEventListener("keydown", e => { if (e.key === "Enter") sendIt(); });
   const render = () => {
     if (!ov.isConnected) return;
     const inf = arenaInfo(), pre = !!(arenaSess && arenaSess.pre), wantId = pre ? arenaSess.id : inf.id;
@@ -11432,6 +11512,13 @@ function openArena() {
       subId = wantId; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
       arenaLobbyUnsub = dbOn("arenas/" + wantId, d => { data = d || {}; render(); });
     }
+    const chatOn = inf.running || pre;   // Chat nur waehrend (oder kurz vor) einer Arena
+    cbox.style.display = chatOn ? "flex" : "none";
+    if (chatOn && fbReady && chatSub !== wantId) {
+      if (arenaOvChatUn) { try { arenaOvChatUn(); } catch (e) {} }
+      chatSub = wantId; cm._init = false;
+      arenaOvChatUn = RPC.onArenaChat(wantId, d => { if (ov.isConnected) arenaChatFill(cm, d); });
+    } else if (!chatOn && chatSub) { if (arenaOvChatUn) { try { arenaOvChatUn(); } catch (e) {} arenaOvChatUn = null; } chatSub = null; }
     const list = arenaSorted(arenaWithBot(data));
     const nPaused = list.filter(e => arenaStatus(e) === "paused").length, nGames = Math.floor(list.reduce((a, e) => a + (Number(e.games) || 0), 0) / 2);
     const mineState = arenaSess ? (arenaSess.paused ? " · ⏸ You are paused" : (!onlineMatchId ? " · 🔎 Searching opponent…" : "")) : "";
