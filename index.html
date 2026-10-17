@@ -11360,6 +11360,18 @@ function closeArenaOv() {
   if (arenaLobbyIv) { clearInterval(arenaLobbyIv); arenaLobbyIv = null; }
   if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} arenaLobbyUnsub = null; }
 }
+// Back / X in der Turnier-Ansicht: zurueck ins Menue. Waehrend einer laufenden Teilnahme wird die Arena pausiert,
+// sonst bliebe unter der Ansicht der Bildschirm "Searching opponent" mit einer Online-Suche im Hintergrund stehen.
+function arenaLeaveView() {
+  if (arenaSess && !arenaEnded() && !onlineMatchId) {
+    if (!arenaSess.paused) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); }
+    try { cleanupOnline(); } catch (e) {}
+    closeArenaOv();
+    try { showScreen("menu"); showMenuPage("menuOnline"); } catch (e) {}
+    return;
+  }
+  closeArenaOv();
+}
 function openArena() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   closeArenaOv();
@@ -11372,8 +11384,8 @@ function openArena() {
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
     + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button></div>';
   document.body.appendChild(ov);
-  ov.querySelector(".aoX").onclick = closeArenaOv;
-  ov.addEventListener("click", e => { if (e.target === ov) closeArenaOv(); });
+  ov.querySelector(".aoX").onclick = arenaLeaveView;
+  ov.addEventListener("click", e => { if (e.target === ov) arenaLeaveView(); });
   let subId = null, data = {};
   const render = () => {
     if (!ov.isConnected) return;
@@ -11391,13 +11403,13 @@ function openArena() {
     const b = ov.querySelector(".aoB");
     b.disabled = !inf.running;
     b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
-    b.onclick = () => { if (arenaSess) closeArenaOv(); else arenaPlay(); };
+    b.onclick = () => { if (arenaSess) arenaLeaveView(); else arenaPlay(); };
     const pb = ov.querySelector(".aoP");
     pb.style.display = arenaSess ? "" : "none";
     pb.textContent = arenaSess && arenaSess.paused ? "▶ Resume" : "⏸ Pause";
     pb.onclick = () => { if (arenaSess && arenaSess.paused) arenaResume(); else arenaPause(); };
   };
-  ov.querySelector(".aoX").onclick = closeArenaOv;
+  ov.querySelector(".aoX").onclick = arenaLeaveView;
   arenaLobbyIv = setInterval(render, 1000);
   render();
 }
