@@ -11081,7 +11081,7 @@ async function arenaWriteState(st, oppUid) {
     });
   } catch (e) { console.warn("arena state write failed", e && (e.code || e.message)); }
 }
-function arenaSave() { try { if (arenaSess) localStorage.setItem("arenaSessV1", JSON.stringify({ id: arenaSess.id, paused: !!arenaSess.paused })); } catch (e) {} }
+function arenaSave() { try { if (arenaSess) localStorage.setItem("arenaSessV1", JSON.stringify({ id: arenaSess.id, paused: !!arenaSess.paused, pre: !!arenaSess.pre })); } catch (e) {} }
 function arenaUnsave() { try { localStorage.removeItem("arenaSessV1"); } catch (e) {} }
 function arenaPause() {
   if (!arenaSess || arenaEnded()) return;
@@ -11285,11 +11285,46 @@ function arenaTick() {
   arenaRenderSearch();
   // Der Online Bot ist ein normaler Arena-Spieler: er wird in tryMatchmake() wie jeder Mensch nach Rang gepaart
 }
+// ═══ VORAB-BEITRITT (ab :57, wenn die letzte Arena vorbei ist) ═══
+// Man meldet sich fuer die naechste volle Stunde an. Der Eintrag liegt schon in arenas/<naechste ID>; die Suche startet automatisch um :00.
+let arenaPreT = null, arenaPreHb = 0;
+async function arenaPreJoin(silent) {
+  if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
+  if (!fbReady || !myUid) { try { leagueToast("Not connected yet", "#ff8844"); } catch (e) {} return; }
+  const inf = arenaInfo();
+  if (inf.running) { arenaPlay(); return; }
+  if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  arenaLeave(true);
+  arenaSess = { id: String(inf.nextStart), start: inf.nextStart, end: inf.nextStart + ARENA_MS, pre: true, lastOpp: null, qAt: Date.now(), unsub: null };
+  arenaStandings = {};
+  arenaSess.unsub = dbOn("arenas/" + arenaSess.id, d => { arenaStandings = d || {}; });
+  try { await arenaEnsureEntry(); await arenaEnsureBot(arenaSess.id); }
+  catch (e) { console.warn("arena pre-join failed", e); try { leagueToast("Could not join the arena", "#ff4444"); } catch (x) {} arenaLeave(true); return; }
+  arenaSave();
+  arenaPreHb = Date.now();
+  clearInterval(arenaPreT); arenaPreT = setInterval(arenaPreTick, 500);
+  if (!silent) openArena();
+}
+function arenaPreTick() {
+  if (!arenaSess || !arenaSess.pre) { clearInterval(arenaPreT); arenaPreT = null; return; }
+  if (arenaNow() < arenaSess.start) {   // Lebenszeichen, damit man nicht als "weg" gilt
+    if (Date.now() - arenaPreHb > 20000) { arenaPreHb = Date.now(); arenaWriteState("search"); }
+    return;
+  }
+  clearInterval(arenaPreT); arenaPreT = null;
+  arenaSess.pre = false; arenaSess.qAt = Date.now(); arenaSess.waitAt = 0; arenaSave();
+  if (inMatchOrSurvival()) {   // gerade in einem anderen Spiel: nicht rausreissen, sondern pausiert eintragen
+    arenaSess.paused = true; arenaSave(); arenaWriteState("paused");
+    try { challengeToast("🏟 Arena started – you are paused. Press Resume when you are ready.", "#ffd700"); } catch (e) {}
+    return;
+  }
+  try { arenaWriteState("search"); cleanupOnline(); enterOnlineQueue(); openArena(); leagueToast("🏟 Arena started!", "#ffd700"); } catch (e) { console.warn("arena auto-start failed", e); }
+}
 async function arenaPlay() {
   if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
   if (!fbReady || !myUid) { try { leagueToast("Not connected yet", "#ff8844"); } catch (e) {} return; }
   const inf = arenaInfo();
-  if (!inf.running) { try { leagueToast("Next arena starts in " + arenaFmt(inf.nextStart - inf.now), "#ffd700"); } catch (e) {} return; }
+  if (!inf.running) { arenaPreJoin(); return; }   // zwischen :57 und :00: fuer die naechste Arena vorab anmelden
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
   arenaLeave(true);
   arenaSess = { id: inf.id, end: inf.end, lastOpp: null, qAt: Date.now(), unsub: null };
@@ -11303,6 +11338,7 @@ async function arenaPlay() {
 }
 function arenaLeave() {
   arenaUnsave();
+  try { clearInterval(arenaPreT); } catch (e) {} arenaPreT = null;
   clearInterval(arenaNextT); arenaNextT = null;
   if (arenaSess && arenaSess.unsub) { try { arenaSess.unsub(); } catch (e) {} }
   arenaSess = null;
@@ -11363,6 +11399,7 @@ function closeArenaOv() {
 // Back / X in der Turnier-Ansicht: zurueck ins Menue. Waehrend einer laufenden Teilnahme wird die Arena pausiert,
 // sonst bliebe unter der Ansicht der Bildschirm "Searching opponent" mit einer Online-Suche im Hintergrund stehen.
 function arenaLeaveView() {
+  if (arenaSess && arenaSess.pre) { closeArenaOv(); return; }   // vorab angemeldet: Anmeldung bleibt, Suche startet automatisch um :00
   if (arenaSess && !arenaEnded() && !onlineMatchId) {
     if (!arenaSess.paused) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); }
     try { cleanupOnline(); } catch (e) {}
@@ -11389,23 +11426,23 @@ function openArena() {
   let subId = null, data = {};
   const render = () => {
     if (!ov.isConnected) return;
-    const inf = arenaInfo();
+    const inf = arenaInfo(), pre = !!(arenaSess && arenaSess.pre), wantId = pre ? arenaSess.id : inf.id;
     if (arenaSess && arenaEnded()) { arenaFinish(); return; }
-    if (fbReady && subId !== inf.id) {
-      subId = inf.id; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
-      arenaLobbyUnsub = dbOn("arenas/" + inf.id, d => { data = d || {}; render(); });
+    if (fbReady && subId !== wantId) {
+      subId = wantId; if (arenaLobbyUnsub) { try { arenaLobbyUnsub(); } catch (e) {} }
+      arenaLobbyUnsub = dbOn("arenas/" + wantId, d => { data = d || {}; render(); });
     }
     const list = arenaSorted(arenaWithBot(data));
     const nPaused = list.filter(e => arenaStatus(e) === "paused").length, nGames = Math.floor(list.reduce((a, e) => a + (Number(e.games) || 0), 0) / 2);
     const mineState = arenaSess ? (arenaSess.paused ? " · ⏸ You are paused" : (!onlineMatchId ? " · 🔎 Searching opponent…" : "")) : "";
-    ov.querySelector(".aoS").textContent = inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (nPaused ? " (" + nPaused + " paused)" : "") + " · " + nGames + " games" + mineState : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
+    ov.querySelector(".aoS").textContent = pre ? "⏳ Arena starts in " + arenaFmt(arenaSess.start - inf.now) + " · " + list.length + " joined · ✅ You are in – the search starts automatically" : inf.running ? "🟢 Live · " + arenaFmt(inf.end - inf.now) + " left · " + list.length + " players" + (nPaused ? " (" + nPaused + " paused)" : "") + " · " + nGames + " games" + mineState : "⏳ Next arena starts in " + arenaFmt(inf.nextStart - inf.now) + (list.length ? " · final results below" : "");
     ov.querySelector(".aoT").innerHTML = arenaRowsHtml(list, 200);
     const b = ov.querySelector(".aoB");
-    b.disabled = !inf.running;
-    b.textContent = !inf.running ? "Starts in " + arenaFmt(inf.nextStart - inf.now) : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
-    b.onclick = () => { if (arenaSess) arenaLeaveView(); else arenaPlay(); };
+    b.disabled = false;
+    b.textContent = !inf.running ? (pre ? "↩ Back" : "▶ Join early (starts in " + arenaFmt(inf.nextStart - inf.now) + ")") : arenaSess ? "↩ Back" : (myUid && data[myUid] && data[myUid].name ? "▶ Resume" : "▶ Join & play");
+    b.onclick = () => { if (arenaSess) arenaLeaveView(); else if (inf.running) arenaPlay(); else arenaPreJoin(); };
     const pb = ov.querySelector(".aoP");
-    pb.style.display = arenaSess ? "" : "none";
+    pb.style.display = (arenaSess && !arenaSess.pre) ? "" : "none";
     pb.textContent = arenaSess && arenaSess.paused ? "▶ Resume" : "⏸ Pause";
     pb.onclick = () => { if (arenaSess && arenaSess.paused) arenaResume(); else arenaPause(); };
   };
@@ -11415,7 +11452,7 @@ function openArena() {
 }
 function arenaBtnUpd() {
   const b = document.getElementById("arenaBtn"); if (!b) return;
-  const i = arenaInfo(), t = i.running ? "🟢 live · " + Math.ceil((i.end - i.now) / 60000) + " min left" : "⏳ starts in " + Math.ceil((i.nextStart - i.now) / 60000) + " min";
+  const i = arenaInfo(), t = i.running ? "🟢 live · " + Math.ceil((i.end - i.now) / 60000) + " min left" : "⏳ starts in " + Math.ceil((i.nextStart - i.now) / 60000) + " min · join early";
   const key = "arena|" + t; if (b.dataset.k === key) return; b.dataset.k = key;
   b.textContent = "🏟 Hourly Arena";
   const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = t; b.appendChild(sm);
@@ -11426,6 +11463,7 @@ async function arenaRestoreTick() {
   let sv = null; try { sv = JSON.parse(localStorage.getItem("arenaSessV1") || "null"); } catch (e) {}
   if (!sv) { arenaRestoreTried = true; return; }
   const inf = arenaInfo();
+  if (sv.pre && sv.id === String(inf.nextStart) && !inf.running) { arenaRestoreTried = true; arenaPreJoin(true); return; }   // Vorab-Anmeldung nach Neuladen wiederherstellen
   if (!sv.id || sv.id !== inf.id || !inf.running) { arenaUnsave(); arenaRestoreTried = true; return; }
   const menu = document.getElementById("menu");
   if (!menu || menu.style.display === "none" || inMatchOrSurvival()) return;     // erst wenn man im Menue ist
