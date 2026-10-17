@@ -6271,8 +6271,9 @@ async function tryMatchmake() {
   if (arenaSess && !arenaEnded() && !arenaBotIsBusy()) others.push({ uid: ONLINE_BOT_UID, name: "Online Bot", elo: onlineBotElo, ts: Date.now(), arena: arenaSess.id, aspect: screenAspect(), isBot: true });
   if (!others.length) return;
 
-  if (arenaSess) { if (arenaEnded()) return; arenaSortOthers(others); } else others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo));
-  const opp     = others[0];
+  let opp;
+  if (arenaSess) { if (arenaEnded()) return; opp = arenaPickOpponent(others); if (!opp) return; }   // Arena: Paarung wie bei Lichess (siehe arenaPickOpponent); kein Partner -> weiter warten
+  else { others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo)); opp = others[0]; }
   if (opp.isBot) {
     if (!(await arenaBotClaim(arenaSess.id))) return;   // jemand anderes war schneller -> naechster Versuch in 2 s
     if (onlineMatchId) { arenaBotRelease(arenaSess.id); return; }
@@ -7102,7 +7103,7 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
   }
   logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
-  if (onlineArenaId) { arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid); if (onlineVsBot) arenaRecordBot(onlineArenaId, !won, myOriginalElo); }
+  if (onlineArenaId) { arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid); if (onlineVsBot) arenaRecordBot(onlineArenaId, !won, myOriginalElo, myUid); }
   saveAccountLocal();
   updateAccountBtn();
   lastLeagueNote = "";
@@ -11108,10 +11109,68 @@ function arenaSortOthers(others) {
   const list = arenaSorted(arenaWithBot(arenaStandings)).filter(e => e.uid === myUid || arenaStatus(e) !== "paused"), rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
   const R = u => rk[u] === undefined ? list.length : rk[u], me = R(myUid);
   others.sort((a, b) => Math.abs(R(a.uid) - me) - Math.abs(R(b.uid) - me) || Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo) || (a.uid < b.uid ? -1 : 1));
-  if (arenaSess && arenaSess.lastOpp && others.length > 1) {
-    const i = others.findIndex(o => o.uid === arenaSess.lastOpp);
-    if (i >= 0) others.push(others.splice(i, 1)[0]);
+  // REGEL: nie zweimal hintereinander dieselbe Paarung - AUSSER es sind nur 2 Spieler in der Arena (ich + 1 weiterer; der Online Bot zaehlt als Spieler).
+  // Bei 3 Spielern A, B, C ergibt das automatisch: A-B, dann A-C, dann B-C ...  Gibt es keinen erlaubten Gegner, wird gewartet.
+  if (arenaSess && list.length > 2) {
+    const myLo = arenaSess.lastOpp || (arenaStandings[myUid] && arenaStandings[myUid].lo) || "";
+    for (let i = others.length - 1; i >= 0; i--) {
+      const ent = arenaStandings[others[i].uid];
+      if ((myLo && others[i].uid === myLo) || (ent && ent.lo === myUid)) others.splice(i, 1);   // mein letzter Gegner ODER dessen letzter Gegner war ich
+    }
   }
+}
+// ═══ ARENA-PAARUNG WIE BEI LICHESS ═══
+// Alle wartenden Spieler (inkl. mir und dem freien Online Bot) werden GEMEINSAM gepaart: Minimum-Weight-Matching ueber alle Paare.
+// Kantengewicht (Lichess AntmaPairing): |Rang a - Rang b| * (300 + 1700 * (maxRang - min(Rang a, Rang b)) / maxRang) + (ELO a - ELO b)^2
+//  -> Spieler mit aehnlichem Platz in der Rangliste spielen gegeneinander, oben besonders streng; ELO nur als Feinabstimmung (am Anfang, wenn alle 0 Punkte haben, entscheidet sie den Rang).
+// Nie zweimal hintereinander dieselbe Paarung, ausser es sind nur 2 Spieler in der Arena (ich + 1 weiterer; der Bot zaehlt mit).
+// Ungerade Anzahl: der Spieler, bei dem die Gesamtsumme am kleinsten bleibt, wartet auf die naechste Runde.
+// Jeder Client rechnet dasselbe Ergebnis aus denselben Daten aus; das Match erstellt weiterhin nur die kleinere UID.
+function arenaMatch(c, wf) {
+  const n = c.length, BIG = 1e12;
+  if (n < 2) return [];
+  if (n > 14) {   // sehr viele Wartende: Rang fuer Rang den guenstigsten freien Partner nehmen
+    const used = new Array(n).fill(false), out = [];
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue; let bj = -1, bw = Infinity;
+      for (let j = i + 1; j < n; j++) { if (used[j]) continue; const w = wf(c[i], c[j]); if (w !== null && w < bw) { bw = w; bj = j; } }
+      if (bj >= 0) { used[i] = used[bj] = true; out.push([i, bj]); }
+    }
+    return out;
+  }
+  const full = (1 << n) - 1, memo = new Float64Array(1 << n).fill(-1), pick = new Int16Array(1 << n).fill(-2);
+  const f = m => {
+    if (m === full) return 0; if (memo[m] >= 0) return memo[m];
+    let i = 0; while (m & (1 << i)) i++;
+    let best = BIG + f(m | (1 << i)), bj = -1;   // i wartet (hohe Strafe: moeglichst viele Paare)
+    for (let j = i + 1; j < n; j++) {
+      if (m & (1 << j)) continue; const w = wf(c[i], c[j]); if (w === null) continue;
+      const v = w + f(m | (1 << i) | (1 << j)); if (v < best) { best = v; bj = j; }
+    }
+    memo[m] = best; pick[m] = bj; return best;
+  };
+  f(0);
+  const pairs = []; let m = 0;
+  while (m !== full) { let i = 0; while (m & (1 << i)) i++; const j = pick[m]; if (j >= 0) { pairs.push([i, j]); m |= (1 << i) | (1 << j); } else m |= (1 << i); }
+  return pairs;
+}
+function arenaPickOpponent(others) {
+  const list = arenaSorted(arenaWithBot(arenaStandings)).filter(e => e.uid === myUid || arenaStatus(e) !== "paused");
+  list.sort((a, b) => (b.score || 0) - (a.score || 0) || arenaPerf(b) - arenaPerf(a) || (Number(b.elo) || 0) - (Number(a.elo) || 0) || (a.uid < b.uid ? -1 : 1));
+  const rk = {}; list.forEach((e, i) => { rk[e.uid] = i; });
+  const maxRank = Math.max(1, list.length), onlyTwo = list.length <= 2;
+  const lastOf = u => u === myUid ? ((arenaSess && arenaSess.lastOpp) || (arenaStandings[myUid] && arenaStandings[myUid].lo) || "") : ((arenaStandings[u] && arenaStandings[u].lo) || "");
+  const c = [{ uid: myUid, elo: Number(onlineAccount.elo) || 1500 }].concat(others.map(o => ({ uid: o.uid, elo: Number(o.elo) || 1500 })));
+  c.forEach(x => { x.rank = rk[x.uid] !== undefined ? rk[x.uid] : list.length; });
+  c.sort((a, b) => a.rank - b.rank || (a.uid < b.uid ? -1 : 1));
+  const wf = (a, b) => {
+    if (!onlyTwo && (lastOf(a.uid) === b.uid || lastOf(b.uid) === a.uid)) return null;   // gerade erst gegeneinander gespielt
+    return Math.abs(a.rank - b.rank) * (300 + 1700 * (maxRank - Math.min(a.rank, b.rank)) / maxRank) + Math.pow(a.elo - b.elo, 2);
+  };
+  const me = c.findIndex(x => x.uid === myUid), pr = arenaMatch(c, wf).find(q => q[0] === me || q[1] === me);
+  if (!pr) return null;
+  const partner = c[pr[0] === me ? pr[1] : pr[0]].uid;
+  return others.find(o => o.uid === partner) || null;
 }
 async function arenaEnsureEntry() {
   const id = arenaSess.id, cur = await RPC.get("arenas/" + id + "/" + myUid);
@@ -11159,7 +11218,7 @@ async function arenaEnsureBot(aid) {
     await arenaBotTx(aid, cur => cur || { name: "Online Bot", score: 0, games: 0, wins: 0, streak: 0, oppSum: 0, sh: "", elo: Math.round(Number(onlineBotElo) || 1500), ts: Date.now() });
   } catch (e) { console.warn("arena bot entry failed (Rules?)", e && (e.code || e.message)); }
 }
-async function arenaRecordBot(aid, botWon, humanElo) {
+async function arenaRecordBot(aid, botWon, humanElo, humanUid) {
   if (!fbReady || !aid) return;
   try {
     await arenaBotTx(aid, cur => {
@@ -11167,7 +11226,7 @@ async function arenaRecordBot(aid, botWon, humanElo) {
       const st = Number(cur.streak) || 0, pts = botWon ? (st >= 2 ? 4 : 2) : 0;
       const r = { name: "Online Bot", score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (botWon ? 1 : 0),
         streak: botWon ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(humanElo) || 1500), last: pts, ts: Date.now(),
-        sh: (String(cur.sh || "") + (botWon ? "W" : "L")).slice(-40), elo: Math.round(Number(onlineBotElo) || 1500) };
+        sh: (String(cur.sh || "") + (botWon ? "W" : "L")).slice(-40), elo: Math.round(Number(onlineBotElo) || 1500), lo: String(humanUid || "").slice(0, 64) };
       // Reservierung freigeben (nur wenn sie von mir ist); fremde, noch gueltige Reservierung bleibt erhalten
       if (cur.busyBy && cur.busyBy !== myUid && Number(cur.busyUntil) > arenaNow()) { r.busyBy = cur.busyBy; r.busyUntil = cur.busyUntil; }
       return r;
@@ -11183,7 +11242,7 @@ async function arenaRecordResult(aid, won, oppElo, oppUid) {
       const st = Number(cur.streak) || 0, pts = won ? (st >= 2 ? 4 : 2) : 0;
       const e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
         streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now(),
-        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-40), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo) };
+        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-40), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo), lo: String(oppUid || "").slice(0, 64) };
       await RPC.setArenaEntry(aid, e);
       arenaStandings[myUid] = e;
       try { leagueToast("🏟 " + (won ? "+" + pts + " arena points" + (pts === 4 ? " 🔥" : "") : "0 arena points") + " · " + e.score + " total", won ? "#ffd700" : "#888"); } catch (x) {}
