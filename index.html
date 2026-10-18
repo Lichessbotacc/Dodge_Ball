@@ -1594,6 +1594,12 @@ async function rpcRemoveIdleOld() {
   await remove(ref(db, "idleBoard/" + uid));
   try { await remove(ref(db, "idleSave/" + uid)); } catch (e) {}
 }
+async function rpcModRemoveIdle(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  await remove(ref(db, "idleBoard/" + uid));
+  try { await remove(ref(db, "idleSave/" + uid)); } catch (e) {}
+}
 async function rpcSetIdleBoard(name, total, best) {
   requireNotBanned();
   const uid = requireUid();
@@ -2145,7 +2151,7 @@ window._dobRPC = {
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, youtubeSubmit: rpcYoutubeSubmit, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -2168,7 +2174,7 @@ window._dobRPC = {
 // Jeder Client traegt nach dem Login clientVer/{uid} = CLIENT_VER ein. Die Database Rules lassen JEDEN Schreibzugriff
 // nur zu, wenn dieser Eintrag >= 2 ist -> alte Seiten (ohne diesen Eintrag) koennen nichts mehr schreiben, bis sie neu laden.
 // Bei einer neuen Version: CLIENT_VER hier UND die Zahl in den Rules ("clientVer ... >= 2") erhoehen.
-const CLIENT_VER = 2;
+const CLIENT_VER = 3;   // 3 = Idle-Neustart 19.10.2026: Rules lassen idleBoard nur ab clientVer >= 3 schreiben (alte Versionen koennen das Leaderboard nicht mehr beschreiben)
 let _verUid = null, _verGiveUp = false, _verBusy = false, _verTries = 0;
 // Traegt die Version fuer die AKTUELLE uid ein (auch nach Login / Registrierung / Logout, wo sich die uid aendert ohne Reload)
 async function ensureClientVer(uid) {
@@ -11866,6 +11872,7 @@ function idleBoardRender() {
     const vl = document.createElement("span"); vl.className = "vl"; vl.textContent = "$" + idleFmt(r.total);
     const dl = document.createElement("span"); dl.className = "dl";
     const pv = _IS.prev[r.uid]; if (pv !== undefined && pv !== i) { dl.textContent = i < pv ? "▲" : "▼"; dl.style.color = i < pv ? "#00ff88" : "#ff4444"; }
+    if (_modIsAdminSafe() && r.uid !== myUid) { const x = document.createElement("span"); x.textContent = "✖"; x.title = "Admin: remove from idle board"; x.style.cssText = "cursor:pointer;color:#ff4444;margin-left:8px;"; x.onclick = async (ev) => { ev.stopPropagation(); if (!confirm("Remove " + dn(r.name) + " from the idle board and reset their idle save?")) return; try { await window._dobRPC.modRemoveIdle(r.uid); } catch (e) { alert("Error: " + e.message); } }; dl.appendChild(x); }
     row.append(rk, nm, vl, dl); row.onclick = () => { try { openOnlineProfile(r.uid); } catch (e) {} };
     rowsEl.appendChild(row);
   }
