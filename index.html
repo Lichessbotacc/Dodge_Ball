@@ -6080,6 +6080,9 @@ async function deleteAccount() {
   window.location.reload();                                   // clean state, new account can be created now
 }
 
+// Such-Generation: cleanupOnline() und jede neue Suche erhoehen sie; asynchrone Reste einer alten Suche (z. B. nach "Pause") brechen dann ab,
+// statt spaeter noch einen Warteschlangen-Eintrag zu schreiben, eine Dauersuche zu starten oder ein Match zu erstellen.
+let onlineSearchGen = 0;
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
   showScreen("onlineWait");
@@ -6145,6 +6148,7 @@ function cancelOnline() {
 
 // CHANGED: queue/invite cleanup now keyed by myUid instead of name.
 function cleanupOnline() {
+  onlineSearchGen++;
   try { stopViewerCount(); } catch (e) {}
   if (_skLiveOn) { _skLiveOn = false; try { if (fbReady && myUid) RPC.removeSurvivalLive().catch(() => {}); } catch (e) {} }
   if (onlineBallIv) { clearInterval(onlineBallIv); onlineBallIv = null; }
@@ -6220,6 +6224,7 @@ async function acceptInvite(data) {
   if (onlineMatchId) return;
   const matchData = await RPC.getMatch(data.matchId);
   if (!matchData) return;
+  if (arenaSess && (arenaSess.paused || arenaSess.pre)) { RPC.updateMatch(data.matchId, { status: "abandoned" }).catch(() => {}); return; }   // pausiert: Einladung ablehnen
 
   if (onlineSearchInterval) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; }
   if (onlineBotMatchTimeout) { clearTimeout(onlineBotMatchTimeout); onlineBotMatchTimeout = null; }
@@ -6239,14 +6244,17 @@ async function startSearchingOnline() {
     document.getElementById("onlineStatus").textContent = "Firebase not connected. Cannot play online.";
     return;
   }
-  await cleanStaleMatches();
-  await pullAccountFromServer();
+  const gen = ++onlineSearchGen;
+  const dead = () => gen !== onlineSearchGen || !!(arenaSess && (arenaSess.paused || arenaSess.pre));
+  await cleanStaleMatches(); if (dead()) return;
+  await pullAccountFromServer(); if (dead()) return;
   onlineSearchStartTime = Date.now();
 
   await RPC.setOwnQueueEntry({
     uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), arena: arenaSess ? arenaSess.id : null,
     aspect: screenAspect()
   });
+  if (dead()) { RPC.removeOwnQueueEntry().catch(() => {}); return; }   // waehrend des Schreibens pausiert/abgebrochen: Eintrag wieder entfernen
 
   const queueUnsub = dbOn("queue/" + myUid + "_invite", (data) => {
     if (data && data.matchId && !onlineMatchId) {
@@ -6258,6 +6266,7 @@ async function startSearchingOnline() {
   const anim = ["⏳","⌛"];
   let ai = 0;
   onlineSearchInterval = setInterval(async () => {
+    if (gen !== onlineSearchGen) { clearInterval(onlineSearchInterval); onlineSearchInterval = null; return; }
     document.getElementById("onlineSearchAnim").textContent = anim[ai++ % 2];
     if (arenaSess) arenaTick();
     try { await tryMatchmake(); } catch(e) { console.warn("matchmake error:", e); }
@@ -6282,14 +6291,17 @@ function playWithBotNow() {
 // p1uid/p2uid (for security-rule enforcement and as the real
 // identity key).
 async function tryMatchmake() {
-  if (onlineMatchId || !myUid) return;
+  const gen = onlineSearchGen;
+  const dead = () => gen !== onlineSearchGen || !!(arenaSess && (arenaSess.paused || arenaSess.pre));   // Suche beendet / ich bin pausiert
+  if (onlineMatchId || !myUid || dead()) return;
   const queue = await dbGet("queue");
-  if (onlineMatchId) return;
+  if (onlineMatchId || dead()) return;
   if (!queue && !arenaSess) return;
   const others = Object.entries(queue || {})
     .map(([uid, p]) => ({ uid, ...p }))
     .filter(p =>
       p.uid && p.uid !== myUid && p.ts && (Date.now() - p.ts < 60000) && !String(p.uid).endsWith("_invite") && (arenaSess ? p.arena === arenaSess.id : !p.arena)
+      && !(arenaSess && arenaStandings[p.uid] && arenaStatus(Object.assign({ uid: p.uid }, arenaStandings[p.uid])) === "paused")   // Arena: pausierte Spieler werden nie gepaart
     );
   // Arena: der Online Bot steht in der Rangliste und ist immer ein Paarungs-Kandidat wie jeder andere Spieler
   if (arenaSess && !arenaEnded() && !arenaBotIsBusy()) others.push({ uid: ONLINE_BOT_UID, name: "Online Bot", elo: onlineBotElo, ts: Date.now(), arena: arenaSess.id, aspect: screenAspect(), isBot: true });
@@ -6300,14 +6312,15 @@ async function tryMatchmake() {
   else { others.sort((a,b) => Math.abs(a.elo - onlineAccount.elo) - Math.abs(b.elo - onlineAccount.elo)); opp = others[0]; }
   if (opp.isBot) {
     if (!(await arenaBotClaim(arenaSess.id))) return;   // jemand anderes war schneller -> naechster Versuch in 2 s
-    if (onlineMatchId) { arenaBotRelease(arenaSess.id); return; }
+    if (onlineMatchId || dead()) { arenaBotRelease(arenaSess.id); return; }
     await startBotMatch(); return;
   }
   const matchId = [myUid, opp.uid].sort().join("__VS__");
 
   const existing = await RPC.getMatch(matchId);
+  if (dead()) return;
   if (existing && existing.status === "waiting") {
-    if (onlineMatchId) return;
+    if (onlineMatchId || dead()) return;
     await RPC.removeOwnQueueEntry();
     joinMatch(matchId, { uid: opp.uid, name: opp.name, elo: opp.elo }, existing);
     return;
@@ -6336,11 +6349,18 @@ async function tryMatchmake() {
   };
   try {
     const existingCheck = await RPC.getMatch(matchId);
+    if (dead()) return;
+    if (arenaSess) {   // Arena: ist der Gegner noch frei? (sonst erstellen zwei Spieler gleichzeitig ein Match mit demselben Spieler)
+      const oq = await dbGet("queue/" + opp.uid), oi = await dbGet("queue/" + opp.uid + "_invite");
+      if (dead() || onlineMatchId) return;
+      if (!oq || !oq.ts || Date.now() - oq.ts > 60000 || oi) return;
+    }
     if (!existingCheck || existingCheck.status === "done" || existingCheck.status === "abandoned") {
       await RPC.createMatch(matchId, matchData);
     } else {
       return;
     }
+    if (dead()) { RPC.updateMatch(matchId, { status: "abandoned" }).catch(() => {}); return; }   // waehrenddessen pausiert
 
     await RPC.sendInvite(opp.uid, {
       matchId: matchId,
@@ -6350,6 +6370,7 @@ async function tryMatchmake() {
     });
 
     await RPC.removeOwnQueueEntry();
+    if (dead() || onlineMatchId) { RPC.updateMatch(matchId, { status: "abandoned" }).catch(() => {}); return; }
     // Note: we cannot remove the OPPONENT's queue entry ourselves
     // anymore (that would be writing to someone else's data). The
     // opponent's own client removes its queue entry in acceptInvite()
@@ -11266,12 +11287,16 @@ async function arenaRecordResult(aid, won, oppElo, oppUid) {
   if (arenaSess && arenaSess.id === aid) arenaSess.lastOpp = oppUid;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const cur = (await RPC.get("arenas/" + aid + "/" + myUid)) || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
-      const st = Number(cur.streak) || 0, pts = won ? (st >= 2 ? 4 : 2) : 0;
-      const e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
-        streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now(),
-        sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-40), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo), lo: String(oppUid || "").slice(0, 64) };
-      await RPC.setArenaEntry(aid, e);
+      let e = null, pts = 0;
+      const r = await arenaMyTx(aid, cur => {   // Transaktion: parallele Writes (z. B. "Pause") gehen nicht verloren
+        cur = cur || { score: 0, games: 0, wins: 0, streak: 0, oppSum: 0 };
+        const st = Number(cur.streak) || 0; pts = won ? (st >= 2 ? 4 : 2) : 0;
+        e = { name: onlineAccount.name, score: (Number(cur.score) || 0) + pts, games: (Number(cur.games) || 0) + 1, wins: (Number(cur.wins) || 0) + (won ? 1 : 0),
+          streak: won ? st + 1 : 0, oppSum: (Number(cur.oppSum) || 0) + Math.round(Number(oppElo) || 1500), last: pts, ts: Date.now(),
+          sh: (String(cur.sh || "") + (won ? "W" : "L")).slice(-40), st: (arenaSess && arenaSess.paused) ? "paused" : "search", hb: arenaNow(), elo: Math.round(onlineAccount.elo), lo: String(oppUid || "").slice(0, 64) };
+        return e;
+      });
+      if (!r || !r.committed || !e) throw new Error("arena result not committed");
       arenaStandings[myUid] = e;
       try { leagueToast("🏟 " + (won ? "+" + pts + " arena points" + (pts === 4 ? " 🔥" : "") : "0 arena points") + " · " + e.score + " total", won ? "#ffd700" : "#888"); } catch (x) {}
       return;
@@ -11305,9 +11330,9 @@ function arenaTick() {
   if (!arenaSess) return;
   if (arenaEnded()) { arenaFinish(); return; }
   const now = Date.now();
-  if (now - arenaSess.qAt > 20000 && !onlineMatchId) {   // Warteschlangen-Eintrag frisch halten
+  if (now - arenaSess.qAt > 20000 && !onlineMatchId && !arenaSess.paused) {   // Warteschlangen-Eintrag frisch halten (nie waehrend einer Pause)
     arenaSess.qAt = now;
-    if (!arenaSess.paused) arenaWriteState("search");
+    arenaWriteState("search");
     RPC.setOwnQueueEntry({ uid: myUid, name: onlineAccount.name, elo: onlineAccount.elo, ts: now, arena: arenaSess.id, aspect: screenAspect() }).catch(() => {});
   }
   arenaRenderSearch();
