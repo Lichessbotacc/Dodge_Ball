@@ -5755,8 +5755,8 @@ async function openOnlineProfile(uid) {
       const ownUid = _modMyUid();
       if (ownUid && ownUid === uid) {
         const rq = await dbGet("youtubeRequests/" + uid).catch(() => null);
-        ytHtml += (ytHtml ? " " : "") + (rq ? `<span style="opacity:.7">⏳ YouTube: wartet auf Freigabe</span> ` : "") +
-          `<button onclick="openYoutubeLinkDialog()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">${ytL ? "YouTube ändern" : "YouTube verlinken"}</button>` +
+        ytHtml += (ytHtml ? " " : "") + (rq ? `<span style="opacity:.7">⏳ ${tr("YouTube: waiting for approval")}</span> ` : "") +
+          `<button onclick="openYoutubeLinkDialog()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">${ytL ? tr("Change YouTube") : tr("Link YouTube")}</button>` +
           (ytL || rq ? `<button onclick="youtubeRemoveOwn()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">✖</button>` : "");
       }
       if (ytHtml) document.getElementById("profileStats").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin-top:10px;">${ytHtml}</div>`);
@@ -5839,10 +5839,20 @@ function showLoggedInAccountScreen() {
     <p style="color:#00ff88;font-size:22px;font-weight:700;margin-bottom:10px;">${escapeHtml(dn(onlineAccount.name))}</p>
     <div style="font-size:20px;margin-bottom:14px;">${leagueBadgeHTML(onlineAccount.leagueTier)} <span style="color:#8b93a6;font-size:14px;">· ${Math.round(onlineAccount.elo)} ELO</span></div>
     <button onclick="showLeagueScreen()">🏅 Weekly League</button>
+    <button onclick="openYoutubeLinkDialog()">▶ ${tr("Link YouTube")}</button>
+    <div id="ytAccStatus" style="color:#8b93a6;font-size:12px;margin:2px 0 6px;"></div>
     <p style="color:#8b93a6;font-size:12px;max-width:340px;margin:6px auto 14px;line-height:1.5;">${tr("One account per player. To use a different account you have to delete this one first.")}</p>
     <button onclick="showDeleteAccountScreen()" style="border-color:rgba(255,68,68,.5);color:#ff6666;">🗑 ${tr("Delete Account")}</button>
     <button onclick="showScreen('menu')">← Back</button>
   `;
+  _ytAccStatus();
+}
+async function _ytAccStatus() {
+  try {
+    const u = _modMyUid(), el = document.getElementById("ytAccStatus"); if (!u || !el) return;
+    const [l, r] = await Promise.all([dbGet("youtubeLinks/" + u).catch(() => null), dbGet("youtubeRequests/" + u).catch(() => null)]);
+    el.textContent = r ? "⏳ " + tr("YouTube: waiting for approval") : (l ? "✅ " + tr("YouTube linked") : tr("Only for players who upload DarkOnBalls videos."));
+  } catch (e) {}
 }
 
 function showDeleteAccountScreen() {
@@ -12119,7 +12129,19 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "🚩 Report":"🚩 Melden","✍️ New report":"✍️ Neuer Report","📋 All reports":"📋 Alle Reports","What happened? What did you do right before? (device / browser help too)":"Was ist passiert? Was hast du kurz davor gemacht? (Gerät / Browser hilft auch)","Describe the bug…":"Beschreibe den Bug…","📎 Add image / video":"📎 Bild / Video hinzufügen","up to 3 images + 1 video (max. 5 MB)":"bis zu 3 Bilder + 1 Video (max. 5 MB)","Send report":"Report senden","Please describe the bug.":"Bitte beschreibe den Bug.","Please wait a moment before sending another report.":"Bitte warte kurz, bevor du einen weiteren Report sendest.","Sending…":"Sende…","✅ Thank you! Your report was sent.":"✅ Danke! Dein Report wurde gesendet.","Only images or videos.":"Nur Bilder oder Videos.","Only 1 video allowed.":"Nur 1 Video erlaubt.","Video too large (max. 5 MB). Please send a shorter clip.":"Video zu groß (max. 5 MB). Bitte sende einen kürzeren Clip.","No reports yet.":"Noch keine Reports.",
+  "Link YouTube":"YouTube verlinken",
+  "Change YouTube":"YouTube ändern",
+  "YouTube: waiting for approval":"YouTube: wartet auf Freigabe",
+  "YouTube linked":"YouTube verlinkt",
+  "Only for players who upload DarkOnBalls videos.":"Nur für Spieler, die DarkOnBalls-Videos hochladen.",
+  "Your YouTube channel (https://youtube.com/@name or /channel/UC…). Only allowed if you upload DarkOnBalls videos:":"Dein YouTube-Kanal (https://youtube.com/@name oder /channel/UC…). Nur erlaubt, wenn du DarkOnBalls-Videos hochlädst:",
+  "Link to one of your DarkOnBalls videos (as proof, https://youtube.com/watch?v=… or youtu.be/…):":"Link zu einem deiner DarkOnBalls-Videos (als Beleg, https://youtube.com/watch?v=… oder youtu.be/…):",
+  "Submitted! The link appears after admin approval.":"Eingereicht! Der Link erscheint nach Freigabe durch den Admin.",
+  "Invalid link: only https://youtube.com/@name or /channel/UC… and a youtube.com/watch?v= / youtu.be video.":"Ungültiger Link: nur https://youtube.com/@name bzw. /channel/UC… und ein youtube.com/watch?v= / youtu.be-Video.",
+  "Remove YouTube link?":"YouTube-Verlinkung entfernen?",
+  "Removed.":"Entfernt.",
+  "Error.":"Fehler.",
+    "🚩 Report":"🚩 Melden","✍️ New report":"✍️ Neuer Report","📋 All reports":"📋 Alle Reports","What happened? What did you do right before? (device / browser help too)":"Was ist passiert? Was hast du kurz davor gemacht? (Gerät / Browser hilft auch)","Describe the bug…":"Beschreibe den Bug…","📎 Add image / video":"📎 Bild / Video hinzufügen","up to 3 images + 1 video (max. 5 MB)":"bis zu 3 Bilder + 1 Video (max. 5 MB)","Send report":"Report senden","Please describe the bug.":"Bitte beschreibe den Bug.","Please wait a moment before sending another report.":"Bitte warte kurz, bevor du einen weiteren Report sendest.","Sending…":"Sende…","✅ Thank you! Your report was sent.":"✅ Danke! Dein Report wurde gesendet.","Only images or videos.":"Nur Bilder oder Videos.","Only 1 video allowed.":"Nur 1 Video erlaubt.","Video too large (max. 5 MB). Please send a shorter clip.":"Video zu groß (max. 5 MB). Bitte sende einen kürzeren Clip.","No reports yet.":"Noch keine Reports.",
   "🏠 Home":"🏠 Menü","Home":"Menü","Time:":"Zeit:","Record:":"Rekord:","Balls:":"Bälle:","Mode:":"Modus:","Players:":"Spieler:","Total:":"Gesamt:","Survived:":"Überlebt:",
   "ELO LIVE":"ELO LIVE","BEST TV":"BESTES TV","RANDOM TV":"ZUFALLS-TV","TARGET TV":"ZIEL-TV","▶ RESUME":"▶ WEITER",
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
@@ -12686,7 +12708,7 @@ function _adminBar() {
   if (bar) return bar;
   const menu = document.getElementById("menu"); if (!menu) return null;
   bar = document.createElement("div"); bar.id = "adminBar";
-  bar.style.cssText = "position:absolute;top:14px;left:16px;display:flex;flex-direction:row;gap:8px;z-index:5;";
+  bar.style.cssText = "position:absolute;top:14px;left:16px;display:flex;flex-direction:row;flex-wrap:wrap;gap:6px;max-width:55vw;z-index:5;";
   menu.appendChild(bar);
   return bar;
 }
@@ -12712,16 +12734,16 @@ function _patronAdminBtn() {
 }
 // ═══ YouTube: Spieler-Dialog + Admin-Panel ═══
 async function openYoutubeLinkDialog() {
-  const ch = prompt("Dein YouTube-Kanal (https://youtube.com/@name oder /channel/UC…).\nNur erlaubt, wenn du DarkOnBalls-Videos hochlädst:");
+  const ch = prompt(tr("Your YouTube channel (https://youtube.com/@name or /channel/UC…). Only allowed if you upload DarkOnBalls videos:"));
   if (!ch) return;
-  const pr = prompt("Link zu einem DarkOnBalls-Video von dir (als Beleg, https://youtube.com/watch?v=… oder youtu.be/…):");
+  const pr = prompt(tr("Link to one of your DarkOnBalls videos (as proof, https://youtube.com/watch?v=… or youtu.be/…):"));
   if (!pr) return;
-  try { await _modRPC().youtubeSubmit(ch, pr); alert("Eingereicht! Der Link erscheint nach Freigabe durch den Admin."); }
-  catch (e) { alert("Ungültiger Link: nur https://youtube.com/@name bzw. /channel/UC… und ein youtube.com/watch?v= / youtu.be Video."); }
+  try { await _modRPC().youtubeSubmit(ch, pr); alert(tr("Submitted! The link appears after admin approval.")); try { _ytAccStatus(); } catch (e) {}; }
+  catch (e) { alert(tr("Invalid link: only https://youtube.com/@name or /channel/UC… and a youtube.com/watch?v= / youtu.be video.")); }
 }
 async function youtubeRemoveOwn() {
-  if (!confirm("YouTube-Verlinkung entfernen?")) return;
-  try { await _modRPC().youtubeRemoveOwn(); alert("Entfernt."); } catch (e) { alert("Fehler."); }
+  if (!confirm(tr("Remove YouTube link?"))) return;
+  try { await _modRPC().youtubeRemoveOwn(); alert(tr("Removed.")); try { _ytAccStatus(); } catch (e) {} } catch (e) { alert(tr("Error.")); }
 }
 async function openYoutubeAdmin() {
   if (!_modIsAdmin()) return;
