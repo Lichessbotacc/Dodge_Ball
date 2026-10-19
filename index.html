@@ -11720,19 +11720,34 @@ const IDLE_SEASON = "2026-10-19";   // neue Season: alte lokale Staende werden g
 function idleFresh(ts) { return Number(ts) >= IDLE_UNLOCK_AT; }   // nur Eintraege ab Neustart zaehlen (alte Cloud-Staende/Leaderboard-Zeilen werden ignoriert)
 function idleNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
 function idleUnlocked() { return idleNow() >= IDLE_UNLOCK_AT; }
-function idleCanPlay() { return idleUnlocked() || _modIsAdminSafe(); }
+// Wochen-Zeitplan: Idle ist nur Montag und Donnerstag (ganzer Tag, deutsche Zeit Europe/Berlin) spielbar. Staende bleiben immer gespeichert.
+const IDLE_OPEN_DAYS = ["Mon", "Thu"];
+let _idleWdFmt = null;
+function idleBerlinWd(ts) { try { if (!_idleWdFmt) _idleWdFmt = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Berlin", weekday: "short" }); return _idleWdFmt.format(new Date(ts)); } catch (e) { return "Mon"; } }
+function idleDayOpen(ts) { return IDLE_OPEN_DAYS.indexOf(idleBerlinWd(ts === undefined ? idleNow() : ts)) >= 0; }
+function idleNextOpenAt() {
+  let t = idleNow();
+  if (idleDayOpen(t)) return t;
+  for (let i = 0; i < 24 * 8 && !idleDayOpen(t); i++) t += 3600000;        // stundenweise bis zum offenen Tag ...
+  t -= 3600000; for (let i = 0; i < 61 && !idleDayOpen(t); i++) t += 60000;   // ... dann minutengenau
+  return t;
+}
+function idleCanPlay() { return (idleUnlocked() && idleDayOpen()) || _modIsAdminSafe(); }
 function idleLeftText() {
-  const ms = Math.max(0, IDLE_UNLOCK_AT - idleNow()), d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000);
+  const ms = Math.max(0, (idleUnlocked() ? idleNextOpenAt() : Math.max(IDLE_UNLOCK_AT, idleNextOpenAt())) - idleNow()), d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000);
   return (d ? d + "d " : "") + h + "h " + m + "m";
 }
 function updIdleBtn() {
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
   const b = document.getElementById("idleBtn"); if (!b) return;
-  const sub = idleUnlocked() ? "" : (_modIsAdminSafe() ? "🛡 Test · " : "🔒 ") + idleLeftText();
+  const sub = (idleUnlocked() && idleDayOpen()) ? "" : (_modIsAdminSafe() ? "🛡 Test · " : "🔒 ") + (idleUnlocked() ? tr("Mon & Thu only") + " · " : "") + idleLeftText();
   const key = "🧱 Idle Brick Breaker|" + sub;
   if (b.dataset.k !== key) { b.dataset.k = key; b.textContent = "🧱 Idle Brick Breaker"; if (sub) { const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = sub; b.appendChild(sm); } }
   b.style.opacity = idleCanPlay() ? "" : "0.6";
 }
+setInterval(() => {   // Tag zu Ende (Mitternacht deutsche Zeit): Idle schliessen, Stand wird dabei gespeichert
+  try { if (window.__idleOpen && window.__idleCfg && window.__idleCfg.persist && !idleDayOpen()) { closeIdle(); leagueToast("🔒 " + tr("Idle Brick Breaker is closed for today. Your progress is saved."), "#ffd700"); } } catch (e) {}
+}, 20000);
 setInterval(updIdleBtn, 15000); setTimeout(updIdleBtn, 500); setTimeout(updIdleBtn, 3000);
 
 let _idleLast = 0, _idleAt = 0;
@@ -11976,9 +11991,9 @@ async function openIdle() {
     document.body.appendChild(cb); return;
   }
   try { if (fbReady) ensureSrvOffset(); } catch (e) {}
-  if (!idleCanPlay()) { try { leagueToast("🔒 Idle Brick Breaker opens in " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
+  if (!idleCanPlay()) { try { leagueToast("🔒 " + (idleUnlocked() ? tr("Idle Brick Breaker is only open on Mondays and Thursdays (German time).") + " " : "") + tr("Opens in") + " " + idleLeftText(), "#ffd700"); } catch (e) {} return; }
   if (document.getElementById("idleOverlay")) return;
-  const persist = idleUnlocked();
+  const persist = idleUnlocked() && idleDayOpen();   // an geschlossenen Tagen (nur Admin) = Testmodus ohne Speichern
   window.__idleCfg = { persist };
   if (persist) { try { if (localStorage.getItem("idleSeason") !== IDLE_SEASON) { localStorage.removeItem("idleBrickBreaker_v5"); localStorage.setItem("idleSeason", IDLE_SEASON); _idleLast = 0; _idleSaveTot = 0; } } catch (e) {} }
   if (persist && fbReady && myUid) { try { const o = await RPC.get("idleBoard/" + myUid); if (o && !idleFresh(o.ts)) { await RPC.removeIdleOld(); _idleLast = 0; _idleSaveTot = 0; } else _idleLast = Math.max(_idleLast, Number(o && o.total) || 0); } catch (e) {} }
@@ -12207,7 +12222,11 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "Streamers":"Streamer",
+  "Mon & Thu only":"Nur Mo & Do",
+  "Idle Brick Breaker is only open on Mondays and Thursdays (German time).":"Idle Brick Breaker ist nur montags und donnerstags offen (deutsche Zeit).",
+  "Opens in":"Öffnet in",
+  "Idle Brick Breaker is closed for today. Your progress is saved.":"Idle Brick Breaker ist für heute geschlossen. Dein Fortschritt ist gespeichert.",
+    "Streamers":"Streamer",
   "Link your YouTube":"Verlinke dein YouTube",
   "Link your Twitch":"Verlinke dein Twitch",
   "Only for players who upload or stream DarkOnBalls. Links appear after admin approval.":"Nur für Spieler, die DarkOnBalls hochladen oder streamen. Links erscheinen nach Freigabe durch den Admin.",
