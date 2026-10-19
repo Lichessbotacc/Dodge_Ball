@@ -2003,17 +2003,13 @@ function _plusMonthFn(ts) { const d = new Date(ts), day = d.getDate(); d.setMont
 // ═══ YouTube-Verlinkung (nur mit Admin-Freigabe) ═══
 const _YT_CH_RE = /^https:\/\/(www\.)?youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})$/;
 const _YT_VID_RE = /^https:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[A-Za-z0-9_-]{11}$/;
-async function rpcYoutubeSubmit(channelUrl, proofUrl) {
+async function rpcYoutubeSubmit(channelUrl) {
   requireNotBanned(); const uid = requireUid();
-  channelUrl = String(channelUrl || "").trim(); proofUrl = String(proofUrl || "").trim();
-  // Share-Links tolerieren (?si=..., &t=..., /, m./www.) und auf die strenge Kurzform normalisieren, die auch die Database Rules verlangen
+  channelUrl = String(channelUrl || "").trim();
+  // Share-Links tolerieren (?si=..., /, m./www.) und auf die strenge Kurzform normalisieren, die auch die Database Rules verlangen
   const cm = channelUrl.match(/^https:\/\/(?:www\.|m\.)?youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})\/?(?:[?#].*)?$/);
   if (!cm) throw new Error("Bad channel URL.");
-  channelUrl = "https://www.youtube.com/" + cm[1];
-  const vm = proofUrl.match(/^https:\/\/(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#\/].*)?$/);
-  if (!vm) throw new Error("Bad video URL.");
-  proofUrl = "https://youtu.be/" + vm[1];
-  return set(ref(db, "youtubeRequests/" + uid), { url: channelUrl, proof: proofUrl, ts: serverTimestamp() });
+  return set(ref(db, "youtubeRequests/" + uid), { url: "https://www.youtube.com/" + cm[1], ts: serverTimestamp() });
 }
 async function rpcYoutubeRemoveOwn() {
   requireNotBanned(); const uid = requireUid();
@@ -12146,10 +12142,8 @@ const DICT = { de: {
   "YouTube: waiting for approval":"YouTube: wartet auf Freigabe",
   "YouTube linked":"YouTube verlinkt",
   "Only for players who upload DarkOnBalls videos.":"Nur für Spieler, die DarkOnBalls-Videos hochladen.",
-  "Your YouTube channel (https://youtube.com/@name or /channel/UC…). Only allowed if you upload DarkOnBalls videos:":"Dein YouTube-Kanal (https://youtube.com/@name oder /channel/UC…). Nur erlaubt, wenn du DarkOnBalls-Videos hochlädst:",
-  "Link to one of your DarkOnBalls videos (as proof, https://youtube.com/watch?v=… or youtu.be/…):":"Link zu einem deiner DarkOnBalls-Videos (als Beleg, https://youtube.com/watch?v=… oder youtu.be/…):",
   "Submitted! The link appears after admin approval.":"Eingereicht! Der Link erscheint nach Freigabe durch den Admin.",
-  "Invalid link: only https://youtube.com/@name or /channel/UC… and a youtube.com/watch?v= / youtu.be video.":"Ungültiger Link: nur https://youtube.com/@name bzw. /channel/UC… und ein youtube.com/watch?v= / youtu.be-Video.",
+  "Your YouTube channel link (https://youtube.com/@name). Only allowed if you upload DarkOnBalls videos:":"Dein YouTube-Kanal-Link (https://youtube.com/@name). Nur erlaubt, wenn du DarkOnBalls-Videos hochlädst:","Invalid link: only https://youtube.com/@name or https://youtube.com/channel/UC… are allowed.":"Ungültiger Link: nur https://youtube.com/@name oder https://youtube.com/channel/UC… sind erlaubt.",
   "Remove YouTube link?":"YouTube-Verlinkung entfernen?",
   "Removed.":"Entfernt.",
   "Error.":"Fehler.",
@@ -12746,12 +12740,10 @@ function _patronAdminBtn() {
 }
 // ═══ YouTube: Spieler-Dialog + Admin-Panel ═══
 async function openYoutubeLinkDialog() {
-  const ch = prompt(tr("Your YouTube channel (https://youtube.com/@name or /channel/UC…). Only allowed if you upload DarkOnBalls videos:"));
+  const ch = prompt(tr("Your YouTube channel link (https://youtube.com/@name). Only allowed if you upload DarkOnBalls videos:"));
   if (!ch) return;
-  const pr = prompt(tr("Link to one of your DarkOnBalls videos (as proof, https://youtube.com/watch?v=… or youtu.be/…):"));
-  if (!pr) return;
-  try { await _modRPC().youtubeSubmit(ch, pr); alert(tr("Submitted! The link appears after admin approval.")); try { _ytAccStatus(); } catch (e) {}; }
-  catch (e) { alert(tr("Invalid link: only https://youtube.com/@name or /channel/UC… and a youtube.com/watch?v= / youtu.be video.")); }
+  try { await _modRPC().youtubeSubmit(ch); alert(tr("Submitted! The link appears after admin approval.")); try { _ytAccStatus(); } catch (e) {} }
+  catch (e) { alert(tr("Invalid link: only https://youtube.com/@name or https://youtube.com/channel/UC… are allowed.")); }
 }
 async function youtubeRemoveOwn() {
   if (!confirm(tr("Remove YouTube link?"))) return;
@@ -12770,7 +12762,6 @@ async function openYoutubeAdmin() {
     const r = reqs[u] || {};
     return `<div style="border:1px solid #444;padding:8px;margin:6px 0;"><div style="font-size:12px;opacity:.6">${escapeHtml(u)}</div>
       <div><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.url)}</a></div>
-      <div><a href="${escapeHtml(r.proof)}" target="_blank" rel="noopener noreferrer">Beleg-Video</a></div>
       <button data-a="1" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✔ Freigeben</button>
       <button data-a="0" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✖ Ablehnen</button></div>`;
   }).join("") || "<div>Keine offenen Anfragen.</div>";
