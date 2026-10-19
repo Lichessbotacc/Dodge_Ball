@@ -1836,6 +1836,7 @@ function requireAdmin() { const u = requireUid(); if (u !== MOD_ADMIN_UID_RPC) t
 async function rpcModSetSanction(uid, data) { requireAdmin(); return update(ref(db, "sanctions/" + uid), data); }
 async function rpcModClearSanction(uid)     { requireAdmin(); return remove(ref(db, "sanctions/" + uid)); }
 async function rpcModDeleteChat(id)         { requireAdmin(); return remove(ref(db, "chat/" + id)); }
+async function rpcModDeleteIdleChat(id)     { requireAdmin(); id = String(id || ""); if (!/^[A-Za-z0-9_-]{6,40}$/.test(id)) throw new Error("Bad id."); return remove(ref(db, "idleChat/" + id)); }
 // Mute / Chat-Ban: Nachrichten einer Person loeschen (sinceMs = 0 -> ALLE, sonst nur die der letzten sinceMs Millisekunden)
 async function rpcModDeleteChatOf(uid, sinceMs) {
   requireAdmin(); uid = String(uid || "");
@@ -1843,6 +1844,11 @@ async function rpcModDeleteChatOf(uid, sinceMs) {
   const v = (await get(query(ref(db, "chat"), orderByChild("uid"), equalTo(uid)))).val() || {};
   const cutoff = Number(sinceMs) > 0 ? Date.now() - Number(sinceMs) : 0, up = {}; let n = 0;
   Object.entries(v).forEach(([id, m]) => { if (m && m.uid === uid && (!cutoff || Number(m.ts) >= cutoff)) { up["chat/" + id] = null; n++; } });
+  // gleiches Muten/Chat-Ban auch fuer den Idle-Chat: dort ebenfalls die Nachrichten der Person loeschen
+  try {
+    const iv = (await get(query(ref(db, "idleChat"), orderByChild("uid"), equalTo(uid)))).val() || {};
+    Object.entries(iv).forEach(([id, m]) => { if (m && m.uid === uid && (!cutoff || Number(m.ts) >= cutoff)) { up["idleChat/" + id] = null; n++; } });
+  } catch (e) {}
   if (n) await update(ref(db), up);
   return n;
 }
@@ -2181,7 +2187,7 @@ window._dobRPC = {
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -11886,7 +11892,9 @@ function idleChatRender() {
   box.textContent = "";
   if (!arr.length) { const e = document.createElement("div"); e.className = "is-gap"; e.textContent = "No messages yet."; box.appendChild(e); }
   const me = onlineAccount && String(onlineAccount.name).toLowerCase();
-  for (const m of arr) {
+  const _ents = Object.entries(_IS.msgs || {}).filter(([k, m]) => m && m.text).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0)).slice(-50);
+  const _isAdm = _modIsAdminSafe();
+  for (const [mkey, m] of _ents) {
     const row = document.createElement("div"); row.className = "is-m";
     const mine = myUid && m.uid === myUid; if (mine) row.classList.add("me");
     const tm = document.createElement("i"); const d = new Date(m.ts || 0); tm.textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
@@ -11900,6 +11908,14 @@ function idleChatRender() {
       if (/^@\w+$/.test(part)) { const s = document.createElement("span"); s.className = "mn"; s.textContent = part; row.append(s); }
       else row.append(document.createTextNode(part));
     });
+    if (_isAdm) {   // wie im globalen Chat: Mod-Panel (Mute/Chat-Ban/Warnung) + Nachricht loeschen
+      const mb = document.createElement("button"); mb.textContent = "🛡"; mb.title = "Mod actions for this player";
+      mb.style.cssText = "margin:0 0 0 8px;padding:0 5px;font-size:11px;"; mb.onclick = () => openModPanel(m.name);
+      const db_ = document.createElement("button"); db_.textContent = "🗑"; db_.title = "Delete message";
+      db_.style.cssText = "margin:0 0 0 4px;padding:0 5px;font-size:11px;";
+      db_.onclick = async () => { if (!confirm("Delete this chat message?")) return; try { await _modRPC().modDeleteIdleChat(mkey); if (_IS.msgs) delete _IS.msgs[mkey]; idleChatRender(); } catch (e) { alert("Failed: " + (e && e.message)); } };
+      row.append(mb, db_);
+    }
     box.appendChild(row);
   }
   const on = document.getElementById("isOnline"); if (on) { const n = new Set(arr.filter(m => Date.now() - (m.ts || 0) < 600000).map(m => m.uid)).size; on.textContent = n ? n + " active" : ""; }
