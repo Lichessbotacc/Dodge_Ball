@@ -1864,7 +1864,7 @@ async function rpcModPurgeUser(uid, name) {
   uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
   const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
-    "idleBoard/" + uid, "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid, "youtubeRequests/" + uid, "youtubeLinks/" + uid]);
+    "idleBoard/" + uid, "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid, "youtubeRequests/" + uid, "youtubeLinks/" + uid, "twitchRequests/" + uid, "twitchLinks/" + uid]);
   const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
   const [un, wl, ch, h2h, chat, dly] = await Promise.all([
     safe(async () => (await get(ref(db, "usernames"))).val()),
@@ -2029,6 +2029,33 @@ async function rpcModYoutubeReject(uid) {
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
   return set(ref(db, "youtubeRequests/" + uid), null);
 }
+// ═══ Twitch-Verlinkung (nur mit Admin-Freigabe) ═══
+const _TW_RE = /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/;
+async function rpcTwitchSubmit(channelUrl) {
+  requireNotBanned(); const uid = requireUid();
+  channelUrl = String(channelUrl || "").trim();
+  const m = channelUrl.match(/^(?:https:\/\/)?(?:www\.|m\.)?twitch\.tv\/([A-Za-z0-9_]{3,25})\/?(?:[?#].*)?$/);
+  if (!m) throw new Error("Bad channel URL.");
+  return set(ref(db, "twitchRequests/" + uid), { url: "https://www.twitch.tv/" + m[1].toLowerCase(), ts: serverTimestamp() });
+}
+async function rpcTwitchRemoveOwn() {
+  requireNotBanned(); const uid = requireUid();
+  await set(ref(db, "twitchRequests/" + uid), null);
+  try { await set(ref(db, "twitchLinks/" + uid), null); } catch (e) {}
+}
+async function rpcModTwitchApprove(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  const r = (await get(ref(db, "twitchRequests/" + uid))).val();
+  if (!r || !_TW_RE.test(String(r.url || ""))) throw new Error("No valid request.");
+  await set(ref(db, "twitchLinks/" + uid), { url: r.url });
+  await set(ref(db, "twitchRequests/" + uid), null);
+}
+async function rpcModTwitchReject(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  return set(ref(db, "twitchRequests/" + uid), null);
+}
 async function rpcModApplyDailyWins(updates) {
   requireAdmin();
   const keys = Object.keys(updates || {});
@@ -2152,7 +2179,7 @@ window._dobRPC = {
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -5768,6 +5795,20 @@ async function openOnlineProfile(uid) {
       }
       if (ytHtml) document.getElementById("profileStats").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin-top:10px;">${ytHtml}</div>`);
     } catch (e) {}
+    try {
+      const twL = await dbGet("twitchLinks/" + uid).catch(() => null);
+      let twHtml = "";
+      if (twL && /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/.test(String(twL.url || ""))) {
+        twHtml = `<a href="${escapeHtml(twL.url)}" target="_blank" rel="noopener noreferrer nofollow ugc" style="color:#a970ff;font-weight:700;">🟣 Twitch</a>`;
+      }
+      if (_modMyUid() && _modMyUid() === uid) {
+        const rq = await dbGet("twitchRequests/" + uid).catch(() => null);
+        twHtml += (twHtml ? " " : "") + (rq ? `<span style="opacity:.7">⏳ ${tr("Twitch: waiting for approval")}</span> ` : "") +
+          `<button onclick="openTwitchLinkDialog()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">${twL ? tr("Change Twitch") : tr("Link Twitch")}</button>` +
+          (twL || rq ? `<button onclick="twitchRemoveOwn()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">✖</button>` : "");
+      }
+      if (twHtml) document.getElementById("profileStats").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin-top:6px;">${twHtml}</div>`);
+    } catch (e) {}
     document.getElementById("profileModal").style.display = "flex";
   } catch(e) {
     console.warn("Error while loading profile", e);
@@ -5848,11 +5889,20 @@ function showLoggedInAccountScreen() {
     <button onclick="showLeagueScreen()">🏅 Weekly League</button>
     <button onclick="openYoutubeLinkDialog()">▶ ${tr("Link YouTube")}</button>
     <div id="ytAccStatus" style="color:#8b93a6;font-size:12px;margin:2px 0 6px;"></div>
+    <button onclick="openTwitchLinkDialog()">🟣 ${tr("Link Twitch")}</button>
+    <div id="twAccStatus" style="color:#8b93a6;font-size:12px;margin:2px 0 6px;"></div>
     <p style="color:#8b93a6;font-size:12px;max-width:340px;margin:6px auto 14px;line-height:1.5;">${tr("One account per player. To use a different account you have to delete this one first.")}</p>
     <button onclick="showDeleteAccountScreen()" style="border-color:rgba(255,68,68,.5);color:#ff6666;">🗑 ${tr("Delete Account")}</button>
     <button onclick="showScreen('menu')">← Back</button>
   `;
-  _ytAccStatus();
+  _ytAccStatus(); _twAccStatus();
+}
+async function _twAccStatus() {
+  try {
+    const u = _modMyUid(), el = document.getElementById("twAccStatus"); if (!u || !el) return;
+    const [l, r] = await Promise.all([dbGet("twitchLinks/" + u).catch(() => null), dbGet("twitchRequests/" + u).catch(() => null)]);
+    el.textContent = r ? "⏳ " + tr("Twitch: waiting for approval") : (l ? "✅ " + tr("Twitch linked") : tr("Only for players who stream DarkOnBalls."));
+  } catch (e) {}
 }
 async function _ytAccStatus() {
   try {
@@ -12137,7 +12187,15 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "Link YouTube":"YouTube verlinken",
+  "Link Twitch":"Twitch verlinken",
+  "Change Twitch":"Twitch ändern",
+  "Twitch: waiting for approval":"Twitch: wartet auf Freigabe",
+  "Twitch linked":"Twitch verlinkt",
+  "Only for players who stream DarkOnBalls.":"Nur für Spieler, die DarkOnBalls streamen.",
+  "Your Twitch channel link (https://twitch.tv/name). Only allowed if you stream DarkOnBalls:":"Dein Twitch-Kanal-Link (https://twitch.tv/name). Nur erlaubt, wenn du DarkOnBalls streamst:",
+  "Invalid link: only https://twitch.tv/name is allowed.":"Ungültiger Link: nur https://twitch.tv/name ist erlaubt.",
+  "Remove Twitch link?":"Twitch-Verlinkung entfernen?",
+    "Link YouTube":"YouTube verlinken",
   "Change YouTube":"YouTube ändern",
   "YouTube: waiting for approval":"YouTube: wartet auf Freigabe",
   "YouTube linked":"YouTube verlinkt",
@@ -12704,7 +12762,7 @@ function _modRender() {
   }
 }
 setInterval(_modRender, 1000);
-setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); _cheatersBtn(); _patronAdminBtn(); _youtubeAdminBtn(); }, 3000);
+setInterval(() => { _modWatch(); _modAdminBtn(); _dailyAdminBtn(); _cheatersBtn(); _patronAdminBtn(); _youtubeAdminBtn(); _twitchAdminBtn(); }, 3000);
 setInterval(() => { try { if (_modIsAdmin()) _cheatersLoad(); } catch (e) {} }, 60000);
 if (_modRPC()) _modWatch();
 
@@ -12780,6 +12838,49 @@ function _youtubeAdminBtn() {
   const b = document.createElement("button"); b.id = "ytAdminBtn"; b.textContent = "▶ YouTube";
   b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
   b.onclick = () => openYoutubeAdmin();
+  bar.appendChild(b);
+}
+// ═══ Twitch: Spieler-Dialog + Admin-Panel ═══
+async function openTwitchLinkDialog() {
+  const ch = prompt(tr("Your Twitch channel link (https://twitch.tv/name). Only allowed if you stream DarkOnBalls:"));
+  if (!ch) return;
+  try { await _modRPC().twitchSubmit(ch); alert(tr("Submitted! The link appears after admin approval.")); try { _twAccStatus(); } catch (e) {} }
+  catch (e) { alert(tr("Invalid link: only https://twitch.tv/name is allowed.")); }
+}
+async function twitchRemoveOwn() {
+  if (!confirm(tr("Remove Twitch link?"))) return;
+  try { await _modRPC().twitchRemoveOwn(); alert(tr("Removed.")); try { _twAccStatus(); } catch (e) {} } catch (e) { alert(tr("Error.")); }
+}
+async function openTwitchAdmin() {
+  if (!_modIsAdmin()) return;
+  let ov = document.getElementById("twAdminOv");
+  if (!ov) { ov = document.createElement("div"); ov.id = "twAdminOv";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100000;display:flex;align-items:center;justify-content:center;";
+    document.body.appendChild(ov); }
+  ov.style.display = "flex";
+  const reqs = (await dbGet("twitchRequests").catch(() => null)) || {};
+  const rows = Object.keys(reqs).map(u => {
+    const r = reqs[u] || {};
+    return `<div style="border:1px solid #444;padding:8px;margin:6px 0;"><div style="font-size:12px;opacity:.6">${escapeHtml(u)}</div>
+      <div><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.url)}</a></div>
+      <button data-a="1" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✔ Freigeben</button>
+      <button data-a="0" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✖ Ablehnen</button></div>`;
+  }).join("") || "<div>Keine offenen Anfragen.</div>";
+  ov.innerHTML = `<div style="background:#111;color:#fff;padding:16px;max-width:520px;width:92%;max-height:80vh;overflow:auto;"><h3>🟣 Twitch-Anfragen</h3>${rows}<button id="twClose" style="position:static;margin-top:10px;">Schließen</button></div>`;
+  ov.querySelector("#twClose").onclick = () => { ov.style.display = "none"; };
+  ov.querySelectorAll("button[data-u]").forEach(b => b.onclick = async () => {
+    try { b.dataset.a === "1" ? await _modRPC().modTwitchApprove(b.dataset.u) : await _modRPC().modTwitchReject(b.dataset.u); } catch (e) { alert("Fehler: " + e.message); }
+    openTwitchAdmin();
+  });
+}
+function _twitchAdminBtn() {
+  const ex = document.getElementById("twAdminBtn");
+  if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
+  if (ex) return;
+  const bar = _adminBar(); if (!bar) return;
+  const b = document.createElement("button"); b.id = "twAdminBtn"; b.textContent = "🟣 Twitch";
+  b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
+  b.onclick = () => openTwitchAdmin();
   bar.appendChild(b);
 }
 function _dailyAdminBtn() {
