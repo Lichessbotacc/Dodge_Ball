@@ -2006,8 +2006,13 @@ const _YT_VID_RE = /^https:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[A-Z
 async function rpcYoutubeSubmit(channelUrl, proofUrl) {
   requireNotBanned(); const uid = requireUid();
   channelUrl = String(channelUrl || "").trim(); proofUrl = String(proofUrl || "").trim();
-  if (!_YT_CH_RE.test(channelUrl)) throw new Error("Bad channel URL.");
-  if (!_YT_VID_RE.test(proofUrl)) throw new Error("Bad video URL.");
+  // Share-Links tolerieren (?si=..., &t=..., /, m./www.) und auf die strenge Kurzform normalisieren, die auch die Database Rules verlangen
+  const cm = channelUrl.match(/^https:\/\/(?:www\.|m\.)?youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})\/?(?:[?#].*)?$/);
+  if (!cm) throw new Error("Bad channel URL.");
+  channelUrl = "https://www.youtube.com/" + cm[1];
+  const vm = proofUrl.match(/^https:\/\/(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#\/].*)?$/);
+  if (!vm) throw new Error("Bad video URL.");
+  proofUrl = "https://youtu.be/" + vm[1];
   return set(ref(db, "youtubeRequests/" + uid), { url: channelUrl, proof: proofUrl, ts: serverTimestamp() });
 }
 async function rpcYoutubeRemoveOwn() {
@@ -10341,7 +10346,7 @@ gameWrap.addEventListener("touchstart", e => {
     { id: "lightning", name: "Lightning",    col: "#7ee8ff", tier: 6, pm: 1,    sm: 1.15, info: "Chain lightning to more bricks for 30% damage." },
     { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blue bricks ×2, hex bricks ×25 damage." }
   ];
-  var CASH_BALL_MUL = 50, CASH_BALL_CAP = 0.25, CASH_BALL_MIN = 0.02;  // Zahlt pro Treffer Anteil (Kraft/Steinleben × MUL, max CAP) vom Steinwert   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
+  var CASH_BALL_MUL = 50, CASH_BALL_CAP = 1, CASH_BALL_MIN = 0.10;  // Zahlt pro Treffer Anteil (Kraft/Steinleben × MUL, max CAP) vom Steinwert   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
   var POISON_PER_LVL = 0.3, POISON_MAX = 40;   // Poison: Schaden auf vergiftete Steine = 1 + 0,3 pro Power-Stufe, max. x40
   var BALL_POWER_MUL = 0.6;   // globale Abschwaechung der Ball-Power (1 = Original)
   var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
