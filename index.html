@@ -943,6 +943,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
               </svg>
               <span>WhatsApp</span>
             </a>
+            <a class="socialLink" href="#" onclick="openStreamers();return false;" title="Streamers" aria-label="Streamers"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">🎥</span><span>Streamers</span></a>
             <a id="linkDiscordMain" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#5865F2"/>
@@ -976,6 +977,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
               </svg>
               <span>WhatsApp</span>
             </a>
+            <a class="socialLink" href="#" onclick="openStreamers();return false;" title="Streamers" aria-label="Streamers"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">🎥</span><span>Streamers</span></a>
             <a id="linkDiscord" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#5865F2"/>
@@ -12189,7 +12191,13 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "Link Twitch":"Twitch verlinken",
+  "Streamers":"Streamer",
+  "Link your YouTube":"Verlinke dein YouTube",
+  "Link your Twitch":"Verlinke dein Twitch",
+  "Only for players who upload or stream DarkOnBalls. Links appear after admin approval.":"Nur für Spieler, die DarkOnBalls hochladen oder streamen. Links erscheinen nach Freigabe durch den Admin.",
+  "No streamers yet.":"Noch keine Streamer.",
+  "Close":"Schließen",
+    "Link Twitch":"Twitch verlinken",
   "Change Twitch":"Twitch ändern",
   "Twitch: waiting for approval":"Twitch: wartet auf Freigabe",
   "Twitch linked":"Twitch verlinkt",
@@ -12886,6 +12894,52 @@ function _twitchAdminBtn() {
   bar.appendChild(b);
 }
 
+// ═══ Streamers: alle freigegebenen YouTuber/Twitcher + Knopf zum Verlinken ═══
+async function openStreamers() {
+  let ov = document.getElementById("streamersOv");
+  if (!ov) { ov = document.createElement("div"); ov.id = "streamersOv";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100000;display:flex;align-items:center;justify-content:center;";
+    ov.addEventListener("click", e => { if (e.target === ov) ov.style.display = "none"; });
+    document.body.appendChild(ov); }
+  ov.style.display = "flex";
+  ov.textContent = "";
+  const box = document.createElement("div");
+  box.style.cssText = "background:#111;color:#fff;padding:16px;max-width:460px;width:92%;max-height:80vh;overflow:auto;border-radius:12px;border:1px solid #333;text-align:center;";
+  const h = document.createElement("h3"); h.textContent = "🎥 " + tr("Streamers"); box.appendChild(h);
+  const btns = document.createElement("div");
+  const mk = (txt, fn) => { const b = document.createElement("button"); b.textContent = txt; b.style.cssText = "position:static;margin:4px;padding:8px 12px;font-size:13px;"; b.onclick = fn; return b; };
+  const needLogin = (fn) => () => { if (_modMyUid() && onlineAccount) { ov.style.display = "none"; fn(); } else { ov.style.display = "none"; openAccountScreen(); } };
+  btns.append(mk("▶ " + tr("Link your YouTube"), needLogin(openYoutubeLinkDialog)), mk("🟣 " + tr("Link your Twitch"), needLogin(openTwitchLinkDialog)));
+  box.appendChild(btns);
+  const hint = document.createElement("div"); hint.style.cssText = "font-size:12px;opacity:.65;margin:4px 0 10px;"; hint.textContent = tr("Only for players who upload or stream DarkOnBalls. Links appear after admin approval.");
+  box.appendChild(hint);
+  const list = document.createElement("div"); list.textContent = "…"; box.appendChild(list);
+  const close = mk(tr("Close"), () => { ov.style.display = "none"; }); box.appendChild(close);
+  ov.appendChild(box);
+  try {
+    const [yt, tw] = await Promise.all([dbGet("youtubeLinks").catch(() => null), dbGet("twitchLinks").catch(() => null)]);
+    const YRE = /^https:\/\/www\.youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})$/, TRE = /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/;
+    const m = {};
+    Object.entries(yt || {}).forEach(([u, v]) => { if (v && YRE.test(String(v.url || ""))) (m[u] = m[u] || {}).y = v.url; });
+    Object.entries(tw || {}).forEach(([u, v]) => { if (v && TRE.test(String(v.url || ""))) (m[u] = m[u] || {}).t = v.url; });
+    const uids = Object.keys(m);
+    const pl = window._lastPlayersData || {};
+    const names = await Promise.all(uids.map(async u => (pl[u] && pl[u].name) || ((await dbGet("players/" + u + "/name").catch(() => null)) || "?")));
+    const rows = uids.map((u, i) => ({ u, n: String(names[i]), y: m[u].y, t: m[u].t })).sort((a, b) => a.n.localeCompare(b.n));
+    list.textContent = "";
+    if (!rows.length) { list.textContent = tr("No streamers yet."); return; }
+    rows.forEach(r => {
+      const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid #333;border-radius:8px;padding:6px 10px;margin:5px 0;";
+      const nm = document.createElement("span"); nm.style.cssText = "font-weight:700;color:#00ff88;cursor:pointer;overflow:hidden;text-overflow:ellipsis;"; nm.textContent = dn(r.n);
+      nm.onclick = () => { ov.style.display = "none"; try { openOnlineProfile(r.u); } catch (e) {} };
+      const lk = document.createElement("span");
+      [[r.y, "▶ YouTube", "#ff4444"], [r.t, "🟣 Twitch", "#a970ff"]].forEach(([url, label, col]) => {
+        if (!url) return; const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer nofollow ugc"; a.textContent = label; a.style.cssText = "color:" + col + ";font-weight:700;margin-left:10px;white-space:nowrap;"; lk.appendChild(a);
+      });
+      row.append(nm, lk); list.appendChild(row);
+    });
+  } catch (e) { list.textContent = tr("Error."); }
+}
 function _dailyAdminBtn() {
   const ex = document.getElementById("dailyAdminBtn");
   if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
