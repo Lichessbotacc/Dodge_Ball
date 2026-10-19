@@ -521,6 +521,13 @@ h2::after{
 }
 #eloTable b{font-family:var(--font-display);letter-spacing:1px;color:var(--neon-gold);}
 
+.psoc{width:80%;margin-top:14px;display:flex;flex-direction:column;gap:6px;align-items:stretch;}
+.psoc:empty{display:none;}
+.psoc .psb{display:flex;align-items:center;justify-content:center;gap:6px;margin:0!important;padding:7px 12px!important;font-size:13px!important;font-weight:700;border-radius:999px;border:1.5px solid;background:rgba(255,255,255,.04);text-decoration:none;width:100%;box-sizing:border-box;}
+.psoc .psb.psadd{border-style:dashed;border-color:rgba(255,255,255,.28);color:#cfd6e4;font-weight:600;}
+.psoc .psn{font-size:11px;color:#8b93a6;text-align:center;}
+.psoc .psc{display:flex;gap:6px;justify-content:center;}
+.psoc .psc button{margin:0!important;padding:3px 10px!important;font-size:11px!important;border-radius:999px;background:transparent;color:#8b93a6;border:1px solid rgba(255,255,255,.15);}
 #profileModal{display:none;position:absolute;inset:0;background:rgba(3,3,6,0.85);z-index:200;justify-content:center;align-items:center;backdrop-filter:blur(6px);}
 #profileCard{
   background:linear-gradient(160deg,#1b1b29,#111119);
@@ -5783,43 +5790,36 @@ async function openOnlineProfile(uid) {
             <div class="pbar"><i style="width:${winrate}%;background:#00ff88"></i><i style="width:${totalGames > 0 ? 100 - winrate : 0}%;background:#ff4444"></i></div>
             <div class="prof-label" style="margin-top:4px;">${winrate}% Winrate</div>
           </div>
+          <div id="profSocial" class="psoc"></div>
         </div>
         <div class="pr">
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}</div>
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + (p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + (p.totalEloLost ?? 0))}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
-          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle Brick Breaker", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
+          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
         </div>
       </div>`;
 
-    try {
-      const ytL = await dbGet("youtubeLinks/" + uid).catch(() => null);
-      let ytHtml = "";
-      if (ytL && /^https:\/\/(www\.)?youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})$/.test(String(ytL.url || ""))) {
-        ytHtml = `<a href="${escapeHtml(ytL.url)}" target="_blank" rel="noopener noreferrer nofollow ugc" style="color:#ff4444;font-weight:700;">▶ YouTube</a>`;
+    try {   // YouTube / Twitch: kompakte Chips unter der Winrate (linke Spalte)
+      const box = document.getElementById("profSocial");
+      if (box) {
+        const own = !!(_modMyUid() && _modMyUid() === uid);
+        const YRE = /^https:\/\/(www\.)?youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})$/, TRE = /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/;
+        const [yl, tl, yr, tr_] = await Promise.all([dbGet("youtubeLinks/" + uid).catch(() => null), dbGet("twitchLinks/" + uid).catch(() => null),
+          own ? dbGet("youtubeRequests/" + uid).catch(() => null) : null, own ? dbGet("twitchRequests/" + uid).catch(() => null) : null]);
+        const mkRow = (label, col, link, re, req, openFn, rmFn, name) => {
+          const ok = link && re.test(String(link.url || ""));
+          let h = "";
+          if (ok) h += `<a class="psb" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer nofollow ugc" style="border-color:${col};color:${col};">${label}</a>`;
+          if (own) {
+            if (req) h += `<div class="psn">⏳ ${tr(name + ": waiting for approval")}</div>`;
+            if (!ok && !req) h += `<button class="psb psadd" onclick="${openFn}()">＋ ${tr("Link " + name)}</button>`;
+            else h += `<div class="psc"><button onclick="${openFn}()" title="${tr("Change " + name)}">✎ ${tr("Change")}</button><button onclick="${rmFn}()" title="Remove">✖</button></div>`;
+          }
+          return h;
+        };
+        box.innerHTML = mkRow("▶ YouTube", "#ff5252", yl, YRE, yr, "openYoutubeLinkDialog", "youtubeRemoveOwn", "YouTube") + mkRow("🟣 Twitch", "#a970ff", tl, TRE, tr_, "openTwitchLinkDialog", "twitchRemoveOwn", "Twitch");
       }
-      const ownUid = _modMyUid();
-      if (ownUid && ownUid === uid) {
-        const rq = await dbGet("youtubeRequests/" + uid).catch(() => null);
-        ytHtml += (ytHtml ? " " : "") + (rq ? `<span style="opacity:.7">⏳ ${tr("YouTube: waiting for approval")}</span> ` : "") +
-          `<button onclick="openYoutubeLinkDialog()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">${ytL ? tr("Change YouTube") : tr("Link YouTube")}</button>` +
-          (ytL || rq ? `<button onclick="youtubeRemoveOwn()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">✖</button>` : "");
-      }
-      if (ytHtml) document.getElementById("profileStats").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin-top:10px;">${ytHtml}</div>`);
-    } catch (e) {}
-    try {
-      const twL = await dbGet("twitchLinks/" + uid).catch(() => null);
-      let twHtml = "";
-      if (twL && /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/.test(String(twL.url || ""))) {
-        twHtml = `<a href="${escapeHtml(twL.url)}" target="_blank" rel="noopener noreferrer nofollow ugc" style="color:#a970ff;font-weight:700;">🟣 Twitch</a>`;
-      }
-      if (_modMyUid() && _modMyUid() === uid) {
-        const rq = await dbGet("twitchRequests/" + uid).catch(() => null);
-        twHtml += (twHtml ? " " : "") + (rq ? `<span style="opacity:.7">⏳ ${tr("Twitch: waiting for approval")}</span> ` : "") +
-          `<button onclick="openTwitchLinkDialog()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">${twL ? tr("Change Twitch") : tr("Link Twitch")}</button>` +
-          (twL || rq ? `<button onclick="twitchRemoveOwn()" style="position:static;margin:4px;padding:4px 10px;font-size:12px;">✖</button>` : "");
-      }
-      if (twHtml) document.getElementById("profileStats").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin-top:6px;">${twHtml}</div>`);
     } catch (e) {}
     document.getElementById("profileModal").style.display = "flex";
   } catch(e) {
@@ -12226,6 +12226,7 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
+  "Change":"Ändern",
   "Mon & Thu only":"Nur Mo & Do",
   "Idle Brick Breaker is only open on Mondays and Thursdays (German time).":"Idle Brick Breaker ist nur montags und donnerstags offen (deutsche Zeit).",
   "Opens in":"Öffnet in",
