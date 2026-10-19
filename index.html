@@ -5703,10 +5703,10 @@ async function loadLeaderboard() {
 // directly — read-only, no write capability here at all.
 // Platzierungen (wie in den Ranglisten berechnet) fuer das Profil: Elo, Survival, Streak, Daily Wins
 async function profileRanks(uid) {
-  const out = { elo: "", surv: "", streak: "", dw: "" };
+  const out = { elo: "", surv: "", streak: "", dw: "", idle: "", idleTotal: 0 };
   const tag = i => i >= 0 ? ' <span style="color:#ffd700;font-size:.85em;">#' + (i + 1) + '</span>' : "";
   try {
-    const [pl, sv, sb, dw, bw] = await Promise.all([dbGet("players"), dbGet("survival").catch(() => null), dbGet("streakBoard").catch(() => null), dbGet("dailyWins").catch(() => null), dbGet("dailyBonusWins").catch(() => null)]);
+    const [pl, sv, sb, dw, bw, ib] = await Promise.all([dbGet("players"), dbGet("survival").catch(() => null), dbGet("streakBoard").catch(() => null), dbGet("dailyWins").catch(() => null), dbGet("dailyBonusWins").catch(() => null), dbGet("idleBoard").catch(() => null)]);
     if (!pl) return out;
     const nk = n => String(dn(n)).trim().toLowerCase();
     // Elo (gleiche Regeln wie Elo-Rangliste: min. 1 Partie, ein Eintrag pro Name)
@@ -5728,6 +5728,10 @@ async function profileRanks(uid) {
     const wt = {}; Object.entries(dw || {}).forEach(([u, d]) => { wt[u] = Object.keys(d || {}).length; }); Object.entries(bw || {}).forEach(([u, n]) => { wt[u] = (wt[u] || 0) + (Number(n) || 0); });
     const wr = Object.entries(wt).filter(([u]) => pl[u]).map(([u, w]) => ({ uid: u, wins: w })).filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins);
     out.dw = tag(wr.findIndex(r => r.uid === uid));
+    // Idle Brick Breaker (gleiche Regeln wie die Idle-Rangliste: nur Eintraege ab Neustart, nur existierende Spieler)
+    const ir = Object.entries(ib || {}).filter(([u, r]) => pl[u] && idleFresh(r && r.ts)).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0 }))
+      .filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
+    const ii = ir.findIndex(r => r.uid === uid); out.idle = tag(ii); out.idleTotal = ii >= 0 ? ir[ii].total : 0;
   } catch (e) { console.warn("profile ranks failed", e); }
   return out;
 }
@@ -5784,7 +5788,7 @@ async function openOnlineProfile(uid) {
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}</div>
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + (p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + (p.totalEloLost ?? 0))}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
-          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}</div>
+          <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle Brick Breaker", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
         </div>
       </div>`;
 
