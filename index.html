@@ -11862,7 +11862,8 @@ function idleSideBuild(fr) {
 }
 function idleSideStart() {
   idleSideStop(true);
-  if (!fbReady || !RPC) return;
+  // Nach einem Seiten-Reload ist Firebase oft noch nicht bereit, wenn man Idle oeffnet -> Chat/Leaderboard blieben leer. Jetzt: weiter versuchen, bis es klappt.
+  if (!fbReady || !RPC) { if (document.getElementById("idleOverlay") || !document.getElementById("isMsgs")) _IS.retry = setTimeout(idleSideStart, 600); return; }
   try { _IS.unChat = RPC.onIdleChat(d => { _IS.msgs = d; idleChatRender(); }); } catch (e) {}
   try { _IS.unBoard = dbOn("idleBoard", d => { _IS.board = d || {}; idleBoardSchedule(); }); } catch (e) {}
   _IS.tim = setInterval(() => { idleBoardRender(); }, 5000);   // eigene Zeile live aus dem Spiel
@@ -11873,6 +11874,7 @@ function idleSideStop(keep) {
   if (_IS.unBoard) { try { _IS.unBoard(); } catch (e) {} _IS.unBoard = null; }
   if (_IS.tim) { clearInterval(_IS.tim); _IS.tim = null; }
   if (_IS.rt) { clearTimeout(_IS.rt); _IS.rt = null; }
+  if (_IS.retry) { clearTimeout(_IS.retry); _IS.retry = null; }
   if (!keep) { _IS.prev = {}; _IS.board = null; _IS.msgs = null; }
 }
 function idleChatRender() {
@@ -12883,6 +12885,7 @@ function _twitchAdminBtn() {
   b.onclick = () => openTwitchAdmin();
   bar.appendChild(b);
 }
+
 function _dailyAdminBtn() {
   const ex = document.getElementById("dailyAdminBtn");
   if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
