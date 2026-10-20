@@ -2097,6 +2097,29 @@ async function rpcModYoutubeReject(uid) {
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
   return set(ref(db, "youtubeRequests/" + uid), null);
 }
+// Ein Kanal auf mehreren Accounts: youtubeLinks/{uid} = { url, hide? }. hide:true = im Profil sichtbar, aber NICHT in der Streamers-Liste.
+async function rpcModYoutubeLinkAccount(uid, url) {
+  requireAdmin(); uid = String(uid || ""); url = String(url || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  if (!_YT_CH_RE.test(url)) throw new Error("Bad channel URL.");
+  const ex = (await get(ref(db, "youtubeLinks/" + uid))).val();
+  if (ex && ex.url === url) return;   // schon verknuepft: Einstellung nicht ueberschreiben
+  return set(ref(db, "youtubeLinks/" + uid), { url, hide: true });   // neu verknuepfte Accounts erscheinen nicht in Streamers
+}
+// Genau ein Account der Gruppe (gleiche URL) erscheint in Streamers, alle anderen bekommen hide:true
+async function rpcModYoutubeSetShown(url, shownUid) {
+  requireAdmin(); url = String(url || ""); shownUid = String(shownUid || "");
+  if (!_YT_CH_RE.test(url)) throw new Error("Bad channel URL.");
+  const all = (await get(ref(db, "youtubeLinks"))).val() || {}, upd = {};
+  Object.entries(all).forEach(([u, v]) => { if (v && v.url === url) upd["youtubeLinks/" + u + "/hide"] = (u === shownUid) ? null : true; });
+  if (!upd["youtubeLinks/" + shownUid + "/hide"] && !(shownUid in all)) throw new Error("Account not in group.");
+  return update(ref(db), upd);
+}
+async function rpcModYoutubeUnlink(uid) {
+  requireAdmin(); uid = String(uid || "");
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid)) throw new Error("Bad uid.");
+  return set(ref(db, "youtubeLinks/" + uid), null);
+}
 // ═══ Twitch-Verlinkung (nur mit Admin-Freigabe) ═══
 const _TW_RE = /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/;
 async function rpcTwitchSubmit(channelUrl) {
@@ -2247,7 +2270,7 @@ window._dobRPC = {
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modYoutubeLinkAccount: rpcModYoutubeLinkAccount, modYoutubeSetShown: rpcModYoutubeSetShown, modYoutubeUnlink: rpcModYoutubeUnlink, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugReply: rpcModBugReply, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -13025,10 +13048,40 @@ async function openYoutubeAdmin() {
       <button data-a="1" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✔ Freigeben</button>
       <button data-a="0" data-u="${escapeHtml(u)}" style="position:static;margin:4px;">✖ Ablehnen</button></div>`;
   }).join("") || "<div>Keine offenen Anfragen.</div>";
-  ov.innerHTML = `<div style="background:#111;color:#fff;padding:16px;max-width:520px;width:92%;max-height:80vh;overflow:auto;"><h3>▶ YouTube-Anfragen</h3>${rows}<button id="ytClose" style="position:static;margin-top:10px;">Schließen</button></div>`;
+  // Freigegebene Links, gruppiert nach Kanal: mehrere Accounts pro Kanal, genau einer davon in der Streamers-Liste
+  const links = (await dbGet("youtubeLinks").catch(() => null)) || {};
+  let pl = window._lastPlayersData; if (!pl || !Object.keys(pl).length) pl = (await dbGet("players").catch(() => null)) || {};
+  const nm = u => (pl[u] && pl[u].name) || "?";
+  const groups = {};
+  Object.entries(links).forEach(([u, v]) => { if (v && v.url) (groups[v.url] = groups[v.url] || []).push(u); });
+  const lrows = Object.keys(groups).map((url, gi) => {
+    const accs = groups[url].map(u => {
+      const shown = !(links[u] && links[u].hide);
+      return `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><span style="flex:1;word-break:break-all;">${escapeHtml(nm(u))} <span style="font-size:11px;opacity:.5">${escapeHtml(u)}</span></span>
+        <button data-l="show" data-u="${escapeHtml(u)}" data-url="${escapeHtml(url)}" style="position:static;margin:0;padding:3px 8px;font-size:12px;${shown ? "border-color:#00ff88;color:#00ff88;" : ""}">${shown ? "🎥 in Streamers" : "🎥 anzeigen"}</button>
+        <button data-l="rm" data-u="${escapeHtml(u)}" style="position:static;margin:0;padding:3px 8px;font-size:12px;">✖</button></div>`;
+    }).join("");
+    return `<div style="border:1px solid #444;padding:8px;margin:6px 0;"><div><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></div>${accs}
+      <div style="display:flex;gap:6px;margin-top:6px;"><input data-in="${gi}" placeholder="Weiterer Account (Name)" style="flex:1;min-width:0;padding:4px;background:#222;color:#fff;border:1px solid #555;"><button data-l="add" data-gi="${gi}" data-url="${escapeHtml(url)}" style="position:static;margin:0;padding:3px 8px;font-size:12px;">➕ Verknüpfen</button></div></div>`;
+  }).join("") || "<div>Keine Links.</div>";
+  ov.innerHTML = `<div style="background:#111;color:#fff;padding:16px;max-width:520px;width:92%;max-height:80vh;overflow:auto;"><h3>▶ YouTube-Anfragen</h3>${rows}<h3 style="margin-top:14px;">🔗 Freigegebene Links</h3><div style="font-size:12px;opacity:.6;">Ein Link kann auf mehreren Accounts im Profil stehen. In Streamers erscheint nur der Account mit „in Streamers".</div>${lrows}<button id="ytClose" style="position:static;margin-top:10px;">Schließen</button></div>`;
   ov.querySelector("#ytClose").onclick = () => { ov.style.display = "none"; };
-  ov.querySelectorAll("button[data-u]").forEach(b => b.onclick = async () => {
+  ov.querySelectorAll("button[data-a]").forEach(b => b.onclick = async () => {
     try { b.dataset.a === "1" ? await _modRPC().modYoutubeApprove(b.dataset.u) : await _modRPC().modYoutubeReject(b.dataset.u); } catch (e) { alert("Fehler: " + e.message); }
+    openYoutubeAdmin();
+  });
+  ov.querySelectorAll("button[data-l]").forEach(b => b.onclick = async () => {
+    try {
+      const k = b.dataset.l;
+      if (k === "show") await _modRPC().modYoutubeSetShown(b.dataset.url, b.dataset.u);
+      else if (k === "rm") { if (!confirm("Link von diesem Account entfernen?")) return; await _modRPC().modYoutubeUnlink(b.dataset.u); }
+      else if (k === "add") {
+        const inp = ov.querySelector('input[data-in="' + b.dataset.gi + '"]'), q = ((inp && inp.value) || "").trim().toLowerCase(); if (!q) return;
+        const hits = Object.keys(pl).filter(u => String((pl[u] || {}).name || "").toLowerCase() === q);
+        if (hits.length !== 1) { alert(hits.length ? "Name nicht eindeutig." : "Kein Account mit diesem Namen gefunden."); return; }
+        await _modRPC().modYoutubeLinkAccount(hits[0], b.dataset.url);
+      }
+    } catch (e) { alert("Fehler: " + e.message); }
     openYoutubeAdmin();
   });
 }
@@ -13112,7 +13165,7 @@ async function openStreamers() {
     const [yt, tw] = await Promise.all([dbGet("youtubeLinks").catch(() => null), dbGet("twitchLinks").catch(() => null)]);
     const YRE = /^https:\/\/www\.youtube\.com\/(@[A-Za-z0-9._-]{3,30}|channel\/UC[A-Za-z0-9_-]{22})$/, TRE = /^https:\/\/www\.twitch\.tv\/[a-z0-9_]{3,25}$/;
     const m = {};
-    Object.entries(yt || {}).forEach(([u, v]) => { if (v && YRE.test(String(v.url || ""))) (m[u] = m[u] || {}).y = v.url; });
+    Object.entries(yt || {}).forEach(([u, v]) => { if (v && !v.hide && YRE.test(String(v.url || ""))) (m[u] = m[u] || {}).y = v.url; });   // hide:true = nur im Profil, nicht in Streamers
     Object.entries(tw || {}).forEach(([u, v]) => { if (v && TRE.test(String(v.url || ""))) (m[u] = m[u] || {}).t = v.url; });
     const uids = Object.keys(m);
     const pl = window._lastPlayersData || {};
