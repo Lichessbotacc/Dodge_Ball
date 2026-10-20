@@ -12237,7 +12237,9 @@ async function loadActivityBoard(sel) {   // Aktivitaet: 4 einzelne Ranglisten (
       const w = n(p.wins), l = n(p.losses);
       const c = sel === "games" ? w + l : sel === "surv" ? n(p.survPlayed) : sel === "streak" ? n(p.streakPlayed) : n(p.dailyPlayed);
       return { uid, name: p.name || "?", c, w, l };
-    }).filter(r => r.c > 0).sort((a, b) => b.c - a.c || (a.name < b.name ? -1 : 1)).slice(0, 100);
+    }).filter(r => r.c > 0).sort((a, b) => (b.uid === myUid) - (a.uid === myUid) || b.c - a.c || (a.name < b.name ? -1 : 1))
+      .filter((r, i, arr) => { const k = String(dn(r.name)).trim().toLowerCase(); return arr.findIndex(x => String(dn(x.name)).trim().toLowerCase() === k) === i; })   // ein Eintrag pro Name (wie in der Elo-Liste), der mit den meisten Runden
+      .sort((a, b) => b.c - a.c || (a.name < b.name ? -1 : 1)).slice(0, 100);
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No activity yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.c}</span><span style="font-size:.85em;opacity:.85;">${sel === "games" ? r.w + " / " + r.l : ""}</span></div>`).join("");
