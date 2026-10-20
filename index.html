@@ -1060,6 +1060,12 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <span class="slider"></span>
       </label><br><br>
 
+      <label>Hide score &amp; time in 1v1 / Survival 🙈</label><br>
+      <label class="switch">
+        <input type="checkbox" id="hideHudToggle" onchange="setHideHud(this.checked)">
+        <span class="slider"></span>
+      </label><br><br>
+
       <label>Sound 🔊</label><br>
       <label class="switch">
         <input type="checkbox" id="sfxToggle" checked onchange="SFX.setOn(this.checked)">
@@ -1129,6 +1135,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
+        <button id="lbTabArena" onclick="lbShowTab('arena')" style="margin:0;padding:8px 18px;font-size:14px;">🏟 Arena</button>
         <button id="lbTabActivity" onclick="lbShowTab('activity')" style="margin:0;padding:8px 18px;font-size:14px;">📊 Activity</button>
       </div>
       <div id="lbTable">
@@ -1544,6 +1551,21 @@ async function rpcUpdateMatch(matchId, data) {
   requireUid();
   return update(ref(db, "onlineMatches/" + matchId), data);
 }
+async function rpcAbandonMatchIfStamp(matchId, stamp, payload) {
+  requireUid();
+  return runTransaction(ref(db, "onlineMatches/" + matchId), cur => {
+    if (!cur) return;
+    if (stamp && Number(cur.createdAt) !== Number(stamp)) return;   // anderes (neueres) Match mit gleicher ID: nicht anfassen
+    const n = Object.assign({}, cur, payload);
+    Object.keys(n).forEach(k => { if (n[k] === null) delete n[k]; });
+    return n;
+  });
+}
+async function rpcRemoveArenaEntry(aid) {
+  const uid = requireUid();
+  if (!/^[0-9]{13}$/.test(String(aid))) throw new Error("Bad arena id.");
+  return remove(ref(db, "arenas/" + aid + "/" + uid));
+}
 async function rpcSetMatchPath(matchId, subPath, data) {
   requireUid();
   return set(ref(db, "onlineMatches/" + matchId + "/" + subPath), data);
@@ -1836,6 +1858,13 @@ async function rpcBugReportSend(data, media) {
   }
   await set(r, rec);
   return r.key;
+}
+// Antworten auf Reports: schreiben nur der Admin (Rules!), lesen nur der Empfaenger selbst -> bugReplies/{uid}/{reportId}
+async function rpcModBugReply(uid, id, text) {
+  requireAdmin();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(uid)) || !/^[A-Za-z0-9_-]{1,40}$/.test(String(id))) throw new Error("Bad id.");
+  text = String(text || "").trim().slice(0, 1000); if (!text) throw new Error("Empty reply.");
+  return set(ref(db, "bugReplies/" + uid + "/" + id), { text, ts: Date.now() });
 }
 async function rpcModBugRemove(id) {
   requireAdmin(); if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(id))) throw new Error("Bad id.");
@@ -2218,7 +2247,7 @@ window._dobRPC = {
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
   modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
-  bugReportSend: rpcBugReportSend, modBugRemove: rpcModBugRemove,
+  bugReportSend: rpcBugReportSend, modBugReply: rpcModBugReply, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
@@ -2227,7 +2256,7 @@ window._dobRPC = {
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
   sendInvite: rpcSendInvite, removeOwnInvite: rpcRemoveOwnInvite,
-  createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, setMatchPath: rpcSetMatchPath,
+  createMatch: rpcCreateMatch, updateMatch: rpcUpdateMatch, removeArenaEntry: rpcRemoveArenaEntry, abandonMatchIfStamp: rpcAbandonMatchIfStamp, setMatchPath: rpcSetMatchPath,
   removeMatch: rpcRemoveMatch, onMatch: rpcOnMatch, getMatch: rpcGetMatch, claimMatchEnd: rpcClaimMatchEnd,
   setHeadToHead: rpcSetHeadToHead, getHeadToHead: rpcGetHeadToHead,
   setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
@@ -2347,8 +2376,15 @@ async function onFirebaseAndAuthReady() {
     if (readActiveMatchMarker()) {      // last session ended in the middle of an online match
       const mk0 = readActiveMatchMarker();
       clearActiveMatchMarker();
-      const loss = applyForfeitLoss(mk0 && mk0.loss, mk0 && mk0.opp);
-      try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + loss + " ELO)", "#ff4444"); } catch (e) {}
+      let _stale = false;   // Strafe nur, wenn das Match serverseitig wirklich noch laeuft und der Marker frisch ist
+      try {
+        if (!mk0 || !mk0.id || (Date.now() - (Number(mk0.ts) || 0)) > 6 * 3600 * 1000) _stale = true;
+        else { const cm = await RPC.getMatch(mk0.id); if (!cm || cm.status === "done" || cm.status === "abandoned" || (mk0.stamp && Number(cm.createdAt) !== Number(mk0.stamp))) _stale = true; }
+      } catch (e) {}
+      if (!_stale) {
+        const loss = applyForfeitLoss(mk0 && mk0.loss, mk0 && mk0.opp);
+        try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + loss + " ELO)", "#ff4444"); } catch (e) {}
+      }
     }
     await pushAccountToFirebase();
 
@@ -3387,14 +3423,15 @@ function dailyIdxFor(key, depth) {
 let _dailyRunIdx = null;   // Modus-Index, mit dem der aktuelle Daily-Lauf gestartet wurde (wird mit dem Eintrag gespeichert)
 let _dailyTest = null;   // nur Admin: Testlauf eines beliebigen Modus (wird nie gespeichert)
 function dailyChallengeFor(key) { return DAILY_CHALLENGES[dailyIdxFor(key)]; }
-function dailyActiveCh() { return _dailyTest || dailyChallengeFor(_dailyKey); }
+let _dailyFrozen = null;
+function dailyActiveCh() { return _dailyTest || _dailyFrozen || dailyChallengeFor(_dailyKey); }
 let _dailyPicksLoaded = false;
 async function dailyPicksRefresh() {
   try { if (typeof RPC !== "undefined" && RPC) { const v = await RPC.get("dailyPick"); _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); _dailyPicksLoaded = true; } } catch (e) { console.warn("dailyPick load failed", e); }
   try { updDailyBtn(); } catch (e) {}
 }
 async function startDaily() {
-  await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 2500))]);
+  for (let i = 0; i < 12 && !_dailyPicksLoaded; i++) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 500))]);
   // Modus unsicher (Festlegung noch nicht geladen) -> nicht starten, sonst landet ein Lauf im falschen Modus auf der Tafel
   if (!_dailyPicksLoaded && typeof fbReady !== "undefined" && fbReady) { alert("Could not load today's mode. Check your connection and try again."); return; }
   startSurvival(true);
@@ -3636,6 +3673,7 @@ function startSurvival(daily, testIdx) {
   _dailyKey = daily === true ? dailyKeyNow() : null;
   _dailyTest = (daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null;
   _dailyRunIdx = _dailyKey ? dailyIdxFor(_dailyKey) : null;
+  _dailyFrozen = (_dailyKey && !_dailyTest) ? dailyChallengeFor(_dailyKey) : null;   // Modus fuer den ganzen Lauf einfrieren (kein Wechsel, wenn spaeter Picks laden)
   if (!guestGate("survival")) return;
   countModeRun(_dailyKey ? "dailyPlayed" : "survPlayed");   // Daily-Laeufe zaehlen NICHT als Survival-Runs
   try { cleanupOnline(); } catch (e) {}
@@ -4135,7 +4173,8 @@ function lbShowTab(tab) {
   if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
   const _li = document.getElementById("lbTabIdle"); if (_li) _li.style.borderColor = tab === "idle" ? "#00ff88" : "";
   const _la = document.getElementById("lbTabActivity"); if (_la) _la.style.borderColor = tab === "activity" ? "#00ff88" : "";
-  if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
+  const _lar = document.getElementById("lbTabArena"); if (_lar) _lar.style.borderColor = tab === "arena" ? "#00ff88" : "";
+  if (tab === "arena") loadArenaBoard(); else if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 // Falls das Leaderboard schon offen war, als die Verbindung hergestellt wurde: einmal automatisch neu laden
 window.addEventListener("dobAuthReady", () => {
@@ -4144,6 +4183,32 @@ window.addEventListener("dobAuthReady", () => {
     if (s && s.style.display === "flex" && !(fbReady && RPC && document.querySelectorAll("#lbTable .lb-row").length > 1)) lbShowTab(_lbTab);
   }, 600);
 });
+async function loadArenaBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Arena points (last 24 h)</span><span></span></div>';
+  const my = ++_lbToken;
+  const head = t.innerHTML;
+  t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
+  if (!(await _lbReady(t, head))) return;
+  try {
+    const ar = await _dbGetT("arenas");
+    if (my !== _lbToken) return;
+    t.innerHTML = head;
+    const since = Date.now() - 24 * 3600000, agg = {};
+    Object.entries(ar || {}).forEach(([id, ents]) => {
+      if (!/^\d{13}$/.test(id) || Number(id) < since || !ents) return;
+      Object.entries(ents).forEach(([uid, e]) => {
+        if (!e || !e.name || uid.indexOf("bot__") === 0) return;
+        const a = agg[uid] || (agg[uid] = { uid, name: e.name, pts: 0, games: 0, wins: 0 });
+        a.pts += Number(e.score) || 0; a.games += Number(e.games) || 0; a.wins += Number(e.wins) || 0; a.name = e.name;
+      });
+    });
+    const rows = Object.values(agg).filter(r => r.pts > 0).sort((a, b) => b.pts - a.pts || b.wins - a.wins).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No arena points yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.pts} pts · ${r.wins}W/${r.games - r.wins}L</span><span></span></div>`).join("");
+  } catch (e) { if (my === _lbToken) _lbErr(t, head); }
+}
 async function loadStreakBoard() {
   const t = document.getElementById("lbTable");
   t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Level</span><span></span></div>';
@@ -4440,7 +4505,7 @@ const OPP_TIMEOUT_PLAYING_MS  = 3000;      // kein Lebenszeichen fuer 3 s -> sof
 const OPP_TIMEOUT_WAITING_MS  = 3000;      // auch vor dem Start: nicht im Match erschienen -> nach 3 s verloren
 let onlineDisarm = null;
 function readActiveMatchMarker() { try { return JSON.parse(localStorage.getItem("dobActiveMatch") || "null"); } catch (e) { return null; } }
-function setActiveMatchMarker(id, loss, opp) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, opp: opp || null, ts: Date.now() })); } catch (e) {} }
+function setActiveMatchMarker(id, loss, opp) { try { localStorage.setItem("dobActiveMatch", JSON.stringify({ id, loss, opp: opp || null, ts: Date.now(), stamp: onlineMatchStamp || 0 })); } catch (e) {} }
 function clearActiveMatchMarker() { try { localStorage.removeItem("dobActiveMatch"); } catch (e) {} }
 function disarmOnlineDisconnect() {
   if (onlineDisarm) { try { onlineDisarm.cancel().catch(() => {}); } catch (e) {} onlineDisarm = null; }
@@ -5337,6 +5402,19 @@ function drawBallImageAt(c, x, y, r, color) {   // Bild im Kreis (gleiche Groess
 }
 _loadBallImg();
 
+function setHideHud(on) {
+  document.body.classList.toggle("hide-hud", !!on);
+  try { localStorage.setItem("dobHideHud", on ? "1" : "0"); } catch (e) {}
+}
+(function () {
+  const st = document.createElement("style");
+  st.textContent = "body.hide-hud.mode-online #ui, body.hide-hud.mode-online #onlineHUD, body.hide-hud.mode-online #survivalHUD, body.hide-hud.mode-survival #ui, body.hide-hud.mode-survival #survivalHUD { display:none !important; }";
+  document.head.appendChild(st);
+  let on = false; try { on = localStorage.getItem("dobHideHud") === "1"; } catch (e) {}
+  const apply = () => { document.body.classList.toggle("hide-hud", on); const t = document.getElementById("hideHudToggle"); if (t) t.checked = on; };
+  if (document.body) apply(); else document.addEventListener("DOMContentLoaded", apply);
+  document.addEventListener("DOMContentLoaded", apply);
+})();
 function setBallTrail(enabled) {
   ballTrailEnabled = enabled;
   localStorage.setItem("dobBallTrail", enabled ? "1" : "0");
@@ -5816,7 +5894,7 @@ async function openOnlineProfile(uid) {
           <div id="profSocial" class="psoc"></div>
         </div>
         <div class="pr">
-          <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}</div>
+          <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}${R("Joined", p.createdAt && isFinite(Number(p.createdAt)) ? new Date(Number(p.createdAt)).toLocaleDateString() : "–")}</div>
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + (p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + (p.totalEloLost ?? 0))}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
@@ -6318,9 +6396,9 @@ function cleanupOnline() {
       const loss = forfeitChange(false);
       applyForfeitLoss(loss, onlineOpponent && onlineOpponent.uid);
       pushAccountToFirebase().catch(() => {});
-      RPC.updateMatch(onlineMatchId, { status: "abandoned", forfeitBy: myUid, eloChange: loss, postChat: null }).catch(() => {});
+      RPC.abandonMatchIfStamp(onlineMatchId, onlineMatchStamp, { status: "abandoned", forfeitBy: myUid, eloChange: loss, postChat: null }).catch(() => {});
     } else {
-      RPC.updateMatch(onlineMatchId, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
+      RPC.abandonMatchIfStamp(onlineMatchId, onlineMatchStamp, onlineVsBot ? { status: "abandoned" } : { status: "abandoned", postChat: null }).catch(() => {});
     }
   }
   if (onlineVsBot && onlineArenaId) { try { arenaBotRelease(onlineArenaId); } catch (e) {} }
@@ -6862,6 +6940,7 @@ function startOnlineGame(matchData) {
   // RULES.txt), since both are listed participant uids.
   const matchUnsub = RPC.onMatch(onlineMatchId, (data) => {
     if (!data) return;
+    if (onlineMatchStamp && Number(data.createdAt) && Number(data.createdAt) !== onlineMatchStamp) return;   // Altlast eines frueheren Matches mit gleicher ID ignorieren
 
     // Opponent heartbeat: any change of their ping / position / (as host) ball counts as "alive"
     onlineMatchStatus = data.status;
@@ -7197,7 +7276,7 @@ async function handleOnlineResult(winnerName, change) {
   window._lastMatchSecs = Math.max(0, (Date.now() - startTime) / 1000);
   stopViewerCount();
   clearActiveMatchMarker();
-  armOnlineDisconnect(false);
+  disarmOnlineDisconnect();   // Match ist beendet: ein spaeterer Verbindungsabbruch darf es nicht mehr auf 'abandoned' setzen
   campWarn(false);
   running = false;
   clearAllTimers();
@@ -11587,6 +11666,15 @@ function arenaLeave() {
   if (arenaSess && arenaSess.unsub) { try { arenaSess.unsub(); } catch (e) {} }
   arenaSess = null;
 }
+async function arenaLeaveFully() {
+  const id = arenaSess && arenaSess.id;
+  const pre = !!(arenaSess && arenaSess.pre);
+  try { arenaLeave(); } catch (e) {}
+  try { cleanupOnline(); } catch (e) {}
+  closeArenaOv();
+  if (id && pre) { try { await RPC.removeArenaEntry(id); } catch (e) { console.warn("arena leave failed", e); } }
+  try { leagueToast("🚪 Left the arena", "#8b93a6"); } catch (e) {}
+}
 function arenaNext() {
   if (!arenaSess) return;
   closeArenaOv();
@@ -11666,7 +11754,7 @@ function openArena() {
     + '<div class="aoT lg-table" style="flex:none;min-height:120px;max-height:none;overflow:visible;"></div>'
     + '<div class="aoC" style="flex:none;display:none;flex-direction:column;gap:6px;background:#12141c;border:0.5px solid #2a2e3c;border-left:3px solid #00c8ff;border-radius:10px;padding:8px;"><b style="font-size:13px;">💬 Arena chat <span style="color:#8b93a6;font-weight:400;font-size:11px;">(deleted after the arena)</span></b><div class="aoCM" style="height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;font-size:13px;"></div><div style="display:flex;gap:6px;"><input class="aoCI" type="text" maxlength="200" placeholder="Message…" style="flex:1;width:auto;min-width:0;margin:0;padding:7px 9px;font-size:13px;"><button class="aoCS" style="margin:0;padding:7px 12px;font-size:13px;">Send</button></div></div>'
     + '<details class="lg-how"><summary>❓ How does it work?</summary><div style="padding:2px 16px 14px;font-size:13px;line-height:1.5;color:#cfd6e4;">Every full hour a 57-minute arena starts. Join any time and play as many 1v1 games as you can – you are paired automatically with players of similar rank.<br><b>Win = 2 points</b>, loss = 0. After <b>2 wins in a row</b> every further win is worth <b>4 points 🔥</b> until you lose. Ties are broken by performance. Arena wins also change your ELO and count for the Weekly League. Leaving a running game counts as a loss.</div></details>'
-    + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button></div>';
+    + '<button class="aoB" style="margin:0;"></button><button class="aoP" style="margin:0;display:none;border-color:#ffd700;"></button><button class="aoL" style="margin:0;display:none;border-color:#ff4444;color:#ff8888;">🚪 Leave arena</button></div>';
   document.body.appendChild(ov);
   ov.querySelector(".aoX").onclick = arenaLeaveView;
   // (kein Schliessen/Verlassen mehr per Tipp neben die Ansicht - auf breiten Bildschirmen fuehrte jeder Tipp in den leeren Bereich ins Menue)
@@ -11702,6 +11790,9 @@ function openArena() {
     pb.style.display = (arenaSess && !arenaSess.pre) ? "" : "none";
     pb.textContent = arenaSess && arenaSess.paused ? "▶ Resume" : "⏸ Pause";
     pb.onclick = () => { if (arenaSess && arenaSess.paused) arenaResume(); else arenaPause(); };
+    const lb = ov.querySelector(".aoL");
+    lb.style.display = (arenaSess && arenaSess.pre) ? "" : "none";
+    lb.onclick = () => arenaLeaveFully();
   };
   ov.querySelector(".aoX").onclick = arenaLeaveView;
   arenaLobbyIv = setInterval(render, 1000);
@@ -12207,6 +12298,9 @@ function watchIdlePlayer(uid) {
 }
 window.watchIdlePlayer = watchIdlePlayer; window.closeIdleWatch = closeIdleWatch;
 document.addEventListener("visibilitychange", () => { if (document.hidden) { try { const f = document.querySelector("#idleOverlay iframe"); if (f && window.__idleCfg && window.__idleCfg.persist) f.contentWindow.__ib.save(); } catch (e) {} } });
+// Geraetewechsel: beim Verstecken/Schliessen der Seite den Idle-Stand sofort (ohne 30-s-Drossel) in die Cloud schreiben
+document.addEventListener("visibilitychange", () => { if (document.hidden) { try { idleCloudSave(true); } catch (e) {} } });
+window.addEventListener("pagehide", () => { try { idleCloudSave(true); } catch (e) {} });
 
 const _IDLE_SUF = ["", "K", "M", "B", "T", "q", "Q", "s", "S", "O", "N"];
 function idleFmt(v) {
@@ -14155,6 +14249,12 @@ async function modDeleteChatMsg(key) {
       }
       const del = document.createElement("button"); del.textContent = "🗑 Delete"; del.style.cssText = "margin:0;padding:4px 10px;font-size:12px;";
       del.onclick = async () => { if (!confirm("Delete this report?")) return; try { await rpc().modBugRemove(id); } catch (e) { alert("Failed: " + e.message); } };
+      const rb = document.createElement("button"); rb.textContent = "💬 Reply"; rb.style.cssText = "margin:0;padding:4px 10px;font-size:12px;";
+      rb.onclick = async () => {
+        const t = prompt("Reply to " + (r.name || "?") + ":"); if (!t || !t.trim()) return;
+        try { await rpc().modBugReply(r.uid, id, t); rb.textContent = "✅ Replied"; } catch (e) { alert("Failed: " + e.message); }
+      };
+      row.appendChild(rb);
       row.appendChild(del); d.appendChild(row); d.appendChild(mm); list.appendChild(d);
     });
   }
@@ -14173,6 +14273,7 @@ async function modDeleteChatMsg(key) {
         + '<div id="bugThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"></div>'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label for="bugFile" style="cursor:pointer;padding:7px 12px;font-size:13px;border:1px solid rgba(255,255,255,.25);border-radius:8px;">📎 Add image / video</label><input id="bugFile" type="file" accept="image/*,video/*" multiple style="display:none;"><span style="font-size:11px;color:#8b93a6;">up to 3 images + 1 video (max. 5 MB)</span></div>'
         + '<div id="bugMsg" style="min-height:18px;font-size:13px;margin:8px 0;"></div>'
+        + '<div id="bugReplies" style="display:none;margin:4px 0 12px;"><b style="font-size:13px;color:#00c8ff;">💬 Replies to your reports</b><div id="bugRepList" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div></div>'
         + '<button id="bugSend" style="margin:0;padding:9px 20px;font-size:14px;">Send report</button></div>'
         + '<div id="bugAllPane" style="display:none;overflow-y:auto;margin-top:10px;"><div id="bugList" style="display:flex;flex-direction:column;gap:8px;"></div></div></div>';
       ov.addEventListener("click", e => { if (e.target === ov) ov.style.display = "none"; });
@@ -14182,6 +14283,15 @@ async function modDeleteChatMsg(key) {
       $("bugTabNew").onclick = () => setTab("new"); $("bugTabAll").onclick = () => setTab("all");
     }
     ov.style.display = "flex";
+    (async () => {   // eigene Antworten laden (nur lesbar fuer den Empfaenger)
+      try {
+        const uid = window.myUid || (typeof myUid !== "undefined" ? myUid : null); if (!uid) return;
+        const o = await rpc().get("bugReplies/" + uid); const box = $("bugReplies"), l = $("bugRepList"); if (!box || !l) return;
+        l.textContent = ""; const ks = o ? Object.keys(o).sort((a, b) => (o[b].ts || 0) - (o[a].ts || 0)) : [];
+        box.style.display = ks.length ? "" : "none";
+        ks.forEach(k => { const d = document.createElement("div"); d.style.cssText = "padding:8px;border-left:3px solid #00c8ff;background:rgba(0,200,255,.08);border-radius:6px;font-size:13px;white-space:pre-wrap;word-break:break-word;"; d.textContent = (o[k].ts ? new Date(o[k].ts).toLocaleDateString() + " · " : "") + (o[k].text || ""); l.appendChild(d); });
+      } catch (e) {}
+    })();
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
   };
 })();
