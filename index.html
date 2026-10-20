@@ -1275,7 +1275,8 @@ window.SFX = (function () {
     eloup:[{f:G5,t:0,d:.15,g:.18},{f:C6,t:.1,d:.3,g:.2}], elodown:[{f:E5,t:0,d:.15,g:.18},{f:B4,t:.1,d:.3,g:.18}]
   };
   function init() {
-    if (ctx) { if (ctx.state === "suspended") ctx.resume(); return !!ctx; }
+    if (ctx && ctx.state === "closed") ctx = null;
+    if (ctx) { if (ctx.state !== "running") { try { var rp = ctx.resume(); if (rp && rp.catch) rp.catch(function () {}); } catch (e) {} } return !!ctx; }
     var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
     try {
       ctx = new AC(); master = ctx.createGain(); master.gain.value = st.vol;
@@ -1303,7 +1304,12 @@ window.SFX = (function () {
     try {
       if (!st.on || !S[name] || !init()) return;
       var now = Date.now(); if (last[name] && now - last[name] < 40) return; last[name] = now;
-      var t0 = ctx.currentTime + .01; S[name].forEach(function (n) { tone(n, t0); });
+      var go = function () { var t0 = ctx.currentTime + .01; S[name].forEach(function (n) { tone(n, t0); }); };
+      if (ctx.state === "running") { go(); return; }
+      // Kontext schlaeft (Tab im Hintergrund, iOS "interrupted", Arena ohne Klick): erst aufwecken, dann spielen (nur wenn nicht zu spaet)
+      var rp = ctx.resume();
+      if (rp && rp.then) rp.then(function () { if (Date.now() - now < 1500 && ctx.state === "running") go(); }).catch(function () {});
+      else go();
     } catch (e) {}
   }
   function save() { try { localStorage.setItem("dobSfx", JSON.stringify(st)); } catch (e) {} }
@@ -1319,7 +1325,12 @@ window.SFX = (function () {
     previewVol: function () { play("click"); }
   };
   // Automatisch fuer alle Buttons: Klick, Hover, Zurueck, Schalter
-  document.addEventListener("pointerdown", function () { if (st.on) init(); }, true);
+  // iOS/Safari entsperrt Audio nur bei touchend/click/keydown (pointerdown reicht nicht) -> alle Wege nutzen; zusaetzlich beim Zurueckkehren in den Tab
+  ["pointerdown", "pointerup", "touchstart", "touchend", "click", "keydown"].forEach(function (ev) {
+    document.addEventListener(ev, function () { if (st.on) init(); }, true);
+  });
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && st.on && ctx && ctx.state !== "running") { try { ctx.resume(); } catch (e) {} } });
+  window.addEventListener("focus", function () { if (st.on && ctx && ctx.state !== "running") { try { ctx.resume(); } catch (e) {} } });
   document.addEventListener("click", function (e) {
     var b = e.target && e.target.closest && e.target.closest("button");
     if (!b || b.disabled) return;
@@ -1964,7 +1975,7 @@ async function rpcLogEloGame(key, data) {
   const uid = requireUid();
   if (!data || data.a !== uid || !data.b) throw new Error("Not your game.");
   key = String(key).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 150);
-  return set(ref(db, "eloGames/" + key), { a: uid, b: String(data.b), d: Math.round(Number(data.d) || 0), bot: data.bot ? 1 : 0, ts: Date.now() });
+  return set(ref(db, "eloGames/" + key), { a: uid, b: String(data.b), d: Math.round((Number(data.d) || 0) * 10) / 10, bot: data.bot ? 1 : 0, ts: Date.now() });
 }
 // Ban: ELO aller Gegner des Gebannten korrigieren (Sieg gegen ihn -> ELO zurueck weg, Niederlage -> ELO zurueck) + Online-Bot
 // + Hinweis an jeden betroffenen Spieler (sanctions/{uid}/banRefunds). Idempotent: verarbeitete Eintraege werden geloescht.
@@ -1999,17 +2010,17 @@ async function rpcModBanEloRefund(bannedUid) {
   uids.forEach((u, i) => {
     const pl = sn[i];
     if (!pl || typeof pl.elo !== "number") return;          // Account existiert nicht mehr
-    const ne = Math.max(100, Math.round(pl.elo + refund[u]));
+    const ne = Math.max(100, Math.round((pl.elo + refund[u]) * 10) / 10);
     up["players/" + u + "/elo"] = ne;
     if (typeof pl.highestElo === "number" && ne > pl.highestElo) up["players/" + u + "/highestElo"] = ne;
     if (typeof pl.lowestElo === "number" && ne < pl.lowestElo) up["players/" + u + "/lowestElo"] = ne;
-    up["sanctions/" + u + "/banRefunds/" + banId] = { ts: now, delta: ne - Math.round(pl.elo), games: count[u] };
+    up["sanctions/" + u + "/banRefunds/" + banId] = { ts: now, delta: Math.round((ne - pl.elo) * 10) / 10, games: count[u] };
   });
   if (botGames && botRefund !== 0) {
     try {
       const bp = (await get(ref(db, "players/" + BOT))).val();
       if (bp && typeof bp.elo === "number") {
-        const ne = Math.max(100, Math.round(bp.elo + botRefund));
+        const ne = Math.max(100, Math.round((bp.elo + botRefund) * 10) / 10);
         up["players/" + BOT + "/elo"] = ne;
         if (typeof bp.highestElo === "number" && ne > bp.highestElo) up["players/" + BOT + "/highestElo"] = ne;
         if (typeof bp.lowestElo === "number" && ne < bp.lowestElo) up["players/" + BOT + "/lowestElo"] = ne;
@@ -2411,7 +2422,7 @@ async function onFirebaseAndAuthReady() {
       } catch (e) {}
       if (!_stale) {
         const loss = applyForfeitLoss(mk0 && mk0.loss, mk0 && mk0.opp);
-        try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + loss + " ELO)", "#ff4444"); } catch (e) {}
+        try { leagueToast(tr("Match abandoned – penalty applied") + " (−" + fmtElo(loss) + " ELO)", "#ff4444"); } catch (e) {}
       }
     }
     await pushAccountToFirebase();
@@ -4527,10 +4538,17 @@ function glickoResult(me, opp, won) {
   // Der Verlierer verliert genau so viel, wie der Sieger bekommt (max. 10, passt zu den Database-Rules).
   const em = Number(me.elo) || 1500, eo = Number(opp.elo) || 1500;
   const wElo = won ? em : eo, lElo = won ? eo : em;          // Elo des Siegers / Verlierers
-  const step = Math.floor(Math.abs(lElo - wElo) / 100);
-  const gain = Math.max(1, Math.min(10, lElo > wElo ? 5 + step : 5 - step));
+  const diff = Math.abs(lElo - wElo);
+  let gain;
+  if (lElo > wElo) gain = Math.min(10, 5 + Math.floor(diff / 100));          // Underdog-Sieg: +1 pro 100 Abstand extra (max. 10)
+  else if (diff < 500) gain = 5 - Math.floor(diff / 100);                    // Favorit: 5,4,3,2,1 (Abstand 0-499)
+  else gain = Math.max(0.1, 0.9 - 0.1 * Math.floor((diff - 500) / 50));      // ab 500 Abstand: 0.9, dann alle 50 weiter -0.1 (0.8, 0.7 ... min. 0.1)
+  gain = Math.round(gain * 10) / 10;
   return { delta: clampEloChange(won ? gain : -gain), rd: G2.DEF_RD, vol: G2.DEF_VOL };
 }
+// Elo intern mit Dezimalstellen (wie Lichess), angezeigt wird ueberall gerundet; Aenderungen (+0.9) mit einer Nachkommastelle
+function r1(x) { return Math.round((Number(x) || 0) * 10) / 10; }
+function fmtElo(x) { const v = r1(Math.abs(Number(x) || 0)); return Number.isInteger(v) ? String(v) : v.toFixed(1); }
 function normalEloChange(winnerElo, loserElo) {   // Fallback ohne Account-Objekte
   const w = { elo: Number(winnerElo) || 1500 }, l = { elo: Number(loserElo) || 1500 };
   return Math.abs(glickoResult(w, l, true).delta);
@@ -4560,10 +4578,10 @@ function applyForfeitLoss(change, oppUid) {
   if (!onlineAccount) return 0;
   const loss = Math.abs(clampEloChange(Number(change) || 10));
   onlineAccount = sanitizeAccount(onlineAccount);
-  onlineAccount.elo = Math.max(100, onlineAccount.elo - loss);
+  onlineAccount.elo = r1(Math.max(100, onlineAccount.elo - loss));
   onlineAccount.losses++;
   onlineAccount.currentStreak = 0;
-  onlineAccount.totalEloLost += loss;
+  onlineAccount.totalEloLost = r1(onlineAccount.totalEloLost + loss);
   if (onlineAccount.elo < onlineAccount.lowestElo) onlineAccount.lowestElo = onlineAccount.elo;
   if (oppUid) logEloGame(oppUid, -loss, false);
   saveAccountLocal();
@@ -5593,7 +5611,7 @@ let onlineBallSpawnTimer  = 0;
 let onlineSearchStartTime = 0;
 let onlineBotMatchTimeout = null;
 let onlineBotOfferTimeout = null;   // zeigt nach 10s den Bot-Hinweis
-let onlineBotElo = parseInt(localStorage.getItem("onlineBotElo")) || 1500;
+let onlineBotElo = parseFloat(localStorage.getItem("onlineBotElo")) || 1500;
 let onlineSimTick = 0;
 let onlineMatchStamp = 0;
 let arenaSess = null, onlineArenaId = null;   // Hourly Arena: aktive Sitzung / Arena-ID des laufenden Matches
@@ -5793,7 +5811,7 @@ function showEloAnimation(change) {
   el.offsetHeight;
   el.style.color      = won ? "#00ff88" : "#ff4444";
   el.style.textShadow = `0 0 40px ${won ? "#00ff88" : "#ff4444"}`;
-  el.innerHTML = (won ? "✓ +" : "✗ ") + Math.round(Math.abs(change)) + " ELO<br>"
+  el.innerHTML = (won ? "✓ +" : "✗ −") + fmtElo(change) + " ELO<br>"
     + (won ? '<span style="font-size:40px">WIN</span>' : '<span style="font-size:40px">LOST</span>');
   el.style.animation = "eloPopIn 2.5s ease forwards";
 }
@@ -5934,7 +5952,7 @@ async function openOnlineProfile(uid) {
         </div>
         <div class="pr">
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}${R("Joined", p.createdAt && isFinite(Number(p.createdAt)) ? new Date(Number(p.createdAt)).toLocaleDateString() : "–")}</div>
-          <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + (p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + (p.totalEloLost ?? 0))}</div>
+          <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
         </div>
@@ -7368,6 +7386,7 @@ async function handleOnlineResult(winnerName, change) {
     if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
   }
 
+  const myOldExact = onlineAccount.elo;
   const myOriginalElo = Math.round(onlineAccount.elo);
   const oppOriginalElo = onlineOpponent ? Math.round(onlineOpponent.elo) : 1500;
 
@@ -7375,13 +7394,13 @@ async function handleOnlineResult(winnerName, change) {
 
   onlineAccount.rd = _gMe.rd; onlineAccount.vol = _gMe.vol; onlineAccount.rdTs = Date.now();
   if (won) {
-    onlineAccount.elo += eloChange;
+    onlineAccount.elo = r1(onlineAccount.elo + eloChange);
     onlineAccount.wins++;
     onlineAccount.currentStreak++;
     if (onlineAccount.currentStreak > onlineAccount.bestStreak) {
       onlineAccount.bestStreak = onlineAccount.currentStreak;
     }
-    onlineAccount.totalEloGained += eloChange;
+    onlineAccount.totalEloGained = r1(onlineAccount.totalEloGained + eloChange);
 
     if (onlineAccount.elo > onlineAccount.highestElo) {
       onlineAccount.highestElo = onlineAccount.elo;
@@ -7392,10 +7411,10 @@ async function handleOnlineResult(winnerName, change) {
       onlineAccount.bestWinOpp = oppName;
     }
   } else {
-    onlineAccount.elo = Math.max(100, onlineAccount.elo - eloChange);
+    onlineAccount.elo = r1(Math.max(100, onlineAccount.elo - eloChange));
     onlineAccount.losses++;
     onlineAccount.currentStreak = 0;
-    onlineAccount.totalEloLost += eloChange;
+    onlineAccount.totalEloLost = r1(onlineAccount.totalEloLost + eloChange);
 
     if (onlineAccount.elo < onlineAccount.lowestElo) {
       onlineAccount.lowestElo = onlineAccount.elo;
@@ -7408,9 +7427,9 @@ async function handleOnlineResult(winnerName, change) {
   }
 
   if (!onlineVsBot && onlineOpponent && Number.isFinite(Number(onlineOpponent.elo))) {
-    onlineOpponent.elo = won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange;
+    onlineOpponent.elo = r1(won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange);
   }
-  logEloGame(oppUid, onlineAccount.elo - myOriginalElo, onlineVsBot);
+  logEloGame(oppUid, r1(onlineAccount.elo - myOldExact), onlineVsBot);
   if (onlineArenaId) { arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid); if (onlineVsBot) arenaRecordBot(onlineArenaId, !won, myOriginalElo, myUid); }
   saveAccountLocal();
   updateAccountBtn();
@@ -7442,11 +7461,11 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent = sanitizeAccount(onlineOpponent);
 
     if (won) {
-      onlineOpponent.elo = Math.max(100, onlineOpponent.elo - oppEloChange);
+      onlineOpponent.elo = r1(Math.max(100, onlineOpponent.elo - oppEloChange));
       onlineOpponent.rd = _gOpp.rd; onlineOpponent.vol = _gOpp.vol; onlineOpponent.rdTs = Date.now();
       onlineOpponent.losses = (onlineOpponent.losses ?? 0) + 1;
       onlineOpponent.currentStreak = 0;
-      onlineOpponent.totalEloLost = (onlineOpponent.totalEloLost ?? 0) + oppEloChange;
+      onlineOpponent.totalEloLost = r1((onlineOpponent.totalEloLost ?? 0) + oppEloChange);
 
       if (onlineOpponent.elo < (onlineOpponent.lowestElo ?? onlineOpponent.elo)) {
         onlineOpponent.lowestElo = onlineOpponent.elo;
@@ -7457,9 +7476,9 @@ async function handleOnlineResult(winnerName, change) {
         onlineOpponent.worstLossOpp = onlineAccount.name;
       }
     } else {
-      onlineOpponent.elo += oppEloChange;
+      onlineOpponent.elo = r1(onlineOpponent.elo + oppEloChange);
       onlineOpponent.rd = _gOpp.rd; onlineOpponent.vol = _gOpp.vol; onlineOpponent.rdTs = Date.now();
-      onlineOpponent.totalEloGained = (onlineOpponent.totalEloGained ?? 0) + oppEloChange;   // fehlte -> Bot hatte nie "Elo gewonnen"
+      onlineOpponent.totalEloGained = r1((onlineOpponent.totalEloGained ?? 0) + oppEloChange);   // fehlte -> Bot hatte nie "Elo gewonnen"
       onlineOpponent.wins = (onlineOpponent.wins ?? 0) + 1;
       onlineOpponent.currentStreak = (onlineOpponent.currentStreak ?? 0) + 1;
       if (onlineOpponent.currentStreak > (onlineOpponent.bestStreak ?? 0)) {
@@ -7758,7 +7777,7 @@ function showWinnerOverlay(winnerName, eloChange, eloRows) {
   document.getElementById("winnerText").innerHTML =
     `🏆 Winner: <span style="color:gold">${escapeHtml(dn(winnerName))}</span>`;
   document.getElementById("winnerEloChange").textContent =
-    `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : ""}${Math.round(eloChange)})`;
+    `Your ELO: ${Math.round(onlineAccount.elo)} (${eloChange >= 0 ? "+" : "−"}${fmtElo(eloChange)})`;
   { // animiertes Elo-Panel (beide Spieler + Leaderboard-Platzwechsel), ersetzt die einfache Textzeile
     const ex = document.getElementById("winnerEloPanel"); if (ex) ex.remove();
     if (eloRows && eloRows.length) {
@@ -9035,11 +9054,29 @@ async function reportOnlineResult(winnerName, loserName) {
   if (onlineVsBot) { handleOnlineResult(winnerName, change); return; }
 
   if (fbReady && onlineMatchId) {
+    const _mid = onlineMatchId, _rnd = onlineRound;
+    // Race-Schutz (Doppel-Sieg-Bug): Wenn beide Clients gleichzeitig ein Ergebnis melden (z.B. beide sehen den Gegner im Eck stehen
+    // oder beide werden im selben Moment getroffen), darf pro Runde nur EIN Client das Ergebnis schreiben. Der andere uebernimmt es.
+    let _claim = null;   // true = ich darf schreiben, false = jemand anderes war schneller, null = nicht pruefbar (altes Verhalten)
+    try { _claim = await Promise.race([RPC.claimMatchEnd(_mid, _rnd), new Promise(r => setTimeout(() => r(null), 4000))]); } catch (e) { _claim = null; }
+    if (onlineResultHandled || onlineMatchId !== _mid) return;
+    if (_claim === false) {
+      // Ergebnis kommt vom Match-Listener; falls der nicht ausloest, hier nachfragen
+      for (let i = 0; i < 8 && !onlineResultHandled && onlineMatchId === _mid; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const md = await RPC.getMatch(_mid);
+          if (md && md.status === "done" && md.winner) { handleOnlineResult(md.winner, md.eloChange || change); return; }
+          if (md && md.status === "abandoned") { handleOnlineResult(md.forfeitBy && md.forfeitBy === myUid ? (onlineOpponent ? onlineOpponent.name : "Online Bot") : onlineAccount.name, md.eloChange || change); return; }
+        } catch (e) {}
+      }
+      if (!onlineResultHandled && onlineMatchId === _mid) handleOnlineResult(winnerName, change);   // letzter Ausweg
+      return;
+    }
     try {
-      await RPC.updateMatch(onlineMatchId, {
+      await RPC.updateMatch(_mid, {
         status: "done", winner: winnerName, eloChange: change
       });
-      const _mid = onlineMatchId;
       setTimeout(() => { if (!onlineResultHandled && onlineMatchId === _mid) handleOnlineResult(winnerName, change); }, 4000);
     } catch(e) {
       handleOnlineResult(winnerName, change);
@@ -9668,7 +9705,7 @@ function tvEloPanel(host, rows, mount) {   // host: Overlay (Konfetti), mount: Z
     c.style.cssText = "animation:tvRise .45s ease " + (0.15 + idx * 0.15) + "s both;";
     const nm = document.createElement("div"); nm.style.cssText = "font-size:13px;opacity:.75;margin-bottom:2px;"; nm.textContent = r.name;
     const dl = document.createElement("div"); dl.style.cssText = "font-size:26px;font-weight:800;display:inline-block;color:" + (r.delta >= 0 ? "#00ff88" : "#ff5566") + ";text-shadow:0 0 14px " + (r.delta >= 0 ? "rgba(0,255,136,.55)" : "rgba(255,85,102,.55)") + ";animation:tvPop .6s cubic-bezier(.2,1.4,.4,1) " + (0.45 + idx * 0.15) + "s both;";
-    dl.textContent = (r.delta >= 0 ? "+" : "−") + Math.abs(r.delta) + " ELO";
+    dl.textContent = (r.delta >= 0 ? "+" : "−") + fmtElo(r.delta) + " ELO";
     const nw = document.createElement("div"); nw.style.cssText = "font-size:13px;opacity:.8;margin-top:2px;";
     const cnt = document.createElement("b"); cnt.textContent = r.from;
     nw.append(document.createTextNode(r.from + " → "), cnt);
@@ -12833,7 +12870,7 @@ function _modShowRefundPopup(delta, games) {
   const box = document.createElement("div");
   box.style.cssText = "width:min(420px,94vw);background:#0d0f16;border:1px solid " + col + ";border-radius:16px;padding:22px;color:#eaf2fb;font:15px sans-serif;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6);";
   const h = document.createElement("div"); h.style.cssText = "font-weight:800;font-size:18px;margin-bottom:10px;color:#ffd700;"; h.textContent = tr("A player you've played against got banned"); box.appendChild(h);
-  const big = document.createElement("div"); big.style.cssText = "font-size:44px;font-weight:800;margin:6px 0 10px;color:" + col + ";"; big.textContent = sign + Math.abs(delta) + " ELO"; box.appendChild(big);
+  const big = document.createElement("div"); big.style.cssText = "font-size:44px;font-weight:800;margin:6px 0 10px;color:" + col + ";"; big.textContent = sign + fmtElo(delta) + " ELO"; box.appendChild(big);
   const ex = document.createElement("div"); ex.style.cssText = "font-size:13px;line-height:1.5;color:#b8bfd0;margin-bottom:16px;";
   ex.textContent = tr("All games against banned players are removed from the ranking. ELO you lost against them was given back, ELO you gained against them was taken back.") + " (" + games + " " + tr(games === 1 ? "game" : "games") + ")";
   box.appendChild(ex);
