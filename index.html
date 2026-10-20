@@ -1860,11 +1860,13 @@ async function rpcBugReportSend(data, media) {
   return r.key;
 }
 // Antworten auf Reports: schreiben nur der Admin (Rules!), lesen nur der Empfaenger selbst -> bugReplies/{uid}/{reportId}
-async function rpcModBugReply(uid, id, text) {
+async function rpcModBugReply(uid, id, text, orig) {
   requireAdmin();
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(uid)) || !/^[A-Za-z0-9_-]{1,40}$/.test(String(id))) throw new Error("Bad id.");
   text = String(text || "").trim().slice(0, 1000); if (!text) throw new Error("Empty reply.");
-  return set(ref(db, "bugReplies/" + uid + "/" + id), { text, ts: Date.now() });
+  const rec = { text, ts: Date.now() };
+  orig = String(orig || "").trim().slice(0, 300); if (orig) rec.re = orig;   // Original-Report-Text, damit der Spieler sieht worauf geantwortet wurde
+  return set(ref(db, "bugReplies/" + uid + "/" + id), rec);
 }
 async function rpcModBugRemove(id) {
   requireAdmin(); if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(id))) throw new Error("Bad id.");
@@ -14252,7 +14254,7 @@ async function modDeleteChatMsg(key) {
       const rb = document.createElement("button"); rb.textContent = "💬 Reply"; rb.style.cssText = "margin:0;padding:4px 10px;font-size:12px;";
       rb.onclick = async () => {
         const t = prompt("Reply to " + (r.name || "?") + ":"); if (!t || !t.trim()) return;
-        try { await rpc().modBugReply(r.uid, id, t); rb.textContent = "✅ Replied"; } catch (e) { alert("Failed: " + e.message); }
+        try { await rpc().modBugReply(r.uid, id, t, r.text); rb.textContent = "✅ Replied"; } catch (e) { alert("Failed: " + e.message); }
       };
       row.appendChild(rb);
       row.appendChild(del); d.appendChild(row); d.appendChild(mm); list.appendChild(d);
@@ -14289,7 +14291,7 @@ async function modDeleteChatMsg(key) {
         const o = await rpc().get("bugReplies/" + uid); const box = $("bugReplies"), l = $("bugRepList"); if (!box || !l) return;
         l.textContent = ""; const ks = o ? Object.keys(o).sort((a, b) => (o[b].ts || 0) - (o[a].ts || 0)) : [];
         box.style.display = ks.length ? "" : "none";
-        ks.forEach(k => { const d = document.createElement("div"); d.style.cssText = "padding:8px;border-left:3px solid #00c8ff;background:rgba(0,200,255,.08);border-radius:6px;font-size:13px;white-space:pre-wrap;word-break:break-word;"; d.textContent = (o[k].ts ? new Date(o[k].ts).toLocaleDateString() + " · " : "") + (o[k].text || ""); l.appendChild(d); });
+        ks.forEach(k => { const d = document.createElement("div"); d.style.cssText = "padding:8px;border-left:3px solid #00c8ff;background:rgba(0,200,255,.08);border-radius:6px;font-size:13px;white-space:pre-wrap;word-break:break-word;"; if (o[k].re) { const q = document.createElement("div"); q.style.cssText = "margin-bottom:6px;padding:6px 8px;border-left:3px solid #6b7386;background:rgba(255,255,255,.05);border-radius:4px;font-size:12px;color:#aab2c5;font-style:italic;"; q.textContent = "Your report: “" + o[k].re + (o[k].re.length >= 300 ? "…" : "") + "”"; d.appendChild(q); } const a = document.createElement("div"); a.textContent = (o[k].ts ? new Date(o[k].ts).toLocaleDateString() + " · " : "") + (o[k].text || ""); d.appendChild(a); l.appendChild(d); });
       } catch (e) {}
     })();
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
