@@ -8810,6 +8810,7 @@ function update() {
     if (me && me.alive && survivalActive && _isDaily && dailyFieldHit(me)) { me.alive = false; endSurvival(false); return; }   // Laser / Wand / Saeule
     if (me && me.alive) checkOnlineCollision(me);
     if (me && me.alive) checkOpponentPassThrough(me);
+    if (me && me.alive) checkOpponentUnresponsive(me);
     return;
   }
   if (mode === "streak") { updateStreak(); return; }
@@ -8930,6 +8931,47 @@ function checkOpponentPassThrough(me) {
   if (_oppPass.events.length >= OPP_PASS.EVENTS || stuck) {
     opp.alive = false;
     challengeToast("Opponent passed through balls (lag) – you win", "#00ff88");
+    reportOnlineResult(me.name, opp.name);
+  }
+}
+
+// ── AFK-/Hintergrund-Gegner: Jeder Client prueft nur den EIGENEN Treffer. Laeuft beim Gegner die Spielschleife nicht (Tab im Hintergrund,
+// App pausiert, Browser eingefroren), sendet sein Client weiter Pings -> kein Timeout, aber Baelle gehen durch ihn durch und niemand stirbt.
+// Da die Baelle eine reine Funktion der Serverzeit sind (bei beiden identisch), kann jeder Client die zuletzt GEMELDETE Gegner-Position pruefen.
+// Bewusst konservativ: Gegner steht >= STATIC_MS still, ein Ball liegt tief auf ihm, und er meldet binnen CONFIRM_MS keinen Tod
+// (ein aktiver Client stirbt sofort und meldet das). Erst EVENTS solcher Durchgaenge -> Sieg fuer mich (ueber den Race-Schutz in reportOnlineResult).
+const OPP_AFK = { DEPTH: 0.6, STATIC_MS: 1200, CONFIRM_MS: 1000, EVENTS: 2, WINDOW_MS: 12000, GRACE_MS: 3000 };
+let _oppAfk = { key: null, inside: new Set(), pending: [], confirmed: [] };
+function checkOpponentUnresponsive(me) {
+  if (onlineVsBot || !onlineMatchId || onlineResultHandled || survivalActive || mode !== "online") return;
+  if (onlineMatchStatus !== "playing") return;
+  const opp = players.find(p => p.name !== me.name);
+  if (!opp || opp.alive === false) return;
+  const key = onlineMatchId + ":" + onlineMatchStamp + ":" + onlineRound;
+  if (_oppAfk.key !== key) _oppAfk = { key, inside: new Set(), pending: [], confirmed: [] };
+  const now = Date.now();
+  if (now - startTime < OPP_AFK.GRACE_MS) return;
+  const ox = opp.baseTx !== undefined ? opp.baseTx : opp.x, oy = opp.baseTy !== undefined ? opp.baseTy : opp.y;
+  const lastMove = opp.lastPacketAt || startTime;            // letzter geaenderter Positions-/Lebend-Stand des Gegners
+  const isStatic = now - lastMove >= OPP_AFK.STATIC_MS;
+  const nowInside = new Set();
+  for (const b of balls) {
+    const lim = (opp.radius + b.radius) * OPP_AFK.DEPTH, dx = ox - b.x, dy = oy - b.y;
+    if (dx * dx + dy * dy < lim * lim) {
+      nowInside.add(b);
+      if (!_oppAfk.inside.has(b) && isStatic) _oppAfk.pending.push({ t: now });   // neuer, getrennter Durchgang
+    }
+  }
+  _oppAfk.inside = nowInside;
+  _oppAfk.pending = _oppAfk.pending.filter(ev => {
+    if (lastMove > ev.t) return false;                                           // er hat sich bewegt / gemeldet -> ist aktiv, Durchgang verwerfen
+    if (now - ev.t < OPP_AFK.CONFIRM_MS) return true;                            // noch warten, ob er seinen Tod meldet
+    _oppAfk.confirmed.push(now); return false;                                   // keine Reaktion -> bestaetigter Durchgang
+  });
+  _oppAfk.confirmed = _oppAfk.confirmed.filter(t => now - t <= OPP_AFK.WINDOW_MS);
+  if (_oppAfk.confirmed.length >= OPP_AFK.EVENTS) {
+    opp.alive = false;
+    try { challengeToast("Opponent is not responding (balls pass through) – you win", "#00ff88"); } catch (e) {}
     reportOnlineResult(me.name, opp.name);
   }
 }
