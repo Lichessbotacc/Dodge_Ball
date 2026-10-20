@@ -1461,6 +1461,8 @@ try {
 }
 
 function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
+// Echte Registrierungszeit aus Firebase Auth (fuer alte Accounts ohne createdAt)
+function rpcAuthCreated() { try { const t = Date.parse(auth.currentUser.metadata.creationTime); return isFinite(t) && t > 1262304000000 && t <= Date.now() ? t : null; } catch (e) { return null; } }
 function requireUid() {
   const uid = myUid();
   if (!uid) throw new Error("Not authenticated yet — cannot perform this operation.");
@@ -2287,6 +2289,7 @@ window._dobRPC = {
   setStreakBoard: rpcSetStreakBoard, sendChallenge: rpcSendChallenge, respondChallenge: rpcRespondChallenge, removeChallenge: rpcRemoveChallenge,
   onDisconnectSetOwnStatus: rpcOnDisconnectSetOwnStatus,
   serverTimestamp: rpcServerTimestamp,
+  authCreatedAt: rpcAuthCreated,
   sendChat: rpcSendChat, onChat: rpcOnChat, sendIdleChat: rpcSendIdleChat, sendArenaChat: rpcSendArenaChat, onArenaChat: rpcOnArenaChat, cleanupArenaChat: rpcCleanupArenaChat, onIdleChat: rpcOnIdleChat, getChatBefore: rpcGetChatBefore, setLeagueMember: rpcSetLeagueMember, removeLeagueMember: rpcRemoveLeagueMember, armMatchDisconnect: rpcArmMatchDisconnect
 };
 // ═══ CLIENT-VERSION: nur die aktuellste Version darf schreiben ═══
@@ -5274,7 +5277,7 @@ async function pushAccountToFirebase() {
   try {
     const _sv = await dbGet("players/" + myUid);
     const _svTier = _sv ? (Number(_sv.leagueTier) || 0) : 0;
-    _createdAt = _sv ? (_sv.createdAt != null ? _sv.createdAt : null) : RPC.serverTimestamp();   // neuer Account: Erstellzeit vom Server (nicht faelschbar)
+    _createdAt = _sv ? (_sv.createdAt != null ? _sv.createdAt : (RPC.authCreatedAt ? RPC.authCreatedAt() : null)) : RPC.serverTimestamp();   // neuer Account: Erstellzeit vom Server (nicht faelschbar)
     _lgAt = ((onlineAccount.leagueTier ?? 0) !== _svTier) ? RPC.serverTimestamp() : (_sv && _sv.leagueAt != null ? _sv.leagueAt : null);
   } catch (e) { _lgAt = null; }
   await RPC.setOwnPlayer({
