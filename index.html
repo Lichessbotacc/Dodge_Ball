@@ -4187,7 +4187,7 @@ window.addEventListener("dobAuthReady", () => {
 });
 async function loadArenaBoard() {
   const t = document.getElementById("lbTable");
-  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Arena points (last 24 h)</span><span></span></div>';
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Arena points (all time)</span><span></span></div>';
   const my = ++_lbToken;
   const head = t.innerHTML;
   t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
@@ -4196,9 +4196,9 @@ async function loadArenaBoard() {
     const ar = await _dbGetT("arenas");
     if (my !== _lbToken) return;
     t.innerHTML = head;
-    const since = Date.now() - 24 * 3600000, agg = {};
+    const agg = {};   // all time: alle gespeicherten Arenen zaehlen
     Object.entries(ar || {}).forEach(([id, ents]) => {
-      if (!/^\d{13}$/.test(id) || Number(id) < since || !ents) return;
+      if (!/^\d{13}$/.test(id) || !ents) return;
       Object.entries(ents).forEach(([uid, e]) => {
         if (!e || !e.name || uid.indexOf("bot__") === 0) return;
         const a = agg[uid] || (agg[uid] = { uid, name: e.name, pts: 0, games: 0, wins: 0 });
