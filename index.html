@@ -3455,11 +3455,22 @@ async function dailyPicksRefresh() {
   try { if (typeof RPC !== "undefined" && RPC) { const v = await RPC.get("dailyPick"); _dailyPicks = {}; if (v) for (const k of Object.keys(v)) if (Number.isInteger(Number(v[k]))) _dailyPicks[k] = Number(v[k]); _dailyPicksLoaded = true; } } catch (e) { console.warn("dailyPick load failed", e); }
   try { updDailyBtn(); } catch (e) {}
 }
+let _dailyStarting = false;
 async function startDaily() {
-  for (let i = 0; i < 12 && !_dailyPicksLoaded; i++) await Promise.race([dailyPicksRefresh(), new Promise(r => setTimeout(r, 500))]);
-  // Modus unsicher (Festlegung noch nicht geladen) -> nicht starten, sonst landet ein Lauf im falschen Modus auf der Tafel
-  if (!_dailyPicksLoaded && typeof fbReady !== "undefined" && fbReady) { alert("Could not load today's mode. Check your connection and try again."); return; }
-  startSurvival(true);
+  if (_dailyStarting) return;   // Doppelklick waehrend des Wartens: nur ein Start
+  _dailyStarting = true;
+  try {
+    // Nach einem Reload ist die Datenbank (RPC/fbReady) erst nach 1-2 s bereit. Bis die Festlegung des Tages geladen ist, wird gewartet
+    // (alle 250 ms, bis ca. 10 s) - sonst startet der Lauf mit dem Zufalls-Ersatzmodus statt mit dem eigentlichen Tagesmodus.
+    for (let i = 0; i < 40 && !_dailyPicksLoaded; i++) {
+      await dailyPicksRefresh();
+      if (_dailyPicksLoaded) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    // Modus unsicher (Festlegung nicht geladen) -> nicht starten, sonst landet ein Lauf im falschen Modus auf der Tafel
+    if (!_dailyPicksLoaded) { alert("Could not load today's mode. Check your connection and try again."); return; }
+    startSurvival(true);
+  } finally { _dailyStarting = false; }
 }
 setInterval(dailyPicksRefresh, 60000); setTimeout(dailyPicksRefresh, 1500); setTimeout(dailyPicksRefresh, 5000);
 let _dailyRun = null;
