@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -951,6 +952,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
               <span>WhatsApp</span>
             </a>
             <a class="socialLink" href="#" onclick="openStreamers();return false;" title="Streamers" aria-label="Streamers"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">🎥</span><span>Streamers</span></a>
+            <a class="socialLink" href="#" onclick="openRules();return false;" title="Rules" aria-label="Rules"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">📜</span><span>Rules</span></a>
             <a id="linkDiscordMain" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#5865F2"/>
@@ -985,6 +987,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
               <span>WhatsApp</span>
             </a>
             <a class="socialLink" href="#" onclick="openStreamers();return false;" title="Streamers" aria-label="Streamers"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">🎥</span><span>Streamers</span></a>
+            <a class="socialLink" href="#" onclick="openRules();return false;" title="Rules" aria-label="Rules"><span style="font-size:24px;line-height:30px;width:30px;text-align:center;">📜</span><span>Rules</span></a>
             <a id="linkDiscord" class="socialLink" href="#" target="_blank" rel="noopener noreferrer" title="Join our Discord server" aria-label="Discord" style="display:none">
               <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
                 <circle cx="16" cy="16" r="16" fill="#5865F2"/>
@@ -1108,6 +1111,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
+        <button id="lbTabActivity" onclick="lbShowTab('activity')" style="margin:0;padding:8px 18px;font-size:14px;">📊 Activity</button>
       </div>
       <div id="lbTable">
         <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
@@ -4112,7 +4116,8 @@ function lbShowTab(tab) {
   const dd = document.getElementById("lbTabDaily"), dw = document.getElementById("lbTabDailyWins");
   if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
   const _li = document.getElementById("lbTabIdle"); if (_li) _li.style.borderColor = tab === "idle" ? "#00ff88" : "";
-  if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
+  const _la = document.getElementById("lbTabActivity"); if (_la) _la.style.borderColor = tab === "activity" ? "#00ff88" : "";
+  if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 // Falls das Leaderboard schon offen war, als die Verbindung hergestellt wurde: einmal automatisch neu laden
 window.addEventListener("dobAuthReady", () => {
@@ -12194,6 +12199,32 @@ function idleFmt(v) {
   const suf = i < _IDLE_SUF.length ? _IDLE_SUF[i] : String.fromCharCode(97 + Math.floor((i - _IDLE_SUF.length) / 26)) + String.fromCharCode(97 + (i - _IDLE_SUF.length) % 26);
   return s + suf;
 }
+const _ACT_MODES = [["games", "⚔️ Online 1vs1"], ["surv", "🏝 Survival"], ["streak", "🔥 Streaks"], ["daily", "📅 Daily"]];
+async function loadActivityBoard(sel) {   // Aktivitaet: 4 einzelne Ranglisten (gespielte Runden pro Modus), Auswahl wie im Daily-Tab
+  if (!sel) sel = "games";
+  const t = document.getElementById("lbTable");
+  const tabs = '<div class="lb-row" style="display:block;text-align:center;">' + _ACT_MODES.map(m =>
+    '<button style="margin:2px;padding:5px 10px;font-size:12px;' + (sel === m[0] ? 'border-color:#00ff88;' : '') + '" onclick="loadActivityBoard(\'' + m[0] + '\')">' + m[1] + '</button>').join("") + '</div>';
+  const label = sel === "games" ? "Games played" : "Runs played";
+  const head = tabs + '<div class="lb-row"><span>Rank</span><span>Name</span><span>' + label + '</span><span>' + (sel === "games" ? "W/L" : "") + '</span></div>';
+  const my = ++_lbToken;
+  t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
+  if (!(await _lbReady(t, head))) return;
+  try {
+    const pl = await _dbGetT("players");
+    if (my !== _lbToken) return;
+    t.innerHTML = head;
+    const n = v => Math.max(0, Math.floor(Number(v) || 0));
+    const rows = Object.entries(pl || {}).filter(([uid]) => uid !== ONLINE_BOT_UID).map(([uid, p]) => {
+      const w = n(p.wins), l = n(p.losses);
+      const c = sel === "games" ? w + l : sel === "surv" ? n(p.survPlayed) : sel === "streak" ? n(p.streakPlayed) : n(p.dailyPlayed);
+      return { uid, name: p.name || "?", c, w, l };
+    }).filter(r => r.c > 0).sort((a, b) => b.c - a.c || (a.name < b.name ? -1 : 1)).slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No activity yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.c}</span><span style="font-size:.85em;opacity:.85;">${sel === "games" ? r.w + " / " + r.l : ""}</span></div>`).join("");
+  } catch (e) { if (my === _lbToken) _lbErr(t, head); }
+}
 async function loadIdleBoard() {
   const t = document.getElementById("lbTable");
   t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>💰 Total money</span><span></span></div>';
@@ -12226,7 +12257,12 @@ async function loadIdleBoard() {
 // ═══════════════════════════════════════════════
 const LANGS = ["en", "de"];
 const DICT = { de: {
-  "Change":"Ändern",
+    "Games played":"Gespielte Spiele",
+  "Runs played":"Gespielte Runs",
+    "📊 Activity":"📊 Aktivität",
+  "📊 Total plays":"📊 Gesamt gespielt",
+  "No activity yet":"Noch keine Aktivität",
+    "Change":"Ändern",
   "Mon & Thu only":"Nur Mo & Do",
   "Idle Brick Breaker is only open on Mondays and Thursdays (German time).":"Idle Brick Breaker ist nur montags und donnerstags offen (deutsche Zeit).",
   "Opens in":"Öffnet in",
@@ -12979,6 +13015,43 @@ async function openStreamers() {
       row.append(nm, lk); list.appendChild(row);
     });
   } catch (e) { list.textContent = tr("Error."); }
+}
+// ═══ Regeln (Rules) – grosse, durchsuchbare Liste, EN/DE ═══
+const RULES_DATA = {"en": [["🤝 General / Fair play", ["Play fair. Win by skill, not by tricks.", "Be respectful to everyone – no insults, harassment, hate or threats.", "No discrimination of any kind (origin, religion, gender, sexuality, disability …).", "No spam, no advertising, no scams, no begging for items or money.", "Do not share personal information (yours or others') – no addresses, phone numbers, real names of others.", "Do not impersonate moderators, the developer or other players.", "Moderator decisions are final in the game. If you think one is wrong, use the appeal option.", "Rules can change. Not knowing a rule does not protect you from a sanction."]], ["👤 Accounts & names", ["One account per player and device. Creating extra accounts to dodge a ban or to farm rankings is forbidden.", "Names must be 3–20 characters long.", "Allowed characters: letters, numbers, _ and -. Names must start with a letter and end with a letter or number.", "No names made only of numbers or special characters, and no consecutive _ or - characters.", "No offensive, hateful, political-extremist or inappropriate names – also no names that imitate staff (e.g. the developer).", "Moderators may rename you at any time. Keep the new name or lose access to the affected feature.", "Never share your password. We will never ask you for it.", "Deleting your account removes your name, Elo, stats and league progress permanently."]], ["💬 Chat (Global, Idle, Arena)", ["New accounts can write in the chat only after a short waiting time (about 2 hours).", "Messages can be at most 200 characters long.", "Be on topic and friendly. English or German is fine – mixing is okay, spam is not.", "No flooding: repeating the same message or writing very fast is blocked.", "No insults, no hate speech, no sexual content, no threats.", "No links to other servers, shops, scams or malware.", "No begging, no trading real money or accounts.", "Do not use @mentions to harass someone.", "Mutes are temporary. While muted you can't write in any chat (Global and Idle chat share the same mute).", "A chat ban removes your right to write in chats completely. It is shown on your profile.", "Moderators may delete messages and all recent messages of a player."]], ["🚫 Cheating & bots", ["No cheats, hacks, scripts, auto-clickers, macros or modified clients.", "No exploiting bugs on purpose. Found a bug? Use the 🚩 Report button.", "No bots or automation for ranked modes or leaderboards.", "No win-trading, boosting or agreeing with others to throw matches.", "No leaving matches on purpose to avoid losing Elo (forfeits count as a loss).", "Suspicious behaviour is detected automatically. Accounts can be banned automatically, and their data removed.", "Banned devices cannot create new accounts. Ban evasion leads to permanent bans.", "Using old or modified versions of the game to submit records is not allowed."]], ["⚔️ Online 1v1 & Elo", ["Everyone starts with 1500 Elo.", "Elo changes after each ranked game. The change depends on the rating difference.", "Disconnecting or quitting during a match counts as a forfeit.", "Matches against the Online Bot count like normal games.", "Do not insult or provoke your opponent. Be a good sport.", "Rankings only list players with at least 1 played game."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Records are only valid when they come from a normal, unmodified run.", "Daily Challenge: one challenge per day. Only the daily mode counts for the daily leaderboard.", "Daily Challenge wins are awarded by moderators/automatically for the best time of the day.", "Replays can be checked by moderators. Suspicious records can be removed.", "Streaks: your level is only valid if it was earned in a real run – the game checks how fast levels can be gained."]], ["🏅 Weekly League", ["Leagues: Bronze, Silver, Gold, Platinum.", "Every week you play in a group of up to 20 players of your league.", "Your wins in ranked games count. Joining a group happens with your first counted win.", "Weeks run Monday to Monday, German time (Europe/Berlin).", "At the end of the week the best players of a group move up – but only with at least 3 wins that week.", "Groups with fewer than 5 players do not promote anyone.", "Promotion slots: Bronze up to the top 10 (at most half of the group), Silver and higher up to the top 5 (at most a third).", "Relegation: the bottom players move down – a quarter of the group, at most 5. Groups with fewer than 4 players have no relegation. Bronze can't be relegated.", "Platinum is the highest league. You can't move up from there.", "Tie-break: with the same number of wins, the player who reached these wins earlier ranks higher.", "Rank is final after the end of the week. Late wins of the old week are accepted for a few seconds only."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker is open every Monday and Thursday (00:00–24:00, German time). On other days it is closed – your progress stays saved.", "When the day ends while you play, the game closes automatically and saves your progress.", "The Idle leaderboard ranks your total money earned.", "Progress is saved on your device and in the cloud (for logged-in players).", "Old or modified versions of the game can't write to the Idle leaderboard.", "Cheated or impossible scores are removed. Moderators can remove a player from the board.", "The Idle chat has the same rules as the Global chat.", "A new season resets all progress. It is announced in advance."]], ["🎥 Streamers & links", ["You can link your YouTube and/or Twitch channel – but only if you really upload or stream DarkOnBalls content.", "Links are checked and approved by a moderator before they appear on your profile.", "Allowed formats: youtube.com/@name or youtube.com/channel/UC…, and twitch.tv/name.", "Linking someone else's channel is forbidden and leads to a sanction.", "You can change or remove your link at any time. Moderators can remove links that break the rules.", "Linked channels must follow the platform rules and must not contain illegal or hateful content."]], ["💎 Patrons", ["Patron tiers (Bronze, Silver, Gold, Diamond) are a thank-you for supporting the game.", "A tier is valid for one calendar month. It can be renewed.", "Patron status does not give gameplay advantages in ranked modes.", "Misusing, selling or sharing Patron perks is not allowed."]], ["⚠️ Sanctions & appeals", ["Moderators can warn, mute, chat-ban, rename or ban players.", "A warning can lock the game until you read and react to it.", "Bans can be permanent, especially for cheating and repeated breaking of the rules.", "A ban removes the ranking data of the account (profile, records, league).", "If you are banned or warned, you can send an appeal with a short explanation (once per week).", "Be honest in an appeal. False statements reduce your chances.", "Do not harass moderators."]], ["🛠 Technical & fair use", ["Reload the page when you see the update message, to be on the latest version.", "Do not overload the servers: no scripts that spam requests.", "Report bugs and cheaters with the 🚩 Report button instead of publicly accusing players.", "Screenshots and videos are welcome – respect other players' privacy.", "The game is provided as it is. We may reset or change features for balance and fairness."]]], "de": [["🤝 Allgemein / Fair Play", ["Spiele fair. Gewinne durch Können, nicht durch Tricks.", "Sei respektvoll zu allen – keine Beleidigungen, Belästigung, Hass oder Drohungen.", "Keine Diskriminierung jeder Art (Herkunft, Religion, Geschlecht, Sexualität, Behinderung …).", "Kein Spam, keine Werbung, keine Betrugsversuche, kein Betteln um Items oder Geld.", "Gib keine persönlichen Daten weiter (deine oder die anderer) – keine Adressen, Telefonnummern, echte Namen anderer.", "Gib dich nicht als Moderator, Entwickler oder anderer Spieler aus.", "Entscheidungen der Moderatoren gelten im Spiel. Wenn du eine für falsch hältst, nutze den Einspruch.", "Regeln können sich ändern. Unwissenheit schützt nicht vor einer Strafe."]], ["👤 Accounts & Namen", ["Ein Account pro Spieler und Gerät. Zusatz-Accounts, um einen Bann zu umgehen oder Ranglisten zu farmen, sind verboten.", "Namen müssen 3–20 Zeichen lang sein.", "Erlaubt sind Buchstaben, Zahlen, _ und -. Ein Name muss mit einem Buchstaben beginnen und mit Buchstabe oder Zahl enden.", "Keine Namen nur aus Zahlen oder Sonderzeichen und keine aufeinanderfolgenden _ oder -.", "Keine beleidigenden, hasserfüllten, extremistischen oder unpassenden Namen – auch keine Namen, die Mitarbeiter nachahmen (z. B. den Entwickler).", "Moderatoren dürfen dich jederzeit umbenennen. Behalte den neuen Namen, sonst verlierst du den Zugriff auf die betroffene Funktion.", "Gib niemals dein Passwort weiter. Wir fragen nie danach.", "Das Löschen deines Accounts entfernt Name, Elo, Statistiken und Liga-Fortschritt dauerhaft."]], ["💬 Chat (Global, Idle, Arena)", ["Neue Accounts dürfen erst nach einer kurzen Wartezeit (ca. 2 Stunden) im Chat schreiben.", "Nachrichten dürfen höchstens 200 Zeichen lang sein.", "Bleib beim Thema und freundlich. Deutsch oder Englisch ist okay – Spam nicht.", "Kein Flooding: Dieselbe Nachricht wiederholen oder extrem schnell schreiben wird blockiert.", "Keine Beleidigungen, keine Hassrede, keine sexuellen Inhalte, keine Drohungen.", "Keine Links zu anderen Servern, Shops, Betrug oder Malware.", "Kein Betteln, kein Handel mit echtem Geld oder Accounts.", "Nutze @Erwähnungen nicht, um jemanden zu belästigen.", "Mutes sind zeitlich begrenzt. Solange du gemutet bist, kannst du in keinem Chat schreiben (Global- und Idle-Chat teilen sich denselben Mute).", "Ein Chat-Bann entzieht dir das Schreiben in Chats komplett. Er wird auf deinem Profil angezeigt.", "Moderatoren dürfen Nachrichten und alle letzten Nachrichten eines Spielers löschen."]], ["🚫 Cheating & Bots", ["Keine Cheats, Hacks, Skripte, Autoclicker, Makros oder veränderten Clients.", "Keine absichtliche Ausnutzung von Bugs. Bug gefunden? Nutze den 🚩-Melden-Knopf.", "Keine Bots oder Automatisierung für Ranglisten-Modi.", "Kein Win-Trading, Boosting oder Absprachen, um Spiele absichtlich zu verlieren.", "Kein absichtliches Verlassen von Matches, um Elo-Verlust zu vermeiden (Aufgeben zählt als Niederlage).", "Verdächtiges Verhalten wird automatisch erkannt. Accounts können automatisch gebannt und ihre Daten entfernt werden.", "Gebannte Geräte können keine neuen Accounts erstellen. Bann-Umgehung führt zum dauerhaften Bann.", "Alte oder veränderte Versionen des Spiels zum Einreichen von Rekorden zu nutzen ist nicht erlaubt."]], ["⚔️ Online 1v1 & Elo", ["Alle starten mit 1500 Elo.", "Elo ändert sich nach jedem Ranglisten-Spiel. Die Änderung hängt vom Wertungsunterschied ab.", "Verbindungsabbruch oder Verlassen während eines Matches zählt als Aufgabe.", "Matches gegen den Online-Bot zählen wie normale Spiele.", "Beleidige oder provoziere deinen Gegner nicht. Sei ein guter Verlierer und Gewinner.", "In den Ranglisten stehen nur Spieler mit mindestens 1 gespielten Spiel."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Rekorde sind nur gültig, wenn sie aus einem normalen, unveränderten Durchlauf stammen.", "Daily Challenge: eine Challenge pro Tag. Nur der Daily-Modus zählt für die Daily-Rangliste.", "Daily-Challenge-Siege gibt es für die beste Zeit des Tages (durch Moderatoren/automatisch).", "Replays können von Moderatoren geprüft werden. Verdächtige Rekorde können entfernt werden.", "Streaks: Dein Level ist nur gültig, wenn du es in einem echten Durchlauf erreicht hast – das Spiel prüft, wie schnell Level möglich sind."]], ["🏅 Weekly League", ["Ligen: Bronze, Silber, Gold, Platin.", "Jede Woche spielst du in einer Gruppe mit bis zu 20 Spielern deiner Liga.", "Deine Siege in Ranglisten-Spielen zählen. Du trittst einer Gruppe mit deinem ersten gezählten Sieg bei.", "Wochen laufen von Montag bis Montag, deutsche Zeit (Europe/Berlin).", "Am Wochenende steigen die Besten einer Gruppe auf – aber nur mit mindestens 3 Siegen in dieser Woche.", "Gruppen mit weniger als 5 Spielern befördern niemanden.", "Aufstiegsplätze: Bronze bis zu den Top 10 (höchstens die Hälfte der Gruppe), Silber und höher bis zu den Top 5 (höchstens ein Drittel).", "Abstieg: Die letzten Spieler steigen ab – ein Viertel der Gruppe, höchstens 5. Gruppen mit weniger als 4 Spielern haben keinen Abstieg. Aus Bronze steigt man nicht ab.", "Platin ist die höchste Liga. Von dort gibt es keinen Aufstieg.", "Gleichstand: Bei gleich vielen Siegen steht der Spieler weiter oben, der diese Siege früher erreicht hat.", "Der Rang steht nach Wochenende fest. Späte Siege der alten Woche werden nur wenige Sekunden lang angenommen."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker ist jeden Montag und Donnerstag offen (0:00–24:00 Uhr deutscher Zeit). An anderen Tagen ist er geschlossen – dein Fortschritt bleibt gespeichert.", "Endet der Tag während du spielst, schließt das Spiel automatisch und speichert deinen Fortschritt.", "Die Idle-Rangliste zeigt dein insgesamt verdientes Geld.", "Der Fortschritt wird auf deinem Gerät und in der Cloud gespeichert (für eingeloggte Spieler).", "Alte oder veränderte Versionen des Spiels können nicht in die Idle-Rangliste schreiben.", "Gecheatete oder unmögliche Werte werden entfernt. Moderatoren können Spieler aus der Rangliste nehmen.", "Im Idle-Chat gelten dieselben Regeln wie im Global-Chat.", "Eine neue Season setzt den Fortschritt zurück. Sie wird vorher angekündigt."]], ["🎥 Streamer & Links", ["Du kannst deinen YouTube- und/oder Twitch-Kanal verlinken – aber nur, wenn du wirklich DarkOnBalls-Inhalte hochlädst oder streamst.", "Links werden vor der Anzeige auf deinem Profil von einem Moderator geprüft und freigegeben.", "Erlaubte Formate: youtube.com/@name oder youtube.com/channel/UC… sowie twitch.tv/name.", "Den Kanal einer anderen Person zu verlinken ist verboten und wird bestraft.", "Du kannst deinen Link jederzeit ändern oder entfernen. Moderatoren können Links entfernen, die gegen die Regeln verstoßen.", "Verlinkte Kanäle müssen die Regeln der Plattform einhalten und dürfen keine illegalen oder hasserfüllten Inhalte enthalten."]], ["💎 Patrons", ["Patron-Stufen (Bronze, Silber, Gold, Diamant) sind ein Dankeschön für die Unterstützung des Spiels.", "Eine Stufe gilt einen Kalendermonat und kann verlängert werden.", "Patron-Status gibt keine Spielvorteile in Ranglisten-Modi.", "Missbrauch, Verkauf oder Weitergabe von Patron-Vorteilen ist nicht erlaubt."]], ["⚠️ Strafen & Einspruch", ["Moderatoren können Spieler verwarnen, muten, im Chat bannen, umbenennen oder bannen.", "Eine Verwarnung kann das Spiel sperren, bis du sie gelesen und darauf reagiert hast.", "Banns können dauerhaft sein, besonders bei Cheating und wiederholten Regelverstößen.", "Ein Bann entfernt die Ranglisten-Daten des Accounts (Profil, Rekorde, Liga).", "Bist du gebannt oder verwarnt, kannst du einen Einspruch mit kurzer Erklärung senden (einmal pro Woche).", "Sei ehrlich im Einspruch. Falsche Angaben verringern deine Chancen.", "Belästige keine Moderatoren."]], ["🛠 Technik & fairer Umgang", ["Lade die Seite neu, wenn die Update-Meldung erscheint, damit du auf dem neuesten Stand bist.", "Überlaste die Server nicht: keine Skripte, die Anfragen spammen.", "Melde Bugs und Cheater über den 🚩-Melden-Knopf, statt Spieler öffentlich zu beschuldigen.", "Screenshots und Videos sind willkommen – respektiere die Privatsphäre anderer Spieler.", "Das Spiel wird so bereitgestellt, wie es ist. Wir dürfen Funktionen für Balance und Fairness zurücksetzen oder ändern."]]]};
+function openRules() {
+  let ov = document.getElementById("rulesOv");
+  if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "rulesOv";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100000;display:flex;align-items:center;justify-content:center;";
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  const de = (typeof LANG !== "undefined" && LANG === "de");
+  const sections = RULES_DATA[de ? "de" : "en"];
+  const box = document.createElement("div");
+  box.style.cssText = "background:#111;color:#fff;padding:16px;max-width:620px;width:94%;max-height:88vh;display:flex;flex-direction:column;border-radius:12px;border:1px solid #333;";
+  const top = document.createElement("div"); top.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:8px;";
+  const h = document.createElement("h3"); h.style.margin = "0"; h.textContent = "📜 " + (de ? "Regeln" : "Rules");
+  const x = document.createElement("button"); x.textContent = "✕"; x.style.cssText = "position:static;margin:0;padding:4px 10px;"; x.onclick = () => ov.remove();
+  top.append(h, x);
+  const q = document.createElement("input"); q.type = "text"; q.placeholder = de ? "Regeln durchsuchen…" : "Search rules…"; q.style.cssText = "margin:10px 0;padding:8px;font-size:14px;width:100%;box-sizing:border-box;";
+  const list = document.createElement("div"); list.style.cssText = "overflow-y:auto;flex:1;text-align:left;";
+  const note = document.createElement("div"); note.style.cssText = "font-size:11px;opacity:.6;margin-top:8px;text-align:center;";
+  let total = 0; sections.forEach(s => { total += s[1].length; });
+  note.textContent = total + (de ? " Regeln · Verstöße können zu Verwarnung, Mute oder Bann führen." : " rules · Breaking them can lead to a warning, mute or ban.");
+  const secEls = sections.map((sec, si) => {
+    const d = document.createElement("details"); d.open = si === 0; d.style.cssText = "border:1px solid #333;border-radius:8px;margin:6px 0;padding:6px 10px;";
+    const sm = document.createElement("summary"); sm.style.cssText = "cursor:pointer;font-weight:700;"; sm.textContent = sec[0] + " (" + sec[1].length + ")"; d.appendChild(sm);
+    const ol = document.createElement("ol"); ol.style.cssText = "margin:8px 0 4px 0;padding-left:22px;line-height:1.45;font-size:14px;";
+    const lis = sec[1].map(t => { const li = document.createElement("li"); li.textContent = t; li.style.margin = "4px 0"; ol.appendChild(li); return li; });
+    d.appendChild(ol); list.appendChild(d); return { d, sm, lis, sec };
+  });
+  q.oninput = () => {
+    const v = q.value.trim().toLowerCase();
+    secEls.forEach(se => {
+      let n = 0; se.lis.forEach((li, i) => { const m = !v || se.sec[1][i].toLowerCase().indexOf(v) >= 0 || se.sec[0].toLowerCase().indexOf(v) >= 0; li.style.display = m ? "" : "none"; if (m) n++; });
+      se.d.style.display = n ? "" : "none"; if (v && n) se.d.open = true; else if (!v) se.d.open = se === secEls[0];
+    });
+  };
+  box.append(top, q, list, note); ov.appendChild(box); document.body.appendChild(ov);
 }
 function _dailyAdminBtn() {
   const ex = document.getElementById("dailyAdminBtn");
@@ -13883,44 +13956,7 @@ async function modDeleteChatMsg(key) {
   }
   setInterval(subscribe, 2000); subscribe();
 
-  // ═══ AUTOMATISCH: erkennt neue Versionen der Seite selbst - kein Build-Nummer-Pflegen, kein Admin-Klick noetig ═══
-  // 1) Beim Oeffnen: kam die Seite aus dem Browser-Cache (kein Netz-Transfer), wird sie mit der Server-Version verglichen. Weicht sie ab -> Pop-up.
-  // 2) Danach alle AUTO_UPDATE_POLL_MS: kleine HEAD-Anfrage (ETag/Last-Modified). Aenderung -> Pop-up (waehrend eines Matches zurueckgehalten).
-  const AUTO_UPDATE_POLL_MS = 5 * 60 * 1000;   // 0 = nur beim Oeffnen pruefen, nie waehrend des Spielens
-  function _h(str) { let a = 0xdeadbeef, b = 0x41c6ce57; for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); a = Math.imul(a ^ c, 2654435761); b = Math.imul(b ^ c, 1597334677); } a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909); b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909); return (b >>> 0).toString(36) + (a >>> 0).toString(36); }
-  const _selfUrl = () => location.origin + location.pathname + location.search;
-  let _srvSig = null;
-  function _promptReload(tag) { if (document.getElementById("updatePopup")) return; window._dobStaleBuild = tag; tryShow(); }
-  async function _headSig() {
-    const r = await fetch(_selfUrl(), { method: "HEAD", cache: "no-store" });
-    return r.ok ? (r.headers.get("etag") || r.headers.get("last-modified") || null) : null;
-  }
-  async function autoUpdateStart() {
-    try {
-      if (location.protocol !== "http:" && location.protocol !== "https:") return;   // lokal (file://) gibt es nichts zu pruefen
-      let nav = null; try { nav = performance.getEntriesByType("navigation")[0]; } catch (e) {}
-      const fromCache = !nav || typeof nav.transferSize !== "number" || nav.transferSize === 0;   // 0 = aus dem Cache geladen; >0 = frisch oder per 304 bestaetigt
-      if (fromCache) {
-        const [fresh, loaded] = await Promise.all([fetch(_selfUrl(), { cache: "no-store" }), fetch(_selfUrl(), { cache: "force-cache" })]);
-        if (fresh.ok && loaded.ok) {
-          const [ta, tb] = await Promise.all([fresh.text(), loaded.text()]), ha = _h(ta);
-          if (ha !== _h(tb)) {
-            let tried = ""; try { tried = sessionStorage.getItem("dobAutoTried") || ""; } catch (e) {}
-            if (tried !== ha) {   // nur einmal pro Tab und Version -> keine Reload-Schleife
-              try { sessionStorage.setItem("dobAutoTried", ha); } catch (e) {}
-              _srvSig = fresh.headers.get("etag") || fresh.headers.get("last-modified") || null;
-              _promptReload(ha); return;
-            }
-          }
-        }
-      }
-      _srvSig = await _headSig();
-      if (_srvSig && AUTO_UPDATE_POLL_MS > 0) setInterval(async () => {
-        try { const sg = await _headSig(); if (sg && sg !== _srvSig) { _srvSig = sg; _promptReload(sg); } } catch (e) {}
-      }, AUTO_UPDATE_POLL_MS);
-    } catch (e) {}
-  }
-  setTimeout(autoUpdateStart, 3000);
+  // (Automatische Versions-Erkennung entfernt: Updates loest nur der Admin per Button "🔄 Update-Popup" aus.)
 
   // Admin-Button
   window.modBroadcastReload = function () {
