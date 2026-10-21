@@ -2288,7 +2288,26 @@ async function rpcSetArenaEntry(aid, data) {
   if (!/^[0-9]{13}$/.test(String(aid))) throw new Error("Bad arena id.");
   return set(ref(db, "arenas/" + aid + "/" + uid), data);
 }
+async function rpcTournSave(id, data) {
+  requireAdmin(); id = String(id || "");
+  if (!/^[A-Za-z0-9_-]{1,30}$/.test(id)) throw new Error("Bad id.");
+  const d = Object.assign({}, data); delete d.id; Object.keys(d).forEach(k => { if (d[k] === undefined) delete d[k]; });
+  return set(ref(db, "tournaments/" + id), d);
+}
+async function rpcTournRun(id, data) {
+  requireNotBanned(); const uid = requireUid(); id = String(id || "");
+  if (!/^[A-Za-z0-9_-]{1,30}$/.test(id)) throw new Error("Bad id.");
+  const old = (await get(ref(db, "tournamentRuns/" + id + "/" + uid))).val() || {}, time = Number(data.time) || 0;
+  const ts = (old.ts && Number(old.time) === time) ? old.ts : serverTimestamp();
+  return set(ref(db, "tournamentRuns/" + id + "/" + uid), { name: String(data.name).slice(0, 20), time, a: Math.max(0, Math.floor(Number(data.a) || 0)), ts });
+}
+async function rpcTournDelete(id) {
+  requireAdmin(); id = String(id || "");
+  if (!/^[A-Za-z0-9_-]{1,30}$/.test(id)) throw new Error("Bad id.");
+  return update(ref(db), { ["tournaments/" + id]: null, ["tournamentRuns/" + id]: null });
+}
 window._dobRPC = {
+  tournSave: rpcTournSave, tournRun: rpcTournRun, tournDelete: rpcTournDelete,
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
@@ -3586,7 +3605,7 @@ function dailyMakeBall(g, gi, T, initial) {
       ob.x = Math.max(m[0] + ob.radius, Math.min(W() - m[0] - ob.radius, ob.x));
       ob.y = Math.max(m[1] + ob.radius, Math.min(H() - m[1] - ob.radius, ob.y));
     } while (me0 && m[0] > 0 && Math.hypot(ob.x - me0.x, ob.y - me0.y) < me0.radius + ob.radius + 200 && k++ < 20);
-    ob.gi = gi; return ob;
+    if (g.spdMul) { ob.vx *= g.spdMul; ob.vy *= g.spdMul; } ob.gi = gi; return ob;
   }
   const rng = onlineRng || Math.random;   // gleiche Zufallsquelle wie makeOnlineBall
   const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10;
@@ -3730,7 +3749,7 @@ function dailyKeyNow() {   // Kalendertag in deutscher Zeit (Europe/Berlin), Wec
 function dailySeed(k) { let h = 2166136261; for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) % 1000000000 + 1; }
 function startSurvival(daily, testIdx) {
   _dailyKey = daily === true ? dailyKeyNow() : null;
-  _dailyTest = (daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null;
+  _dailyTest = (daily === true && testIdx && typeof testIdx === "object" && window._tourn) ? testIdx : ((daily === true && Number.isInteger(testIdx) && _modIsAdminSafe()) ? DAILY_CHALLENGES[testIdx] : null); if (!(testIdx && typeof testIdx === "object")) window._tourn = null;
   _dailyRunIdx = _dailyKey ? dailyIdxFor(_dailyKey) : null;
   _dailyFrozen = (_dailyKey && !_dailyTest) ? dailyChallengeFor(_dailyKey) : null;   // Modus fuer den ganzen Lauf einfrieren (kein Wechsel, wenn spaeter Picks laden)
   if (!guestGate("survival")) return;
@@ -3746,7 +3765,7 @@ function startSurvival(daily, testIdx) {
   onlineResultHandled = false; campReset(); onlineMatchStatus = null; onlineSimTick = 0; myTrail = [];
   onlineRng = makeLCG(Math.floor(Math.random() * 1e9) + 1);   // Baelle spawnen bei JEDEM Lauf zufaellig (auch im Daily); Replay speichert die Spawns selbst
   onlineBallSpawnTimer = Date.now();
-  const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? (_dailyTest ? "Test: " : "Daily: ") + dailyActiveCh().name : "Survival";
+  const md = document.getElementById("mode"); if (md) md.textContent = _dailyKey ? (window._tourn ? "🏆 " : _dailyTest ? "Test: " : "Daily: ") + dailyActiveCh().name : "Survival";
   document.getElementById("onlineHUD").style.display = "none";
   const me = createPlayer(W() / 2, H() / 2, myBallColor, myPlayName());
   players.push(me);
@@ -4080,6 +4099,7 @@ async function watchDailyReplay(day, uid, label) {
   playSurvivalReplay(rec, label);
 }
 async function _endDaily(t, camped, rec) {
+  if (window._tourn) { _survInfo = await tournSaveRun(t); if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped); return; }
   if (_dailyTest) { _survInfo = { daily: true, key: dailyKeyNow(), best: t, isRecord: false, saved: true, top: [], rank: 0, test: true }; if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped); return; }
   const key = _dailyKey; let best = 0, isRecord = false, saved = true, top = [], rank = 0, queuedD = false;
   try { const l = JSON.parse(localStorage.getItem("dobDaily") || "null"); if (l && l.k === key) best = Number(l.b) || 0; } catch (e) {}   // nur Notfall-Wert (offline/Gast)
@@ -4129,18 +4149,18 @@ function renderSurvivalResult(t, camped) {
   const i = _survInfo;
   if (i && i.isRecord && !i._snd) { i._snd = 1; setTimeout(() => SFX.play("record"), 350); }
   const dly = i && i.daily;
-  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best for today!" : "Your best today: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online" + (window._lastSaveErr ? ": " + window._lastSaveErr : "") + (i.queued ? " – will retry automatically" : "") + ")")
+  const line = (i && i.lost) ? (i.stale ? "⚠ Today's mode was changed while you played – this run was not counted." : "📡 Connection lost – this run was not counted.") : dly ? (i.isRecord ? "🏆 New best!" : "Your best: " + survFmt(i.best)) + (i.rank ? " · Rank #" + i.rank : "") + (i.saved ? "" : " (⚠ not saved online" + (window._lastSaveErr ? ": " + window._lastSaveErr : "") + (i.queued ? " – will retry automatically" : "") + ")")
     : !onlineAccount ? "Guest run – create an account to save your records." : !i ? "Saving…" : !i.saved ? "⚠ Could not save the record (connection/permission)" + (window._lastSaveErr ? " [" + window._lastSaveErr + "]" : "") + (i.queued ? " – will retry automatically." : ".") :
     i.isRecord ? "🏆 New personal record!" : "Your record: " + survFmt(i.best);
   ov.innerHTML = '<div style="background:#14141e;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:22px 28px;text-align:center;color:#f0f0f5;max-width:90vw;">'
-    + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest ? '🧪 TEST (not saved)' : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
+    + (_dailyKey ? '<div style="font-size:13px;color:#ffd700;letter-spacing:1px;">' + (_dailyTest && !window._tourn ? '🧪 TEST (not saved)' : window._tourn ? '🏆 TOURNAMENT' + (window._tourn.noSave ? ' · TEST (not saved)' : '') : '📅 DAILY · ' + _dailyKey) + '</div><div style="font-size:18px;font-weight:700;margin:2px 0 4px;">' + dailyActiveCh().icon + ' ' + dailyActiveCh().name + '</div>' : '')
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped === "disconnect" ? "📡 Connection lost – you lost" : camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
     + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + (k < REPLAY_TOP_DAILY ? ' ▶' : '') + '</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
-  ov.querySelector("#survRetry").onclick = () => { if (_dailyKey && _dailyTest) startSurvival(true, DAILY_CHALLENGES.indexOf(_dailyTest)); else if (_dailyKey) startDaily(); else startSurvival(false); };
+  ov.querySelector("#survRetry").onclick = () => { if (window._tourn) { tournPlay(window._tourn.id); return; } if (_dailyKey && _dailyTest) startSurvival(true, DAILY_CHALLENGES.indexOf(_dailyTest)); else if (_dailyKey) startDaily(); else startSurvival(false); };
   ov.querySelector("#survHome").onclick = () => { ov.remove(); exitToMenu(); };
 }
 async function watchSurvivalReplay(uid, label) {
@@ -4394,10 +4414,11 @@ async function modDeleteAllDaily() {
 function _dailyTabsHtml(sel) {
   const btn = (act, label, on) => '<button style="margin:2px;padding:5px 10px;font-size:12px;' + (on ? 'border-color:#00ff88;' : '') + '" onclick="loadDailyBoard(' + act + ')">' + label + '</button>';
   return '<div class="lb-row" style="display:block;text-align:center;">' + btn("'today'", '📅 Today', sel === "today")
-    + DAILY_CHALLENGES.map((c, i) => btn(i, c.icon + ' ' + escapeHtml(c.name), sel === i)).join("") + '</div>';
+    + DAILY_CHALLENGES.map((c, i) => btn(i, c.icon + ' ' + escapeHtml(c.name), sel === i)).join("") + tournTabsExtra() + '</div>';
 }
 async function loadDailyBoard(sel) {
   if (sel === undefined || sel === null) sel = "today";
+  if (typeof sel === "string" && sel.indexOf("t:") === 0) return loadTournBoard(sel.slice(2));
   const t = document.getElementById("lbTable"), key = dailyKeyNow(), ch = dailyChallengeFor(key);
   const isToday = sel === "today", mch = isToday ? ch : DAILY_CHALLENGES[sel];
   t.innerHTML = _dailyTabsHtml(sel)
@@ -11433,6 +11454,211 @@ gameWrap.addEventListener("touchstart", e => {
 <\/script>
 </body>
 </html>
+</script>
+<script id="tournMode">
+// ═══════════════════════════════════════════════
+//  CUSTOM TURNIERE (Mod erstellt, laufen ueber Daily-Rangliste)
+//  tournaments/{id} (nur Admin schreibt)  |  tournamentRuns/{id}/{uid} = { name, time, a (Versuche), ts }
+// ═══════════════════════════════════════════════
+let _tourns = {}, _tournUn = null;
+function tournStart() { if (_tournUn || !fbReady || !RPC) return; _tournUn = dbOn("tournaments", d => { _tourns = d || {}; tournBtnUpd(); }); }
+setInterval(tournStart, 2000);
+function tournList() { return Object.entries(_tourns).map(([id, t]) => Object.assign({ id }, t)).filter(t => t && t.name && t.start && t.end); }
+function tournState(t) { const n = Date.now(); return n < t.start ? "soon" : n < t.end ? "live" : "ended"; }
+function tournVisible(t) {
+  if (_modIsAdminSafe()) return true;
+  const s = tournState(t);
+  if (s === "ended") return Date.now() - t.end < 7 * 86400000;
+  if (t.hidden && s === "soon") return false;
+  return true;
+}
+function tournLeft(ms) { ms = Math.max(0, ms); const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4); return (d ? d + "d " : "") + h + "h " + m + "m"; }
+function tournBtnUpd() {
+  const d = document.getElementById("dailyBtn"); if (!d) return;
+  let b = document.getElementById("tournBtn");
+  const l = tournList().filter(t => tournVisible(t) && tournState(t) !== "ended").sort((a, b2) => (tournState(a) === "live" ? 0 : 1) - (tournState(b2) === "live" ? 0 : 1) || a.start - b2.start)[0];
+  if (!l) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("button"); b.id = "tournBtn"; b.style.flexBasis = "100%"; b.style.borderColor = "#ffd700"; d.after(b); }
+  const live = tournState(l) === "live";
+  b.onclick = () => { showScreen("leaderboardScreen"); lbShowTab("daily"); loadDailyBoard("t:" + l.id); };
+  const key = l.id + live + Math.floor(Date.now() / 60000); if (b.dataset.k === key) return; b.dataset.k = key;
+  b.textContent = (l.icon || "🏆") + " " + l.name;
+  const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;";
+  sm.textContent = live ? "🟢 live · ends in " + tournLeft(l.end - Date.now()) : "⏳ starts in " + tournLeft(l.start - Date.now()) + (l.hidden ? " (hidden for players)" : "");
+  b.appendChild(sm);
+}
+setInterval(tournBtnUpd, 30000);
+function tournChallenge(t) {
+  const base = DAILY_CHALLENGES[t.ch] || DAILY_CHALLENGES[0], sm = Number(t.speedMul) || 1, cm = Number(t.countMul) || 1;
+  const c = Object.assign({}, base, { name: t.name, icon: t.icon || "🏆" });
+  c.groups = base.groups.map(g => {
+    const q = Object.assign({}, g);
+    if (sm !== 1) { q.spdMul = sm; if (q.v) q.v *= sm; }
+    if (cm !== 1) { if (q.n) q.n = Math.max(1, Math.round(q.n * cm)); if (q.respawn) q.respawn = Math.max(5, Math.round(q.respawn / cm)); }
+    return q;
+  });
+  if (Number(t.playerR) > 0) c.playerR = Number(t.playerR);
+  return c;
+}
+async function tournPlay(id) {
+  const t = _tourns[id]; if (!t) return;
+  if (!onlineAccount) { showCreateAccount(); return; }
+  const adm = _modIsAdminSafe(), st = tournState(t);
+  if (st !== "live" && !adm) { alert("Tournament is not running."); return; }
+  if (!fbReady || !myUid) { alert("Not connected yet."); return; }
+  try {
+    const g = (Number(onlineAccount.wins) || 0) + (Number(onlineAccount.losses) || 0), elo = Number(onlineAccount.elo) || 1500;
+    if (!adm) {
+      if (t.minGames && g < t.minGames) { alert("You need at least " + t.minGames + " played 1v1 games."); return; }
+      if (t.minElo && elo < t.minElo) { alert("Minimum ELO: " + t.minElo); return; }
+      if (t.maxElo && elo > t.maxElo) { alert("Maximum ELO: " + t.maxElo); return; }
+      if (t.minAgeH) { const ca = Number(await dbGet("players/" + myUid + "/createdAt")) || 0; if (ca && Date.now() - ca < t.minAgeH * 36e5) { alert("Your account must be at least " + t.minAgeH + " h old."); return; } }
+    }
+    window._tourn = null;
+    if (st === "live" && !adm) {   // Versuch zaehlt beim Start (kein Abbrechen-Trick)
+      await _saveReady();
+      const old = (await RPC.get("tournamentRuns/" + id + "/" + myUid)) || {}, a = Number(old.a) || 0;
+      if (t.attempts && a >= t.attempts) { alert("No attempts left (" + t.attempts + " allowed)."); return; }
+      await RPC.tournRun(id, { name: onlineAccount.name, time: Number(old.time) || 0, a: a + 1 });
+    }
+    window._tourn = { id, t, test: st !== "live" };
+  } catch (e) { alert("Could not start: " + (e && (e.code || e.message))); return; }
+  const lb = document.getElementById("leaderboardScreen"); if (lb) lb.style.display = "none";
+  startSurvival(true, tournChallenge(t));
+  if (window._tourn && window._tourn.test) window._tourn.noSave = true;
+}
+async function tournSaveRun(t) {
+  const T = window._tourn; let best = 0, isRecord = false, saved = true, rank = 0, top = [];
+  if (T.noSave) return { daily: true, key: dailyKeyNow(), best: t, isRecord: false, saved: true, top: [], rank: 0, tourn: true };
+  try {
+    await _saveReady();
+    if (Date.now() > T.t.end + 20000) throw new Error("tournament ended");
+    const old = (await RPC.get("tournamentRuns/" + T.id + "/" + myUid)) || {};
+    best = Number(old.time) || 0;
+    if (t > best && t >= 1) { await RPC.tournRun(T.id, { name: onlineAccount.name, time: t, a: Number(old.a) || 1 }); isRecord = true; best = t; }
+    const all = (await RPC.get("tournamentRuns/" + T.id)) || {};
+    const arr = Object.entries(all).map(([u, v]) => ({ u, n: v.name, t: Number(v.time) || 0, ts: Number(v.ts) || 0 })).filter(x => x.t > 0).sort(_tcmpT);
+    top = []; rank = 0;
+  } catch (e) { saved = false; window._lastSaveErr = String(e && (e.code || e.message) || e).slice(0, 60); }
+  return { daily: true, key: T.id, best, isRecord, saved, top, rank, tourn: true };
+}
+function tournTabsExtra() {
+  return "";
+}
+function _tournTabsOld() {
+  return tournList().filter(tournVisible).sort((a, b) => b.start - a.start).slice(0, 8).map(t =>
+    '<button style="margin:2px;padding:5px 10px;font-size:12px;border-color:#ffd700;" onclick="loadDailyBoard(\'t:' + escapeHtml(t.id) + '\')">' + escapeHtml(t.icon || "🏆") + ' ' + escapeHtml(t.name) + '</button>').join("");
+}
+async function loadTournBoard(id) {
+  const t = document.getElementById("lbTable"), T = _tourns[id];
+  const tabs = "";
+  if (!T) { t.innerHTML = tabs + '<div class="lb-row"><span style="margin:0 auto;">Tournament not found</span></div>'; return; }
+  const st = tournState(T), ch = DAILY_CHALLENGES[T.ch] || DAILY_CHALLENGES[0], adm = _modIsAdminSafe();
+  const bits = [ch.icon + " " + ch.name];
+  if (T.speedMul && T.speedMul !== 1) bits.push("speed ×" + T.speedMul);
+  if (T.countMul && T.countMul !== 1) bits.push("balls ×" + T.countMul);
+  if (T.playerR) bits.push("your ball r=" + T.playerR);
+  bits.push(T.attempts ? T.attempts + " attempt(s)" : "unlimited attempts");
+  if (T.minGames) bits.push("min " + T.minGames + " games");
+  if (T.minElo) bits.push("ELO ≥ " + T.minElo);
+  if (T.maxElo) bits.push("ELO ≤ " + T.maxElo);
+  if (T.minAgeH) bits.push("account ≥ " + T.minAgeH + " h");
+  let info = '<div class="lb-row" style="display:block;text-align:center;line-height:1.5;"><div style="font-size:18px;font-weight:700;">' + escapeHtml(T.icon || "🏆") + ' ' + escapeHtml(T.name) + '</div>'
+    + (T.desc ? '<div style="font-size:13px;opacity:.85;white-space:pre-wrap;">' + escapeHtml(T.desc) + '</div>' : '')
+    + '<div style="font-size:12px;color:#ffd700;margin-top:4px;">' + (st === "live" ? "🟢 live · ends in " + tournLeft(T.end - Date.now()) : st === "soon" ? "⏳ starts in " + tournLeft(T.start - Date.now()) : "🏁 finished") + '</div>'
+    + '<div style="font-size:11px;opacity:.65;">' + new Date(T.start).toLocaleString() + ' → ' + new Date(T.end).toLocaleString() + '</div>'
+    + '<div style="font-size:12px;opacity:.8;margin-top:3px;">' + bits.map(escapeHtml).join(" · ") + '</div>'
+    + (st === "live" || adm ? '<button style="margin:8px 4px 2px;padding:7px 18px;font-size:14px;border-color:#00ff88;" onclick="tournPlay(\'' + escapeHtml(id) + '\')">▶ ' + (st === "live" ? "Play" : "Test (not saved)") + '</button>' : '')
+    + (adm ? '<div style="margin-top:6px;"><button style="margin:2px;padding:4px 10px;font-size:12px;" onclick="tournDialog(\'' + escapeHtml(id) + '\')">✏ Edit</button><button style="margin:2px;padding:4px 10px;font-size:12px;" onclick="tournDelete(\'' + escapeHtml(id) + '\')">🗑 Delete</button></div>' : '') + '</div>';
+  if (!adm) { t.innerHTML = tabs + info; return; }
+  const head = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Tries</span></div>';
+  const my = ++_lbToken;
+  t.innerHTML = tabs + info + head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
+  if (!(await _lbReady(t, tabs + info + head))) return;
+  try {
+    const [runs, pl] = await Promise.all([RPC.get("tournamentRuns/" + id), _dbGetT("players")]);
+    if (my !== _lbToken) return;
+    t.innerHTML = tabs + info + head;
+    const rows = Object.entries(runs || {}).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, time: Number(r && r.time) || 0, ts: Number(r && r.ts) || 0, a: Number(r && r.a) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }))
+      .filter(r => r.time > 0).sort(_tcmp).slice(0, Number(T.topN) || 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="margin:0 auto;">No runs yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')"><span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${survFmt(r.time)}</span><span>${r.a}</span></div>`).join("");
+  } catch (e) { if (my === _lbToken) _lbErr(t, tabs + info + head); }
+}
+async function tournDelete(id) {
+  if (!_modIsAdminSafe() || !confirm("Delete this tournament and all its runs?")) return;
+  try { await RPC.tournDelete(id); alert("Deleted."); loadDailyBoard("today"); } catch (e) { alert("Failed: " + (e && e.message)); }
+}
+async function tournAward(id) {
+  const T = _tourns[id]; if (!_modIsAdminSafe() || !T) return;
+  try {
+    const runs = (await RPC.get("tournamentRuns/" + id)) || {}, pl = (await RPC.get("players")) || {};
+    const arr = Object.entries(runs).filter(([u]) => pl[u]).map(([u, r]) => ({ uid: u, time: Number(r.time) || 0, ts: Number(r.ts) || 0 })).filter(r => r.time > 0).sort(_tcmp);
+    if (!arr.length) { alert("No runs."); return; }
+    const w = arr[0], n = Number(T.reward) || 1;
+    if (T.awarded && !confirm("Already awarded to " + T.awarded + ". Award again?")) return;
+    if (!confirm("Give " + pl[w.uid].name + " (" + survFmt(w.time) + ") +" + n + " Daily win(s)?")) return;
+    const cur = Number(await RPC.get("dailyBonusWins/" + w.uid)) || 0;
+    await RPC.modSetBonusWins(w.uid, cur + n);
+    await RPC.tournSave(id, Object.assign({}, T, { id: undefined, awarded: pl[w.uid].name }));
+    try { delete _DB_CACHE["dailyWins"]; } catch (e) {}
+    alert("Awarded.");
+  } catch (e) { alert("Failed: " + (e && e.message)); }
+}
+function tournDialog(editId) {
+  if (!_modIsAdminSafe()) return;
+  const T = editId ? Object.assign({}, _tourns[editId]) : {}, pad = n => String(n).padStart(2, "0");
+  const dt = ms => { const d = new Date(ms); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+  const now = Date.now();
+  let ov = document.getElementById("tournOv"); if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "tournOv";
+  ov.style.cssText = "position:fixed;inset:0;z-index:20002;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.8);padding:12px;box-sizing:border-box;";
+  const f = (label, html) => '<label style="display:block;font-size:12px;color:#aab2c5;margin:6px 0 2px;">' + label + '</label>' + html;
+  const inp = (id, type, val, extra) => '<input id="tn_' + id + '" type="' + type + '" value="' + escapeHtml(val === undefined || val === null ? "" : val) + '" ' + (extra || "") + ' style="width:100%;box-sizing:border-box;margin:0;padding:7px;font-size:13px;">';
+  ov.innerHTML = '<div style="width:min(520px,96vw);max-height:92vh;overflow-y:auto;background:#0d0f16;border:1px solid #ffd700;border-radius:14px;padding:16px;color:#e6e9f2;text-align:left;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🏆 ' + (editId ? "Edit" : "New") + ' tournament</b><button id="tn_x" style="margin:0;padding:4px 10px;">✕</button></div>'
+    + f("Name", inp("name", "text", T.name || "", 'maxlength="40"')) + f("Icon (emoji)", inp("icon", "text", T.icon || "🏆", 'maxlength="4"'))
+    + f("Description (shown to players)", '<textarea id="tn_desc" maxlength="400" rows="3" style="width:100%;box-sizing:border-box;margin:0;padding:7px;font-size:13px;background:#15151d;color:#fff;border:1px solid #333;border-radius:8px;">' + escapeHtml(T.desc || "") + '</textarea>')
+    + f("Game mode (Daily modes)", '<select id="tn_ch" style="width:100%;margin:0;padding:7px;font-size:13px;">' + DAILY_CHALLENGES.map((c, i) => '<option value="' + i + '"' + ((T.ch || 0) === i ? " selected" : "") + '>' + c.icon + ' ' + escapeHtml(c.name) + '</option>').join("") + '</select>')
+    + f("Start (your local time)", inp("start", "datetime-local", dt(T.start || now + 3600000))) + f("End (your local time)", inp("end", "datetime-local", dt(T.end || now + 86400000 * 3)))
+    + f("Attempts per player (0 = unlimited)", inp("attempts", "number", T.attempts || 0, 'min="0" max="1000"'))
+    + f("Ball speed × (1 = normal, e.g. 0.7 / 1.5)", inp("speedMul", "number", T.speedMul || 1, 'min="0.2" max="4" step="0.05"'))
+    + f("Ball amount × (1 = normal)", inp("countMul", "number", T.countMul || 1, 'min="0.2" max="5" step="0.1"'))
+    + f("Your ball radius (0 = default)", inp("playerR", "number", T.playerR || 0, 'min="0" max="40"'))
+    + f("Min. played 1v1 games (0 = off)", inp("minGames", "number", T.minGames || 0, 'min="0"'))
+    + f("Min. ELO (0 = off)", inp("minElo", "number", T.minElo || 0, 'min="0" max="5000"')) + f("Max. ELO (0 = off)", inp("maxElo", "number", T.maxElo || 0, 'min="0" max="5000"'))
+    + f("Min. account age in hours (0 = off)", inp("minAgeH", "number", T.minAgeH || 0, 'min="0"'))
+    + f("Show top N in ranking", inp("topN", "number", T.topN || 100, 'min="3" max="500"'))
+    + '<label style="display:flex;gap:8px;align-items:center;margin:10px 0;font-size:13px;"><input id="tn_hidden" type="checkbox"' + (T.hidden ? " checked" : "") + '> Hidden for players until start</label>'
+    + '<div id="tn_msg" style="min-height:18px;font-size:13px;color:#ff8a8a;"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="tn_c" style="margin:0;">Cancel</button><button id="tn_s" style="margin:0;border-color:#00ff88;">Save</button></div></div>';
+  document.body.appendChild(ov);
+  const g = id => document.getElementById("tn_" + id), close = () => ov.remove();
+  g("x").onclick = close; g("c").onclick = close;
+  g("s").onclick = async () => {
+    const name = g("name").value.trim(), s = new Date(g("start").value).getTime(), e = new Date(g("end").value).getTime(), num = (id, d) => { const v = Number(g(id).value); return isFinite(v) ? v : d; };
+    if (name.length < 2) { g("msg").textContent = "Name too short."; return; }
+    if (!(s > 0 && e > s)) { g("msg").textContent = "Check start/end (end must be after start)."; return; }
+    const o = { name, icon: g("icon").value.trim() || "🏆", desc: g("desc").value.trim(), ch: Number(g("ch").value) || 0, start: s, end: e, attempts: Math.max(0, Math.floor(num("attempts", 0))),
+      speedMul: num("speedMul", 1) || 1, countMul: num("countMul", 1) || 1, playerR: Math.max(0, num("playerR", 0)), minGames: Math.max(0, Math.floor(num("minGames", 0))), minElo: Math.max(0, Math.floor(num("minElo", 0))),
+      maxElo: Math.max(0, Math.floor(num("maxElo", 0))), minAgeH: Math.max(0, num("minAgeH", 0)), topN: Math.max(3, Math.floor(num("topN", 100))), reward: 0, hidden: g("hidden").checked };
+    if (T.awarded) o.awarded = T.awarded;
+    g("s").disabled = true;
+    try { await RPC.tournSave(editId || ("t" + Date.now().toString(36)), o); close(); alert("Saved."); }
+    catch (er) { g("s").disabled = false; g("msg").textContent = "Failed: " + (er && er.message) + " (Database Rules for tournaments set?)"; }
+  };
+}
+function _tournAdminBtn() {
+  const ex = document.getElementById("tournAdminBtn");
+  if (!_modIsAdmin()) { if (ex) ex.remove(); return; }
+  if (ex) return;
+  const bar = _adminBar(); if (!bar) return;
+  const b = document.createElement("button"); b.id = "tournAdminBtn"; b.textContent = "🏆 Tournament";
+  b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
+  b.onclick = () => tournDialog();
+  bar.appendChild(b);
+}
+setInterval(_tournAdminBtn, 3000);
 </script>
 <script id="arenaMode">
 // ═══════════════════════════════════════════════
