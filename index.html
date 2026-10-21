@@ -1747,10 +1747,19 @@ async function rpcSaveSurvival(time, replayStr, name) {
   // (oder eine Regel dafuer) den ganzen Write und damit auch die Rekordzeit verworfen -> "meine Runs werden nicht gespeichert".
   // Zeitstempel kommt jetzt vom Server (die Uhr mancher Handys geht falsch und scheiterte an der Zeit-Pruefung der Rules).
   await set(ref(db, "survival/" + uid), { name: String(name), time: Number(time), ts: serverTimestamp() });
-  try {
-    if (replayStr && String(replayStr).length <= 3900000) await set(ref(db, "survivalReplays/" + uid), String(replayStr));
-    else await remove(ref(db, "survivalReplays/" + uid));   // kein Replay = altes entfernen (nur Top 5 behalten Replays)
-  } catch (e) { console.warn("survival replay not saved (record is saved)", e); }
+  const wantRep = !!(replayStr && String(replayStr).length <= 3900000);
+  let lastErr = null;
+  for (let i = 0; i < 3; i++) {   // Replay getrennt vom Rekord, aber mit Wiederholung (kurze Verbindungsfehler)
+    try {
+      if (wantRep) await set(ref(db, "survivalReplays/" + uid), String(replayStr));
+      else await remove(ref(db, "survivalReplays/" + uid));   // kein Replay = altes entfernen (nur Top 5 behalten Replays)
+      lastErr = null; break;
+    } catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 700 + i * 900)); }
+  }
+  if (lastErr) {
+    console.warn("survival replay not saved (record is saved)", lastErr);
+    try { await remove(ref(db, "survivalReplays/" + uid)); } catch (e) {}   // altes Replay passt nicht mehr zur neuen Zeit
+  }
 }
 // Daily Challenge: nur eigener Eintrag daily/{YYYY-MM-DD}/{uid}
 async function rpcSaveDaily(day, time, name, ch) {
@@ -3824,10 +3833,14 @@ function countModeRun(field) {
 // - merkt sich nicht gespeicherte Runs in localStorage und sendet sie spaeter automatisch nach (nur fuer dasselbe Konto)
 const PENDING_KEY = "dobPendingRuns";
 function _pendRead() { try { const a = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-function _pendWrite(a) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(a.slice(-20))); } catch (e) {} }
+function _pendWrite(a) {
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(a.slice(-20))); }
+  catch (e) { try { localStorage.setItem(PENDING_KEY, JSON.stringify(a.slice(-20).map(x => { const y = Object.assign({}, x); delete y.rep; return y; }))); } catch (e2) {} }   // Speicher voll: lieber ohne Replay als den Lauf zu verlieren
+}
 function pendAdd(e) {
   e.id = Date.now() + "_" + Math.random().toString(36).slice(2, 7); e.at = Date.now(); e.tries = 0;
   const a = _pendRead().filter(x => !(x.type === e.type && x.name === e.name && x.key === e.key && Number(x.t) <= Number(e.t)));   // nur die beste Zeit je Ziel
+  if (e.type === "surv" && e.rep) a.forEach(x => { if (x.type === "surv") delete x.rep; });
   a.push(e); _pendWrite(a);
 }
 function _saveErrText(e) {
@@ -3871,7 +3884,7 @@ async function flushPendingRuns() {
         if (Date.now() - e.at > 2 * 86400000 || (e.tries || 0) >= 6) drop = true;
         else if (e.type === "surv") {
           const old = await dbGet("survival/" + myUid);
-          if (!(old && Number(old.time) >= e.t)) await RPC.saveSurvival(e.t, null, onlineAccount.name);
+          if (!(old && Number(old.time) >= e.t)) await RPC.saveSurvival(e.t, e.rep || null, onlineAccount.name);
           drop = true;
         } else if (e.type === "daily") {
           if (e.key !== dailyKeyNow()) drop = true;   // alte Tage zaehlen nicht mehr
@@ -3927,15 +3940,21 @@ async function endSurvival(camped) {
       best = (old && Number(old.time)) || 0;
       if (t > best && t >= 1) {
         let keepRep = true;
-        try { const svAll = (await RPC.get("survival")) || {}; keepRep = Object.entries(svAll).filter(([u, v]) => u !== myUid && (Number(v && v.time) || 0) > t).length < REPLAY_TOP_SURV; } catch (e) {}
+        try {   // gleiche Logik wie Rangliste + Replay-Aufraeumen (geloeschte/gebannte Konten und doppelte Namen zaehlen nicht mit)
+          const [svAll, plAll] = await Promise.all([RPC.get("survival"), RPC.get("players")]);
+          const sv2 = Object.assign({}, svAll || {}); sv2[myUid] = { name: onlineAccount.name, time: t };
+          const pl2 = Object.assign({}, plAll || {}); if (!pl2[myUid]) pl2[myUid] = { name: onlineAccount.name };
+          keepRep = survivalKeepUids(sv2, pl2).has(myUid);
+        } catch (e) {}
         const _rs = keepRep ? JSON.stringify(rec) : null;
-        await _withRetry(() => RPC.saveSurvival(t, _rs, onlineAccount.name));
+        try { await _withRetry(() => RPC.saveSurvival(t, _rs, onlineAccount.name)); }
+        catch (e) { if (_rs && _rs.length <= 600000) window._pendRep = _rs; throw e; }
         isRecord = true; best = t;
       }
     }
   } catch (e) {
     saved = false; window._lastSaveErr = _saveErrText(e); console.warn("survival save failed", e);
-    if (onlineAccount && t >= 1) { pendAdd({ type: "surv", name: onlineAccount.name, key: "", t }); queued = true; }
+    if (onlineAccount && t >= 1) { const _pe = { type: "surv", name: onlineAccount.name, key: "", t }; if (window._pendRep) _pe.rep = window._pendRep; window._pendRep = null; pendAdd(_pe); queued = true; }
   }
   _survInfo = { best, isRecord, saved, queued };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
