@@ -11472,6 +11472,15 @@ function tournVisible(t) {
   if (t.hidden && s === "soon") return false;
   return true;
 }
+function tournStdActive(now) { return tournList().find(t => t.std && now >= t.start && now < t.end && /^[0-9]{13}$/.test(String(t.start))) || null; }
+function tournStdEligible(t) {
+  if (_modIsAdminSafe()) return "";
+  const g = (Number(onlineAccount.wins) || 0) + (Number(onlineAccount.losses) || 0), elo = Number(onlineAccount.elo) || 1500;
+  if (t.minGames && g < t.minGames) return "You need at least " + t.minGames + " played 1v1 games.";
+  if (t.minElo && elo < t.minElo) return "Minimum ELO: " + t.minElo;
+  if (t.maxElo && elo > t.maxElo) return "Maximum ELO: " + t.maxElo;
+  return "";
+}
 function tournLeft(ms) { ms = Math.max(0, ms); const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4); return (d ? d + "d " : "") + h + "h " + m + "m"; }
 function tournBtnUpd() {
   const d = document.getElementById("dailyBtn"); if (!d) return;
@@ -11480,7 +11489,7 @@ function tournBtnUpd() {
   if (!l) { if (b) b.remove(); return; }
   if (!b) { b = document.createElement("button"); b.id = "tournBtn"; b.style.flexBasis = "100%"; b.style.borderColor = "#ffd700"; d.after(b); }
   const live = tournState(l) === "live";
-  b.onclick = () => { showScreen("leaderboardScreen"); lbShowTab("daily"); loadDailyBoard("t:" + l.id); };
+  b.onclick = () => { if (l.std) { tournPlay(l.id); return; } showScreen("leaderboardScreen"); lbShowTab("daily"); loadDailyBoard("t:" + l.id); };
   const key = l.id + live + Math.floor(Date.now() / 60000); if (b.dataset.k === key) return; b.dataset.k = key;
   b.textContent = (l.icon || "🏆") + " " + l.name;
   const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;";
@@ -11504,6 +11513,7 @@ async function tournPlay(id) {
   const t = _tourns[id]; if (!t) return;
   if (!onlineAccount) { showCreateAccount(); return; }
   const adm = _modIsAdminSafe(), st = tournState(t);
+  if (t.std) { if (st !== "live") { alert(st === "soon" ? "Starts in " + tournLeft(t.start - Date.now()) : "Tournament ended."); return; } const why = tournStdEligible(t); if (why) { alert(why); return; } arenaPlay(); return; }
   if (st !== "live" && !adm) { alert("Tournament is not running."); return; }
   if (!fbReady || !myUid) { alert("Not connected yet."); return; }
   try {
@@ -11554,11 +11564,11 @@ async function loadTournBoard(id) {
   const tabs = "";
   if (!T) { t.innerHTML = tabs + '<div class="lb-row"><span style="margin:0 auto;">Tournament not found</span></div>'; return; }
   const st = tournState(T), ch = DAILY_CHALLENGES[T.ch] || DAILY_CHALLENGES[0], adm = _modIsAdminSafe();
-  const bits = [ch.icon + " " + ch.name];
-  if (T.speedMul && T.speedMul !== 1) bits.push("speed ×" + T.speedMul);
-  if (T.countMul && T.countMul !== 1) bits.push("balls ×" + T.countMul);
-  if (T.playerR) bits.push("your ball r=" + T.playerR);
-  bits.push(T.attempts ? T.attempts + " attempt(s)" : "unlimited attempts");
+  const bits = T.std ? ["⚔️ Standard 1v1 (Arena)"] : [ch.icon + " " + ch.name];
+  if (!T.std && T.speedMul && T.speedMul !== 1) bits.push("speed ×" + T.speedMul);
+  if (!T.std && T.countMul && T.countMul !== 1) bits.push("balls ×" + T.countMul);
+  if (!T.std && T.playerR) bits.push("your ball r=" + T.playerR);
+  if (!T.std) bits.push(T.attempts ? T.attempts + " attempt(s)" : "unlimited attempts");
   if (T.minGames) bits.push("min " + T.minGames + " games");
   if (T.minElo) bits.push("ELO ≥ " + T.minElo);
   if (T.maxElo) bits.push("ELO ≤ " + T.maxElo);
@@ -11568,7 +11578,7 @@ async function loadTournBoard(id) {
     + '<div style="font-size:12px;color:#ffd700;margin-top:4px;">' + (st === "live" ? "🟢 live · ends in " + tournLeft(T.end - Date.now()) : st === "soon" ? "⏳ starts in " + tournLeft(T.start - Date.now()) : "🏁 finished") + '</div>'
     + '<div style="font-size:11px;opacity:.65;">' + new Date(T.start).toLocaleString() + ' → ' + new Date(T.end).toLocaleString() + '</div>'
     + '<div style="font-size:12px;opacity:.8;margin-top:3px;">' + bits.map(escapeHtml).join(" · ") + '</div>'
-    + (st === "live" || adm ? '<button style="margin:8px 4px 2px;padding:7px 18px;font-size:14px;border-color:#00ff88;" onclick="tournPlay(\'' + escapeHtml(id) + '\')">▶ ' + (st === "live" ? "Play" : "Test (not saved)") + '</button>' : '')
+    + (T.std ? (st === "live" ? '<button style="margin:8px 4px 2px;padding:7px 18px;font-size:14px;border-color:#00ff88;" onclick="tournPlay(\'' + escapeHtml(id) + '\')">▶ Join Arena</button>' : '') : st === "live" || adm ? '<button style="margin:8px 4px 2px;padding:7px 18px;font-size:14px;border-color:#00ff88;" onclick="tournPlay(\'' + escapeHtml(id) + '\')">▶ ' + (st === "live" ? "Play" : "Test (not saved)") + '</button>' : '')
     + (adm ? '<div style="margin-top:6px;"><button style="margin:2px;padding:4px 10px;font-size:12px;" onclick="tournDialog(\'' + escapeHtml(id) + '\')">✏ Edit</button><button style="margin:2px;padding:4px 10px;font-size:12px;" onclick="tournDelete(\'' + escapeHtml(id) + '\')">🗑 Delete</button></div>' : '') + '</div>';
   if (!adm) { t.innerHTML = tabs + info; return; }
   const head = '<div class="lb-row"><span>Rank</span><span>Name</span><span>Time</span><span>Tries</span></div>';
@@ -11619,7 +11629,7 @@ function tournDialog(editId) {
     + '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:18px;">🏆 ' + (editId ? "Edit" : "New") + ' tournament</b><button id="tn_x" style="margin:0;padding:4px 10px;">✕</button></div>'
     + f("Name", inp("name", "text", T.name || "", 'maxlength="40"')) + f("Icon (emoji)", inp("icon", "text", T.icon || "🏆", 'maxlength="4"'))
     + f("Description (shown to players)", '<textarea id="tn_desc" maxlength="400" rows="3" style="width:100%;box-sizing:border-box;margin:0;padding:7px;font-size:13px;background:#15151d;color:#fff;border:1px solid #333;border-radius:8px;">' + escapeHtml(T.desc || "") + '</textarea>')
-    + f("Game mode (Daily modes)", '<select id="tn_ch" style="width:100%;margin:0;padding:7px;font-size:13px;">' + DAILY_CHALLENGES.map((c, i) => '<option value="' + i + '"' + ((T.ch || 0) === i ? " selected" : "") + '>' + c.icon + ' ' + escapeHtml(c.name) + '</option>').join("") + '</select>')
+    + f("Game mode", '<select id="tn_ch" style="width:100%;margin:0;padding:7px;font-size:13px;"><option value="-1' + '"' + (T.std ? " selected" : "") + '>⚔️ Standard 1v1 (like Hourly Arena)</option>' + DAILY_CHALLENGES.map((c, i) => '<option value="' + i + '"' + ((T.ch || 0) === i ? " selected" : "") + '>' + c.icon + ' ' + escapeHtml(c.name) + '</option>').join("") + '</select>')
     + f("Start (your local time)", inp("start", "datetime-local", dt(T.start || now + 3600000))) + f("End (your local time)", inp("end", "datetime-local", dt(T.end || now + 86400000 * 3)))
     + f("Attempts per player (0 = unlimited)", inp("attempts", "number", T.attempts || 0, 'min="0" max="1000"'))
     + f("Ball speed × (1 = normal, e.g. 0.7 / 1.5)", inp("speedMul", "number", T.speedMul || 1, 'min="0.2" max="4" step="0.05"'))
@@ -11639,7 +11649,7 @@ function tournDialog(editId) {
     const name = g("name").value.trim(), s = new Date(g("start").value).getTime(), e = new Date(g("end").value).getTime(), num = (id, d) => { const v = Number(g(id).value); return isFinite(v) ? v : d; };
     if (name.length < 2) { g("msg").textContent = "Name too short."; return; }
     if (!(s > 0 && e > s)) { g("msg").textContent = "Check start/end (end must be after start)."; return; }
-    const o = { name, icon: g("icon").value.trim() || "🏆", desc: g("desc").value.trim(), ch: Number(g("ch").value) || 0, start: s, end: e, attempts: Math.max(0, Math.floor(num("attempts", 0))),
+    const o = { name, icon: g("icon").value.trim() || "🏆", desc: g("desc").value.trim(), ch: Math.max(0, Number(g("ch").value) || 0), std: Number(g("ch").value) === -1, start: s, end: e, attempts: Math.max(0, Math.floor(num("attempts", 0))),
       speedMul: num("speedMul", 1) || 1, countMul: num("countMul", 1) || 1, playerR: Math.max(0, num("playerR", 0)), minGames: Math.max(0, Math.floor(num("minGames", 0))), minElo: Math.max(0, Math.floor(num("minElo", 0))),
       maxElo: Math.max(0, Math.floor(num("maxElo", 0))), minAgeH: Math.max(0, num("minAgeH", 0)), topN: Math.max(3, Math.floor(num("topN", 100))), reward: 0, hidden: g("hidden").checked };
     if (T.awarded) o.awarded = T.awarded;
@@ -11674,6 +11684,7 @@ let arenaStandings = {}, arenaNextT = null, arenaLobbyIv = null, arenaLobbyUnsub
 function arenaNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
 function arenaInfo() {
   const now = arenaNow(), s = Math.floor(now / ARENA_H) * ARENA_H;
+  try { const T = (typeof tournStdActive === "function") && tournStdActive(now); if (T) return { id: String(T.start), start: T.start, end: T.end, running: true, nextStart: T.end, now, tourn: T }; } catch (e) {}
   return { id: String(s), start: s, end: s + ARENA_MS, running: now < s + ARENA_MS, nextStart: s + ARENA_H, now };
 }
 function arenaEnded() { return !arenaSess || arenaNow() >= arenaSess.end; }
@@ -12009,6 +12020,7 @@ async function arenaPlay() {
   if (!onlineAccount) { closeArenaOv(); showCreateAccount(); return; }
   if (!fbReady || !myUid) { try { leagueToast("Not connected yet", "#ff8844"); } catch (e) {} return; }
   const inf = arenaInfo();
+  if (inf.tourn) { const why = tournStdEligible(inf.tourn); if (why) { alert(why); return; } }
   if (!inf.running) { arenaPreJoin(); return; }   // zwischen :57 und :00: fuer die naechste Arena vorab anmelden
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
   arenaLeave(true);
@@ -12165,7 +12177,7 @@ function arenaBtnUpd() {
   const b = document.getElementById("arenaBtn"); if (!b) return;
   const i = arenaInfo(), t = i.running ? "🟢 live · " + Math.ceil((i.end - i.now) / 60000) + " min left" : "⏳ starts in " + Math.ceil((i.nextStart - i.now) / 60000) + " min · join early";
   const key = "arena|" + t; if (b.dataset.k === key) return; b.dataset.k = key;
-  b.textContent = "🏟 Hourly Arena";
+  b.textContent = i.tourn ? ((i.tourn.icon || "🏆") + " " + i.tourn.name) : "🏟 Hourly Arena";
   const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.75;margin-top:2px;letter-spacing:0;"; sm.textContent = t; b.appendChild(sm);
 }
 let arenaRestoreTried = false;
