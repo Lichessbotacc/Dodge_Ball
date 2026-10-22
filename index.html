@@ -11463,6 +11463,38 @@ gameWrap.addEventListener("touchstart", e => {
 </body>
 </html>
 </script>
+<style id="clanCss">
+#clanOv{position:fixed;inset:0;background:radial-gradient(circle at 50% 0,#2a1f5c 0,#0b0b1a 70%);z-index:99999;overflow:auto;padding:18px;color:#eef;font-family:inherit;animation:clFade .2s}
+@keyframes clFade{from{opacity:0}to{opacity:1}}
+#clanOv .cl-wrap{max-width:580px;margin:0 auto;position:relative}
+#clanOv .cl-x{position:absolute;right:0;top:0;width:36px;height:36px;border-radius:50%;background:#ffffff18;border:1px solid #ffffff30;color:#fff;font-size:16px;cursor:pointer}
+#clanOv h2{margin:4px 40px 4px 0;font-size:26px;letter-spacing:.5px}
+#clanOv h3{margin:22px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#9aa0ff}
+#clanOv .cl-sub{color:#b8bbe0;margin:0 0 14px;font-size:14px}
+#clanOv .cl-hero{background:linear-gradient(135deg,#6c4cff,#c94cff);border-radius:16px;padding:16px 18px;margin:12px 0;box-shadow:0 8px 30px #6c4cff55;display:flex;justify-content:space-between;align-items:center}
+#clanOv .cl-hero b{font-size:34px;line-height:1}
+#clanOv .cl-hero small{display:block;opacity:.85;font-size:12px;text-transform:uppercase;letter-spacing:1.5px}
+#clanOv .cl-card{background:#ffffff0d;border:1px solid #ffffff1f;border-radius:14px;padding:12px 14px;margin:8px 0;display:flex;align-items:center;gap:12px;transition:.15s}
+#clanOv .cl-card:hover{background:#ffffff16;transform:translateY(-1px)}
+#clanOv .cl-rank{min-width:34px;height:34px;border-radius:10px;background:#ffffff14;display:flex;align-items:center;justify-content:center;font-weight:700}
+#clanOv .cl-r1{background:linear-gradient(135deg,#ffd700,#ff9d00);color:#222}
+#clanOv .cl-r2{background:linear-gradient(135deg,#e6e6f2,#a9a9c4);color:#222}
+#clanOv .cl-r3{background:linear-gradient(135deg,#e8a56a,#b4693a);color:#222}
+#clanOv .cl-main{flex:1;min-width:0}
+#clanOv .cl-main b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#clanOv .cl-main small{color:#a9acd0;display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis}
+#clanOv .cl-pts{font-weight:800;font-size:18px;color:#ffd96a;white-space:nowrap}
+#clanOv .cl-pts small{font-size:10px;color:#a9acd0;display:block;text-align:right;font-weight:400}
+#clanOv button.cl-b{background:#ffffff14;color:#fff;border:1px solid #ffffff30;border-radius:10px;padding:7px 12px;margin:2px;cursor:pointer;font-size:13px;transition:.15s}
+#clanOv button.cl-b:hover{background:#ffffff28}
+#clanOv button.cl-p{background:linear-gradient(135deg,#6c4cff,#c94cff);border:0;font-weight:700;padding:10px 18px}
+#clanOv button.cl-d{background:#ff4d6a33;border-color:#ff4d6a88}
+#clanOv .cl-tag{font-size:11px;padding:2px 8px;border-radius:20px;margin-left:6px;background:#ffffff18;vertical-align:middle}
+#clanOv .cl-t-leader{background:#ffd70033;color:#ffd96a}
+#clanOv .cl-t-co{background:#6cc7ff33;color:#8fd6ff}
+#clanOv .cl-me{border-color:#c94cff;box-shadow:0 0 0 1px #c94cff55 inset}
+#clanOv .cl-acts{display:flex;flex-wrap:wrap}
+</style>
 <script id="clanMode">
 (function(){
 const W = () => window._dobRPC;
@@ -11482,12 +11514,13 @@ function overlay(html) {
   let o = document.getElementById("clanOv");
   if (!o) {
     o = document.createElement("div"); o.id = "clanOv";
-    o.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;overflow:auto;padding:16px;color:#fff;font-family:inherit";
+    
     document.body.appendChild(o);
   }
-  o.innerHTML = '<div style="max-width:560px;margin:0 auto"><button onclick="document.getElementById(\'clanOv\').remove()" style="float:right">✕</button>' + html + '</div>';
+  o.innerHTML = '<div class="cl-wrap"><button class="cl-x" onclick="document.getElementById(\'clanOv\').remove()">✕</button>' + html + '</div>';
 }
-const btn = (fn, t, extra) => `<button onclick="${fn}" ${extra || ""} style="margin:2px">${t}</button>`;
+const btn = (fn, t, cls) => `<button class="cl-b ${cls || ""}" onclick="${fn}">${t}</button>`;
+const rk = i => `<div class="cl-rank ${i < 3 ? "cl-r" + (i + 1) : ""}">${i + 1}</div>`;
 const ROLE = { leader: "👑 Leader", co: "⭐ Co-Leader", member: "Member" };
 async function run(f) { try { await f(); } catch (e) { alert("Clan: " + (e && e.message || e)); } openClans(); }
 async function openClans() {
@@ -11498,8 +11531,8 @@ async function openClans() {
     if (my) return renderMine(my);
     const [clans, mem] = await Promise.all([W().get("clans"), W().get("clanMembers")]);
     const list = Object.entries(clans || {}).map(([id, c]) => ({ id, c, pts: total((mem || {})[id]), n: Object.keys((mem || {})[id] || {}).length })).sort((a, b) => b.pts - a.pts);
-    overlay(`<h2>🛡 Clans</h2><p>You are not in a clan.</p>${btn("clanUI.create()", "➕ Create clan")}
-      <h3>All clans</h3>` + (list.map((x, i) => `<div style="border:1px solid #555;padding:8px;margin:6px 0;border-radius:8px"><b>#${i + 1} ${esc(x.c.name)}</b> — ${x.pts} pts · ${x.n}/${MAXM}<br><small>${esc(x.c.desc)}</small><br>${x.n < MAXM ? btn(`clanUI.join('${x.id}')`, "Join") : "Full"}</div>`).join("") || "<p>No clans yet.</p>"));
+    overlay(`<h2>🛡 Clans</h2><p class="cl-sub">Join a clan or found your own. Every win earns points for your clan.</p>${btn("clanUI.create()", "➕ Create clan", "cl-p")}
+      <h3>Clan ranking</h3>` + (list.map((x, i) => `<div class="cl-card">${rk(i)}<div class="cl-main"><b>${esc(x.c.name)}</b><small>${esc(x.c.desc) || "—"} · ${x.n}/${MAXM} members</small></div><div class="cl-pts">${x.pts}<small>POINTS</small></div>${x.n < MAXM ? btn(`clanUI.join('${x.id}')`, "Join", "cl-p") : "<small>Full</small>"}</div>`).join("") || '<p class="cl-sub">No clans yet — be the first!</p>'));
   } catch (e) { overlay("<p>Error: " + esc(e.message) + "</p>"); }
 }
 function renderMine(my) {
@@ -11511,14 +11544,15 @@ function renderMine(my) {
       if (r === "leader") a = btn(`clanUI.kick('${u}')`, "Kick") + (m.role === "member" ? btn(`clanUI.promote('${u}')`, "⭐") : m.role === "co" ? btn(`clanUI.demote('${u}')`, "⬇") : "") + btn(`clanUI.transfer('${u}')`, "👑");
       else if (r === "co" && m.role === "member") a = btn(`clanUI.kick('${u}')`, "Kick");
     }
-    return `<div style="padding:4px 0;border-bottom:1px solid #444">${esc(m.name)} <small>${ROLE[m.role] || m.role}</small> — <b>${m.pts || 0}</b> ${a}</div>`;
+    return `<div class="cl-card ${u === uid ? "cl-me" : ""}"><div class="cl-main"><b>${esc(m.name)}<span class="cl-tag cl-t-${m.role}">${ROLE[m.role] || m.role}</span></b></div><div class="cl-pts">${m.pts || 0}<small>WINS</small></div><div class="cl-acts">${a}</div></div>`;
   }).join("");
-  overlay(`<h2>🛡 ${esc(my.clan.name)}</h2><p>${esc(my.clan.desc)}</p><p><b>Total clan points: ${total(my.members)}</b> · ${ms.length}/${MAXM} members</p>${rows}<hr>
-    ${r === "leader" ? btn("clanUI.desc()", "✏ Description") + btn("clanUI.disband()", "🗑 Disband") : btn("clanUI.leave()", "Leave clan")}
-    ${btn("openClans()", "↻")}<h3>Top clans</h3><div id="clanTop">…</div>`);
+  overlay(`<h2>🛡 ${esc(my.clan.name)}</h2><p class="cl-sub">${esc(my.clan.desc) || "—"}</p><div class="cl-hero"><div><small>Total clan points</small><b>${total(my.members)}</b></div><div style="text-align:right"><small>Members</small><b>${ms.length}/${MAXM}</b></div></div>
+    <h3>Members</h3>${rows}<div style="margin-top:14px">
+    ${r === "leader" ? btn("clanUI.desc()", "✏ Description") + btn("clanUI.disband()", "🗑 Disband", "cl-d") : btn("clanUI.leave()", "Leave clan", "cl-d")}
+    ${btn("openClans()", "↻ Refresh")}</div><h3>Top clans</h3><div id="clanTop">…</div>`);
   Promise.all([W().get("clans"), W().get("clanMembers")]).then(([c, m]) => {
     const el = document.getElementById("clanTop"); if (!el) return;
-    el.innerHTML = Object.entries(c || {}).map(([id, x]) => [x.name, total((m || {})[id])]).sort((a, b) => b[1] - a[1]).slice(0, 10).map((x, i) => `<div>#${i + 1} ${esc(x[0])} — ${x[1]}</div>`).join("");
+    el.innerHTML = Object.entries(c || {}).map(([id, x]) => [x.name, total((m || {})[id])]).sort((a, b) => b[1] - a[1]).slice(0, 10).map((x, i) => `<div class="cl-card">${rk(i)}<div class="cl-main"><b>${esc(x[0])}</b></div><div class="cl-pts">${x[1]}</div></div>`).join("");
   }).catch(() => {});
 }
 const w = (p, v) => W().clanWrite(p, v);
