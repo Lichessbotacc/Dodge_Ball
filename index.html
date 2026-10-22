@@ -11728,13 +11728,13 @@ window.clanUI = {
   }),
   accept: t => run(async () => {
     const c = _my.cid, rq = await W().get("clanReq/" + c + "/" + t);
-    await w("clanReq/" + c + "/" + t, null);
-    if (!rq) return;
+    if (!rq) { await w("clanReq/" + c + "/" + t, null).catch(() => {}); return; }
     if (Object.keys(_my.members).length >= MAXM) throw new Error("Clan is full.");
     const other = await W().get("clanOf/" + t);
     if (other) { const om = await W().get("clanMembers/" + other + "/" + t).catch(() => null); if (om) throw new Error("Player already joined another clan."); }
     await w("clanMembers/" + c + "/" + t, { name: String(rq.name || "Player").slice(0, 30), role: "member", pts: 0, pm: MK() });
-    await w("clanOf/" + t, c);
+    await w("clanOf/" + t, c).catch(() => {});
+    await w("clanReq/" + c + "/" + t, null);
   }),
   decline: t => run(async () => { await w("clanReq/" + _my.cid + "/" + t, null); }),
   leave: () => run(async () => {
