@@ -10672,17 +10672,18 @@ gameWrap.addEventListener("touchstart", e => {
     { id: "sniper",    name: "Sniper",       col: "#4fb4ff", tier: 2, pm: 1.1,  sm: 1,    info: "Aims at the nearest brick after hitting a wall." },
     { id: "splash",    name: "Splash",       col: "#ff9f43", tier: 2, pm: 1,    sm: 1,    info: "100% hit + 40% area damage (radius 1.3)." },
     { id: "demo",      name: "Demo",         col: "#c8a165", tier: 3, pm: 16,   sm: .5,   info: "About half speed, about 16× power." },
-    { id: "poison",    name: "Poison",       col: "#7bed9f", tier: 3, pm: .45,  sm: 1,    info: "Poisons bricks within radius 1.3. Poisoned bricks take damage × poison power.", powMax: 119 },
+    { id: "poison",    name: "Poison",       col: "#7bed9f", tier: 3, pm: .45,  sm: 1,    info: "Poisons bricks within radius 1.3. Poisoned bricks take damage × poison power." },
     { id: "scatter",   name: "Scatter",      col: "#ff7ad9", tier: 4, pm: 1,    sm: 1,    info: "Spawns 2 mini balls with 40% power on wall contact (one hit)." },
-    { id: "cash",      name: "Cash",         col: "#ffd32a", tier: 5, pm: .45,  sm: 1,    info: "No damage. Earns money = power × current brick health.", powMax: 199 },
+    { id: "cash",      name: "Cash",         col: "#ffd32a", tier: 5, pm: .45,  sm: 1,    info: "No damage. Earns money = power × current brick health." },
     { id: "pierce",    name: "Pierce",       col: "#e08cff", tier: 5, pm: 1,    sm: 1.1,  info: "Pierces bricks, each only once.", max: 40 },
     { id: "sword",     name: "Sword",        col: "#d0d6e0", tier: 6, pm: 1,    sm: 1,    info: "Aims at shield bricks after a wall hit (full damage)." },
     { id: "fire",      name: "Fire",         col: "#ff5d3a", tier: 6, pm: 1,    sm: 1,    info: "Sets bricks on fire: 35% power per second." },
     { id: "lightning", name: "Lightning",    col: "#7ee8ff", tier: 6, pm: 1,    sm: 1.15, info: "Chain lightning to more bricks for 30% damage." },
     { id: "prop",      name: "Proportional", col: "#b8ff6b", tier: 7, pm: 1,    sm: 1,    info: "Blue bricks ×2, hex bricks ×25 damage." }
   ];
-  var CASH_BALL_MUL = 50, CASH_BALL_CAP = 1, CASH_BALL_MIN = 0.10;  // Zahlt pro Treffer Anteil (Kraft/Steinleben × MUL, max CAP) vom Steinwert   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
-  var POISON_PER_LVL = 0.3, POISON_MAX = 40;   // Poison: Schaden auf vergiftete Steine = 1 + 0,3 pro Power-Stufe, max. x40
+  var CASH_BALL_MUL = 50, CASH_BALL_CAP = 2, CASH_BALL_MIN = 0.10;  // Zahlt pro Treffer Anteil (Kraft/Steinleben × MUL, max CAP) vom Steinwert   // Cash-Ball: Kraft × (Anteil des Steinlebens) × Faktor × Brick-Money^0.86 (Wiki: Cash-Bonus wirkt abgeschwaecht, 12x -> 8,5x ≈ hoch 0.86). Nur Crit-Karte wirkt sonst. Zahl = Feintuning
+  var POISON_PER_LVL = 0.3, POISON_KNEE = 120;
+  function poisonMul(p) { var lin = 1 + POISON_PER_LVL * p; return p <= POISON_KNEE ? lin : (1 + POISON_PER_LVL * POISON_KNEE) * Math.pow(p / POISON_KNEE, 0.7); }   // Poison: Schaden auf vergiftete Steine = 1 + 0,3 pro Power-Stufe, max. x40
   var BALL_POWER_MUL = 0.6;   // globale Abschwaechung der Ball-Power (1 = Original)
   var BM = {}; BALLS.forEach(function (b) { BM[b.id] = b; });
   function BP(slot) { return slot === 1 ? 9.46 / 5 : 12.12 * Math.pow(2.424, slot - 2); }   // Basic Lv.5 = 9,46 und Splash Lv.1 = 12,12 (Screenshot); Rest geschätzt
@@ -10895,7 +10896,7 @@ gameWrap.addEventListener("touchstart", e => {
     M.splR = cv_("sr", 1);
     M.splD = cv_("sd", 1);
     M.prest = bv("prest") * Math.pow(1.15, pc("pb"));
-    M.psnMul = S.balls.poison.own > 0 ? Math.min(POISON_MAX, Math.max(2, 1 + POISON_PER_LVL * S.balls.poison.pow)) : 2;   // Gift-Kraft waechst mit den Power-Stufen des Poison-Balls (begrenzt); vorher = roher Schadenswert, dadurch wurde der Schaden quadriert
+    M.psnMul = S.balls.poison.own > 0 ? Math.max(2, poisonMul(S.balls.poison.pow)) : 2;   // Gift-Kraft waechst mit den Power-Stufen des Poison-Balls (begrenzt); vorher = roher Schadenswert, dadurch wurde der Schaden quadriert
     // Kartenlimit: überzählige Bälle in umgekehrter Kaufreihenfolge entfernen
     var over = totalBalls() - M.maxBalls, changed = false;
     while (over > 0 && S.buyLog.length) {
