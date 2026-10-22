@@ -11494,6 +11494,20 @@ gameWrap.addEventListener("touchstart", e => {
 #clanOv .cl-t-co{background:#6cc7ff33;color:#8fd6ff}
 #clanOv .cl-me{border-color:#c94cff;box-shadow:0 0 0 1px #c94cff55 inset}
 #clanOv .cl-acts{display:flex;flex-wrap:wrap}
+#clanOv .cl-tabs{display:flex;gap:6px;background:#ffffff0d;border-radius:14px;padding:4px;margin:12px 0}
+#clanOv .cl-tab{flex:1;background:none;border:0;color:#b8bbe0;padding:10px 4px;border-radius:10px;cursor:pointer;font-weight:700;font-size:13px}
+#clanOv .cl-tab.on{background:linear-gradient(135deg,#6c4cff,#c94cff);color:#fff}
+#clanOv .cl-head{display:flex;gap:14px;align-items:center;margin:6px 44px 12px 0}
+#clanOv .cl-badge{width:44px;height:44px;border-radius:12px 12px 22px 22px;background:linear-gradient(160deg,#ffd700,#c94cff);color:#222;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 3px 10px #0008}
+#clanOv .cl-badge.big{width:64px;height:72px;font-size:32px}
+#clanOv .cl-stats{display:flex;gap:8px}
+#clanOv .cl-stats>div{flex:1;background:#ffffff0d;border:1px solid #ffffff1f;border-radius:12px;padding:8px;text-align:center}
+#clanOv .cl-stats small{display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#a9acd0}
+#clanOv .cl-stats b{font-size:18px;color:#ffd96a}
+#clanOv .cl-form{display:flex;flex-direction:column;gap:6px}
+#clanOv .cl-form label{font-size:12px;color:#9aa0ff;text-transform:uppercase;letter-spacing:1px;margin-top:6px}
+#clanOv input,#clanOv textarea{background:#ffffff12;border:1px solid #ffffff30;border-radius:10px;color:#fff;padding:10px;font:inherit;width:100%;box-sizing:border-box}
+#clanOv .cl-search{margin-bottom:8px}
 </style>
 <script id="clanMode">
 (function(){
@@ -11522,52 +11536,64 @@ function overlay(html) {
 const btn = (fn, t, cls) => `<button class="cl-b ${cls || ""}" onclick="${fn}">${t}</button>`;
 const rk = i => `<div class="cl-rank ${i < 3 ? "cl-r" + (i + 1) : ""}">${i + 1}</div>`;
 const ROLE = { leader: "👑 Leader", co: "⭐ Co-Leader", member: "Member" };
-async function run(f) { try { await f(); } catch (e) { alert("Clan: " + (e && e.message || e)); } openClans(); }
-async function openClans() {
+async function run(f) { try { await f(); } catch (e) { alert("Clan: " + (e && e.message || e)); } openClans(true); }
+let _tab = null, _q = "", _cache = null;
+async function getAll() { const [c, m] = await Promise.all([W().get("clans"), W().get("clanMembers")]); return _cache = { c: c || {}, m: m || {} }; }
+const ranked = d => Object.entries(d.c).map(([id, c]) => ({ id, c, pts: total(d.m[id]), n: Object.keys(d.m[id] || {}).length })).sort((a, b) => b.pts - a.pts);
+const tabs = (cur, items) => `<div class="cl-tabs">${items.map(([k, t]) => `<button class="cl-tab ${k === cur ? "on" : ""}" onclick="clanUI.tab('${k}')">${t}</button>`).join("")}</div>`;
+const badge = (name, big) => `<div class="cl-badge ${big ? "big" : ""}">${esc((name || "?").trim().charAt(0).toUpperCase())}</div>`;
+function clanRows(list, joinable) {
+  return list.map((x, i) => `<div class="cl-card">${rk(i)}${badge(x.c.name)}<div class="cl-main"><b>${esc(x.c.name)}</b><small>${esc(x.c.desc) || "—"}</small><small>👥 ${x.n}/${MAXM}</small></div><div class="cl-pts">🏆 ${x.pts}<small>CLAN POINTS</small></div>${joinable ? (x.n < MAXM ? btn(`clanUI.join('${x.id}')`, "Join", "cl-p") : "<small>Full</small>") : ""}</div>`).join("") || '<p class="cl-sub">No clans found.</p>';
+}
+async function openClans(keep) {
   if (typeof onlineAccount === "undefined" || !onlineAccount) { showCreateAccount(); return; }
+  if (!keep) { _tab = null; _q = ""; }
   overlay("<p>Loading…</p>");
   try {
-    const my = await loadMy();
-    if (my) return renderMine(my);
-    const [clans, mem] = await Promise.all([W().get("clans"), W().get("clanMembers")]);
-    const list = Object.entries(clans || {}).map(([id, c]) => ({ id, c, pts: total((mem || {})[id]), n: Object.keys((mem || {})[id] || {}).length })).sort((a, b) => b.pts - a.pts);
-    overlay(`<h2>🛡 Clans</h2><p class="cl-sub">Join a clan or found your own. Every win earns points for your clan.</p>${btn("clanUI.create()", "➕ Create clan", "cl-p")}
-      <h3>Clan ranking</h3>` + (list.map((x, i) => `<div class="cl-card">${rk(i)}<div class="cl-main"><b>${esc(x.c.name)}</b><small>${esc(x.c.desc) || "—"} · ${x.n}/${MAXM} members</small></div><div class="cl-pts">${x.pts}<small>POINTS</small></div>${x.n < MAXM ? btn(`clanUI.join('${x.id}')`, "Join", "cl-p") : "<small>Full</small>"}</div>`).join("") || '<p class="cl-sub">No clans yet — be the first!</p>'));
+    const my = await loadMy(), d = await getAll();
+    if (my) { my.members = d.m[my.cid] || my.members; my.clan = d.c[my.cid] || my.clan; return renderMine(my, d); }
+    const t = _tab || "browse";
+    let body;
+    if (t === "create") body = `<div class="cl-form"><label>Clan name</label><input id="clN" maxlength="24" placeholder="3–24 characters"><label>Description</label><textarea id="clD" maxlength="200" rows="3" placeholder="What is your clan about?"></textarea>${btn("clanUI.create()", "🛡 Create clan", "cl-p")}</div>`;
+    else if (t === "top") body = clanRows(ranked(d).slice(0, 50), true);
+    else body = `<input class="cl-search" id="clS" placeholder="🔍 Search clans…" value="${esc(_q)}" oninput="clanUI.search(this.value)"><div id="clList">${clanRows(ranked(d).filter(x => !_q || x.c.name.toLowerCase().includes(_q.toLowerCase())), true)}</div>`;
+    overlay(`<h2>🛡 Clans</h2><p class="cl-sub">You are not in a clan yet. Join one or create your own!</p>${tabs(t, [["browse", "Join clan"], ["top", "Top clans"], ["create", "Create clan"]])}${body}`);
   } catch (e) { overlay("<p>Error: " + esc(e.message) + "</p>"); }
 }
-function renderMine(my) {
-  const uid = W().myUid(), r = my.role;
+function renderMine(my, d) {
+  const uid = W().myUid(), r = my.role, t = _tab === "top" ? "top" : "clan";
   const ms = Object.entries(my.members).sort((a, b) => (b[1].pts || 0) - (a[1].pts || 0));
-  const rows = ms.map(([u, m]) => {
+  const order = { leader: 0, co: 1, member: 2 };
+  const all = ranked(d), pos = all.findIndex(x => x.id === my.cid) + 1;
+  const rows = ms.map(([u, m], i) => {
     let a = "";
     if (u !== uid) {
-      if (r === "leader") a = btn(`clanUI.kick('${u}')`, "Kick") + (m.role === "member" ? btn(`clanUI.promote('${u}')`, "⭐") : m.role === "co" ? btn(`clanUI.demote('${u}')`, "⬇") : "") + btn(`clanUI.transfer('${u}')`, "👑");
-      else if (r === "co" && m.role === "member") a = btn(`clanUI.kick('${u}')`, "Kick");
+      if (r === "leader") a = btn(`clanUI.kick('${u}')`, "Kick", "cl-d") + (m.role === "member" ? btn(`clanUI.promote('${u}')`, "⬆ Co-Leader") : m.role === "co" ? btn(`clanUI.demote('${u}')`, "⬇ Demote") : "") + btn(`clanUI.transfer('${u}')`, "👑 Leader");
+      else if (r === "co" && m.role === "member") a = btn(`clanUI.kick('${u}')`, "Kick", "cl-d");
     }
-    return `<div class="cl-card ${u === uid ? "cl-me" : ""}"><div class="cl-main"><b>${esc(m.name)}<span class="cl-tag cl-t-${m.role}">${ROLE[m.role] || m.role}</span></b></div><div class="cl-pts">${m.pts || 0}<small>WINS</small></div><div class="cl-acts">${a}</div></div>`;
+    return `<div class="cl-card ${u === uid ? "cl-me" : ""}">${rk(i)}<div class="cl-main"><b>${esc(m.name)}<span class="cl-tag cl-t-${m.role}">${ROLE[m.role] || m.role}</span></b>${a ? `<div class="cl-acts">${a}</div>` : ""}</div><div class="cl-pts">🏆 ${m.pts || 0}<small>WINS</small></div></div>`;
   }).join("");
-  overlay(`<h2>🛡 ${esc(my.clan.name)}</h2><p class="cl-sub">${esc(my.clan.desc) || "—"}</p><div class="cl-hero"><div><small>Total clan points</small><b>${total(my.members)}</b></div><div style="text-align:right"><small>Members</small><b>${ms.length}/${MAXM}</b></div></div>
-    <h3>Members</h3>${rows}<div style="margin-top:14px">
-    ${r === "leader" ? btn("clanUI.desc()", "✏ Description") + btn("clanUI.disband()", "🗑 Disband", "cl-d") : btn("clanUI.leave()", "Leave clan", "cl-d")}
-    ${btn("openClans()", "↻ Refresh")}</div><h3>Top clans</h3><div id="clanTop">…</div>`);
-  Promise.all([W().get("clans"), W().get("clanMembers")]).then(([c, m]) => {
-    const el = document.getElementById("clanTop"); if (!el) return;
-    el.innerHTML = Object.entries(c || {}).map(([id, x]) => [x.name, total((m || {})[id])]).sort((a, b) => b[1] - a[1]).slice(0, 10).map((x, i) => `<div class="cl-card">${rk(i)}<div class="cl-main"><b>${esc(x[0])}</b></div><div class="cl-pts">${x[1]}</div></div>`).join("");
-  }).catch(() => {});
+  const head = `<div class="cl-head">${badge(my.clan.name, 1)}<div style="flex:1;min-width:0"><h2 style="margin:0">${esc(my.clan.name)}</h2><p class="cl-sub" style="margin:4px 0 0">${esc(my.clan.desc) || "—"}</p></div></div>
+    <div class="cl-stats"><div><small>Clan points</small><b>🏆 ${total(my.members)}</b></div><div><small>Rank</small><b>#${pos}</b></div><div><small>Members</small><b>${ms.length}/${MAXM}</b></div></div>`;
+  const body = t === "top" ? clanRows(all.slice(0, 50), false) : `<h3>Members</h3>${rows}<div style="margin-top:14px">${r === "leader" ? btn("clanUI.desc()", "✏ Edit description") + btn("clanUI.disband()", "🗑 Disband clan", "cl-d") : btn("clanUI.leave()", "🚪 Leave clan", "cl-d")}</div>`;
+  overlay(head + tabs(t, [["clan", "My clan"], ["top", "Top clans"]]) + body);
 }
 const w = (p, v) => W().clanWrite(p, v);
 const me = () => ({ uid: W().myUid(), name: String(onlineAccount.name || "Player").slice(0, 30) });
 window.clanUI = {
+  tab: k => { _tab = k; openClans(true); },
+  search: v => { _q = v; const el = document.getElementById("clList"); if (el && _cache) el.innerHTML = clanRows(ranked(_cache).filter(x => !v || x.c.name.toLowerCase().includes(v.toLowerCase())), true); },
   create: () => run(async () => {
-    const name = (prompt("Clan name (3-24 chars):") || "").trim(); if (!name) return;
+    const name = (document.getElementById("clN").value || "").trim();
     if (name.length < 3 || name.length > 24) throw new Error("Name must be 3-24 characters.");
-    const desc = (prompt("Description:") || "").trim().slice(0, 200);
-    if (await W().get("clanOf/" + me().uid)) { const m = await loadMy(); if (m) throw new Error("Already in a clan."); }
+    const desc = (document.getElementById("clD").value || "").trim().slice(0, 200);
+    if (await loadMy()) throw new Error("Already in a clan.");
     const cid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const u = me();
     await w("clans/" + cid, { name, desc, leader: u.uid, created: Date.now() });
     await w("clanMembers/" + cid + "/" + u.uid, { name: u.name, role: "leader", pts: 0 });
     await w("clanOf/" + u.uid, cid);
+    _tab = null;
   }),
   join: cid => run(async () => {
     const u = me();
@@ -11603,7 +11629,7 @@ window.clanUI = {
     await w("clanOf/" + u, null);
   })
 };
-window.openClans = openClans;
+window.openClans = () => openClans(false);
 async function clanAddWin() {
   try {
     const u = W().myUid(); if (!u) return;
