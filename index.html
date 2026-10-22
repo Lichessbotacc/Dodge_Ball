@@ -5768,13 +5768,15 @@ async function inviteFriends() {
   const cn = ci ? ci.name : "";
   if (ci) url += "?clan=" + encodeURIComponent(ci.name) + "&c=" + encodeURIComponent(ci.cid);
   const text = cn ? "Join my clan " + cn + " in DarkOnBalls!" : "Play DarkOnBalls with me!";
+  // Link steht im Text selbst: viele Apps (WhatsApp, Discord, ...) uebernehmen beim Teilen nur "text" und verwerfen "url"
+  const msg = text + "\n" + url;
   try {
-    if (navigator.share) { await navigator.share({ title: "DarkOnBalls", text, url }); return; }
+    if (navigator.share) { await navigator.share({ title: "DarkOnBalls", text: msg }); return; }
   } catch (e) { if (e && e.name === "AbortError") return; }
   try {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(msg);
     leagueToast("🔗 " + tr("Invite link copied!"), "#00ff88");
-  } catch (e) { prompt(tr("Copy this link and send it to your friends:"), url); }
+  } catch (e) { prompt(tr("Copy this link and send it to your friends:"), msg); }
 }
 
 function exitToMenu() {
