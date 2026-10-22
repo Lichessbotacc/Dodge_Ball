@@ -10656,7 +10656,7 @@ gameWrap.addEventListener("touchstart", e => {
   function cumMult(L) { var m = 1; for (var i = 0; i < HT.length && HT[i] <= L; i++) m *= HV[i]; return m; }
   // Eigene Kurve ab Level 300 (bis 300 unveraendert Wiki): Das Leben waechst stueckweise exponentiell, zuerst steil (Level 300-1000), dann immer flacher.
   // So bleibt jedes Level auch bei starkem Prestige-Fortschritt eine Huerde, ohne dass spaeter eine unueberwindbare Wand entsteht (per Simulation abgestimmt).
-  var HP_KNOTS = [300, 1000, 2000, 3000, 7000, 10000, 1e9], HP_RATES = [0.0138, 0.0020, 0.0013, 0.00077, 0.00049, 0.0005];
+  var HP_KNOTS = [300, 1000, 2000, 3000, 7000, 10000, 1e9], HP_RATES = [0.0105, 0.0020, 0.0013, 0.00077, 0.00049, 0.0005];
   function health(L) {
     if (L <= 300) return Math.pow(L, 1.32) * cumMult(L);
     var lg = Math.log(Math.pow(300, 1.32) * cumMult(300));
