@@ -3124,6 +3124,8 @@ function recolorChatNames() {
   document.querySelectorAll("#chatMessages b[data-uid]").forEach(el => { chatStyleName(el, el.dataset.uid); });
 }
 
+// Farben des Rang-Tags [#1]-[#5] (Textfarbe, Leuchten) – auch im Idle-Chat benutzt
+const CHAT_RANK_COLORS = { 1: ["#ffd700", "rgba(255,215,0,.55)"], 2: ["#d6dfec", "rgba(214,223,236,.45)"], 3: ["#e8935a", "rgba(232,147,90,.45)"], 4: ["#7fd4ff", "none"], 5: ["#7fd4ff", "none"] };
 // Rang-Tag im Chat: Top 5 der ELO-Rangliste (gleiche Regeln wie die Rangliste: mind. 1 Partie, ein Eintrag pro Name)
 function chatRankMap() {
   const d = window._lastPlayersData, m = {};
@@ -3230,7 +3232,7 @@ function renderChat(keepScroll) {
       const rt = document.createElement("b");
       rt.textContent = "[#" + _rk + "] ";
       rt.title = "Top " + _rk + " in the ELO ranking";
-      const C = { 1: ["#ffd700", "rgba(255,215,0,.55)"], 2: ["#d6dfec", "rgba(214,223,236,.45)"], 3: ["#e8935a", "rgba(232,147,90,.45)"], 4: ["#7fd4ff", "none"], 5: ["#7fd4ff", "none"] }[_rk];
+      const C = CHAT_RANK_COLORS[_rk];
       rt.style.cssText = "color:" + C[0] + ";text-shadow:0 0 8px " + C[1] + ";font-size:12px;";
       parts.push(rt);
     }
@@ -12627,7 +12629,7 @@ async function idleCloudLoad() {
 
 
 // ═══ IDLE: Global Idle Chat (links) + Live-Rangliste (rechts) ═══
-const _IS = { unChat: null, unBoard: null, tim: null, rt: null, prev: {}, board: null, msgs: null, sent: [], lastTxt: "", lastAt: 0 };
+const _IS = { unChat: null, unBoard: null, tim: null, rt: null, prev: {}, board: null, msgs: null, sent: [], lastTxt: "", lastAt: 0, ranks: {}, rankKey: "" };
 (function () {
   const st = document.createElement("style");
   st.textContent = `
@@ -12647,6 +12649,7 @@ const _IS = { unChat: null, unBoard: null, tim: null, rt: null, prev: {}, board:
 #idleOverlay .is-m b{font-family:Rajdhani,sans-serif;font-size:14px;margin-right:4px}
 #idleOverlay .is-m .mn{color:#00c8ff;font-weight:700}
 #idleOverlay .is-m .dev{color:#ff4d6d;font-weight:700;font-size:11px;margin-right:4px}
+#idleOverlay .is-m b.rk{font-size:17px;margin-right:6px}
 #idleOverlay .is-in{display:flex;gap:6px;padding:8px;border-top:1px solid rgba(255,255,255,.08)}
 #idleOverlay .is-in input{flex:1;min-width:0;margin:0;padding:7px 9px;font-size:13px}
 #idleOverlay .is-in button{margin:0;padding:7px 12px;font-size:13px}
@@ -12732,8 +12735,17 @@ function idleSideStop(keep) {
   if (_IS.tim) { clearInterval(_IS.tim); _IS.tim = null; }
   if (_IS.rt) { clearTimeout(_IS.rt); _IS.rt = null; }
   if (_IS.retry) { clearTimeout(_IS.retry); _IS.retry = null; }
-  if (!keep) { _IS.prev = {}; _IS.board = null; _IS.msgs = null; }
+  if (!keep) { _IS.prev = {}; _IS.board = null; _IS.msgs = null; _IS.ranks = {}; _IS.rankKey = ""; }
 }
+// Rangliste "Total money" (gleiche Regeln fuer Leaderboard und Chat-Rang): nur aktuelle Season, nur bekannte Spieler, eigene Zeile live aus dem Spiel
+function idleRankRows() {
+  const pl = window._lastPlayersData;
+  const mine = (() => { try { const f = document.querySelector("#idleOverlay iframe"); return Number(f.contentWindow.__ib.S().c.tot) || 0; } catch (e) { return 0; } })();
+  const list = Object.entries(_IS.board || {}).filter(([u, r]) => idleFresh(r && r.ts)).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
+  if (myUid && onlineAccount && mine > 0) { const e = list.find(x => x.uid === myUid); if (e) { if (mine > e.total) e.total = mine; } else list.push({ uid: myUid, total: mine, ts: Date.now(), name: onlineAccount.name }); }
+  return list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
+}
+function idleRankText(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1); }
 function idleChatRender() {
   const box = document.getElementById("isMsgs"); if (!box) return;
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -12751,6 +12763,9 @@ function idleChatRender() {
     try { chatStyleName(nm, m.uid); } catch (e) {}
     row.append(tm);
     if (m.name === "DarkOnBalls" || m.dev) { const dv = document.createElement("span"); dv.className = "dev"; dv.textContent = "[DEV]"; row.append(dv); }
+    // Rang-Tag wie im Haupt-Chat: nur Top 5, aber nach dem Idle-Leaderboard (aktueller Platz, nicht zum Zeitpunkt der Nachricht)
+    const ri = m.uid ? _IS.ranks[m.uid] : undefined;
+    if (ri !== undefined && ri < 5) { const C = CHAT_RANK_COLORS[ri + 1], rt = document.createElement("b"); rt.className = "rk"; rt.textContent = "[#" + (ri + 1) + "]"; rt.title = "Top " + (ri + 1) + " in the Idle ranking"; rt.style.cssText = "color:" + C[0] + ";text-shadow:0 0 8px " + C[1] + ";"; row.append(rt); }
     row.append(nm);
     String(m.text).split(/(@\w+)/g).forEach(part => {
       if (!part) return;
@@ -12773,11 +12788,10 @@ function idleChatRender() {
 function idleBoardSchedule() { if (_IS.rt) return; _IS.rt = setTimeout(() => { _IS.rt = null; idleBoardRender(); }, 1500); }
 function idleBoardRender() {
   const rowsEl = document.getElementById("isRows"); if (!rowsEl || !_IS.board) return;
-  const pl = window._lastPlayersData;
-  const mine = (() => { try { const f = document.querySelector("#idleOverlay iframe"); return Number(f.contentWindow.__ib.S().c.tot) || 0; } catch (e) { return 0; } })();
-  const list = Object.entries(_IS.board).filter(([u, r]) => idleFresh(r && r.ts)).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
-  if (myUid && onlineAccount && mine > 0) { const e = list.find(x => x.uid === myUid); if (e) { if (mine > e.total) e.total = mine; } else list.push({ uid: myUid, total: mine, ts: Date.now(), name: onlineAccount.name }); }
-  const rows = list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
+  const rows = idleRankRows();
+  // Chat-Raenge aktualisieren; Chat nur neu zeichnen, wenn sich ein Platz geaendert hat
+  const rankKey = rows.map(r => r.uid).join(",");
+  if (rankKey !== _IS.rankKey) { _IS.ranks = {}; rows.forEach((r, i) => { _IS.ranks[r.uid] = i; }); _IS.rankKey = rankKey; try { idleChatRender(); } catch (e) {} }
   rowsEl.textContent = "";
   const mi = rows.findIndex(r => r.uid === myUid);
   const idx = []; for (let i = 0; i < Math.min(100, rows.length); i++) idx.push(i);
@@ -12787,7 +12801,7 @@ function idleBoardRender() {
     if (last >= 0 && i - last > 1) { const g = document.createElement("div"); g.className = "is-gap"; g.textContent = "⋮ " + (i - last - 1) + " players"; rowsEl.appendChild(g); }
     last = i; const r = rows[i];
     const row = document.createElement("div"); row.className = "is-r" + (i === 0 ? " g1" : "") + (r.uid === myUid ? " me" : "");
-    const rk = document.createElement("span"); rk.className = "rk"; rk.textContent = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1);
+    const rk = document.createElement("span"); rk.className = "rk"; rk.textContent = idleRankText(i);
     const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = dn(r.name); try { chatStyleName(nm, r.uid); } catch (e) {}
     const vl = document.createElement("span"); vl.className = "vl"; vl.textContent = "$" + idleFmt(r.total);
     const dl = document.createElement("span"); dl.className = "dl";
