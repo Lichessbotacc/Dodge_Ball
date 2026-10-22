@@ -11083,7 +11083,7 @@ gameWrap.addEventListener("touchstart", e => {
           b.hits++;
           var d = dmC[t.id]; if (M.crit > 0 && t.id !== "poison" && Math.random() < M.crit) d *= 1.5;
           if (t.id === "cash") {                    // Cash-Ball: kein Schaden, Geld = Kraft × aktuelles Steinleben
-            { var cg = r.gem ? d * CASH_BALL_MUL * Math.pow(M.bc, 0.86) : r.val * Math.min(CASH_BALL_CAP, Math.max(CASH_BALL_MIN, d / r.max * CASH_BALL_MUL)); earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
+            { var cashSpec = (S.specBall === "cash" && M.spec > 0) ? M.spec : 1; var cg = r.gem ? d * CASH_BALL_MUL * Math.pow(M.bc, 0.86) : r.val * Math.min(CASH_BALL_CAP, Math.max(CASH_BALL_MIN, (d / cashSpec) / r.max * CASH_BALL_MUL)) * cashSpec; earn(cg); if (fx.length < 60 && Math.random() < 0.5) fx.push({ x: r.x + r.w / 2, y: r.y + r.h / 2, t: 0, s: "+" + fmt(cg), c: "#ffd32a" }); }
             break;
           }
           if (t.id === "prop") d *= r.type === "h" ? 25 : r.type === "b" ? 2 : 1;
