@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -3983,7 +3983,8 @@ async function endSurvival(camped) {
     saved = false; window._lastSaveErr = _saveErrText(e); console.warn("survival save failed", e);
     if (onlineAccount && t >= 1) { const _pe = { type: "surv", name: onlineAccount.name, key: "", t }; if (window._pendRep) _pe.rep = window._pendRep; window._pendRep = null; pendAdd(_pe); queued = true; }
   }
-  _survInfo = { best, isRecord, saved, queued };
+  let _place = null; try { if (!camped) _place = await recordPlacement(t); } catch (e) {}
+  _survInfo = { best, isRecord, saved, queued, place: _place };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
 // ── Replay-Aufbewahrung: Survival nur Top 5, Daily nur Top 3 (pro Modus ueber alle Tage + Top 3 von heute) ──
@@ -4147,6 +4148,14 @@ async function _endDaily(t, camped, rec) {
   _survInfo = { daily: true, key, best, isRecord, saved, top, rank, queued: queuedD };
   if (document.getElementById("survivalResult")) renderSurvivalResult(t, camped);
 }
+function placementBox(p) {
+  const dots = Array.from({ length: PLACE_RUNS }, (_, k) => '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 3px;background:' + (k < p.n ? '#00ff88' : 'rgba(255,255,255,.18)') + ';"></span>').join("");
+  const head = p.elo !== null ? '🎯 Placement complete!' : '🎯 Placement run ' + p.n + ' / ' + PLACE_RUNS;
+  const body = p.elo !== null ? 'Average ' + survFmt(p.avg) + ' → starting rating <b style="color:#ffd700;font-size:20px;">' + p.elo + '</b>'
+    : 'Average so far: ' + survFmt(p.avg) + '<br><span style="opacity:.7;">' + (PLACE_RUNS - p.n) + ' more run' + (PLACE_RUNS - p.n === 1 ? '' : 's') + ' until you can play online</span>';
+  return '<div style="background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.35);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px;">'
+    + '<div style="color:#ffd700;font-weight:700;margin-bottom:6px;">' + head + '</div><div style="margin-bottom:6px;">' + dots + '</div>' + body + '</div>';
+}
 function renderSurvivalResult(t, camped) {
   let ov = document.getElementById("survivalResult");
   if (!ov) {
@@ -4165,6 +4174,7 @@ function renderSurvivalResult(t, camped) {
     + '<div style="font-size:15px;opacity:.8;margin-bottom:6px;">' + (camped === "disconnect" ? "📡 Connection lost – you lost" : camped ? "🚫 Corner camping – game over" : "💥 Game over") + '</div>'
     + '<div style="font-size:44px;font-weight:700;color:#00ff88;margin:4px 0 10px;">' + survFmt(t) + '</div>'
     + '<div style="font-size:15px;margin-bottom:' + (dly && i.top.length ? '8' : '16') + 'px;">' + line + '</div>'
+    + ((i && i.place) ? placementBox(i.place) : (needsPlacement() && !dly ? '<div style="font-size:13px;color:#ffd700;margin-bottom:12px;">Saving placement…</div>' : ''))
     + (dly && i.top.length ? '<div style="font-size:13px;margin-bottom:14px;text-align:left;display:inline-block;">' + i.top.map((x, k) => '<div style="cursor:pointer;" onclick="watchDailyReplay(\'' + i.key + '\',\'' + escapeHtml(x.u) + '\',\'' + escapeHtml(dn(x.n)).replace(/'/g, "") + '\')" title="Watch replay">' + (k + 1) + '. ' + escapeHtml(dn(x.n)) + ' – ' + survFmt(x.t) + (k < REPLAY_TOP_DAILY ? ' ▶' : '') + '</div>').join('') + '</div>' : '')
     + '<button id="survRetry" style="margin:4px 6px;">🔄 Retry</button>'
     + '<button id="survHome" style="margin:4px 6px;">🏠 Home</button></div>';
@@ -4520,6 +4530,29 @@ async function loadSurvivalBoard() {
   } catch (e) { if (my === _lbToken) _lbErr(t, head); }
 }
 
+// ── Platzierung: neue Accounts spielen 5 Survival-Runs; der Durchschnitt bestimmt die Start-Elo ──
+const PLACE_RUNS = 5;
+// Start-Elo aus dem Durchschnitt der 5 Survival-Runs (Sekunden): feste Stufen, ab 60 s +5 Elo pro weitere Sekunde
+const PLACE_STEPS = [[10, 1200], [20, 1300], [25, 1400], [30, 1500], [35, 1550], [40, 1600], [45, 1650], [50, 1700], [55, 1750], [60, 1800]];
+function placementElo(avg) {
+  for (const [limit, elo] of PLACE_STEPS) if (avg < limit) return elo;
+  return Math.round(1800 + (avg - 60) * 5);
+}
+function needsPlacement() { return !!(onlineAccount && onlineAccount.placed === false); }
+async function recordPlacement(t) {   // gibt { n, avg, elo|null } zurueck
+  const a = onlineAccount; if (!a || a.placed !== false) return null;
+  a.pr = (Array.isArray(a.pr) ? a.pr : []).concat([t]).slice(0, PLACE_RUNS);
+  const n = a.pr.length, avg = a.pr.reduce((x, y) => x + y, 0) / n;
+  let elo = null;
+  if (n >= PLACE_RUNS) {
+    elo = placementElo(avg);
+    a.elo = elo; a.placed = true; a.highestElo = elo; a.lowestElo = elo; a._placeJump = true;
+  }
+  saveAccountLocal();
+  try { await pushAccountToFirebase(); } catch (e) { console.warn("placement save failed", e); }
+  delete a._placeJump;
+  return { n, avg, elo };
+}
 function sanitizeAccount(acc) {
   if (!acc) return null;
   acc.elo = acc.elo ?? 1500;
@@ -5335,7 +5368,7 @@ async function pushAccountToFirebase() {
     const _srvElo = await dbGet("players/" + myUid + "/elo");
     if (typeof _srvElo === "number" && isFinite(_srvElo)) {
       const _diff = onlineAccount.elo - _srvElo;
-      if (Math.abs(_diff) > MAX_ELO_DELTA_PER_GAME) onlineAccount.elo = _srvElo + Math.sign(_diff) * MAX_ELO_DELTA_PER_GAME;
+      if (!onlineAccount._placeJump && Math.abs(_diff) > MAX_ELO_DELTA_PER_GAME) onlineAccount.elo = _srvElo + Math.sign(_diff) * MAX_ELO_DELTA_PER_GAME;
     }
   } catch (e) {}
   // Liga-Schutz: Die Regeln erlauben eine Aenderung von leagueTier nur mit frischem Zeitstempel (leagueAt) und max. +1 pro Woche.
@@ -5363,6 +5396,8 @@ async function pushAccountToFirebase() {
     bestWinOpp: onlineAccount.bestWinOpp,
     worstLossChange: onlineAccount.worstLossChange,
     worstLossOpp: onlineAccount.worstLossOpp,
+    placed: onlineAccount.placed === false ? false : true,
+    pr: onlineAccount.pr || [],
     survPlayed: onlineAccount.survPlayed || 0,
     streakPlayed: onlineAccount.streakPlayed || 0,
     dailyPlayed: onlineAccount.dailyPlayed || 0,
@@ -6225,7 +6260,7 @@ async function createAccount() {
       return;
     }
 
-    onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0 });
+    onlineAccount = sanitizeAccount({ name, elo: 1500, wins: 0, losses: 0, placed: false, pr: [] });
     try {
       await RPC.setUsernameIndex(name, newUid);   // Name ZUERST reservieren (atomar: nur wenn noch frei)
       await pushAccountToFirebase();
@@ -6422,6 +6457,7 @@ async function deleteAccount() {
 let onlineSearchGen = 0;
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
+  if (needsPlacement()) { alert("Placement first! Play " + PLACE_RUNS + " Survival runs to get your starting rating (" + ((onlineAccount.pr || []).length) + "/" + PLACE_RUNS + " done)."); return; }
   showScreen("onlineWait");
   document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank…" : "Looking for an opponent…";
   // Erst nur "Looking for an opponent…"; nach 10s erscheint der kleine Bot-Hinweis
