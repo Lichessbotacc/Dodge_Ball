@@ -11646,7 +11646,7 @@ function cleanEmpty(d) {
 }
 function renderView(cid, d, my) {
   const c = d.c[cid], uid = W().myUid();
-  const ms = Object.entries(d.m[cid] || {}).sort((a, b) => ordR[a[1].role] - ordR[b[1].role] || pts(b[1]) - pts(a[1]));
+  const ms = Object.entries(d.m[cid] || {}).sort((a, b) => pts(b[1]) - pts(a[1]));
   const all = ranked(d), x = all.find(z => z.id === cid), pos = all.findIndex(z => z.id === cid) + 1;
   const rows = ms.map(([u, m], i) => `<div class="cl-card ${u === uid ? "cl-me" : ""}">${rk(i)}<div class="cl-main"><b><span class="cl-nm" onclick="clanUI.prof('${u}')">${esc(m.name)}</span><span class="cl-tag cl-t-${m.role}">${ROLE[m.role] || m.role}</span></b></div><div class="cl-pts">🏆 ${pts(m)}<small>THIS MONTH</small></div></div>`).join("") || '<p class="cl-sub">No members.</p>';
   const lead = ms.find(([u, m]) => m.role === "leader");
