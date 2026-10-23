@@ -8714,7 +8714,7 @@ function update() {
       { const r = p.radius || 0; p.tx = Math.max(r, Math.min(W() - r, p.tx)); p.ty = Math.max(r, Math.min(H() - r, p.ty)); }
       // Zeitbasierte (framerate-unabhängige) Glättung, passend zur Paketrate
       const iv = Math.min(NET_SMOOTH.MAX_INTERVAL, Math.max(NET_SMOOTH.MIN_INTERVAL, p.netInterval || NET_SMOOTH.MIN_INTERVAL));
-      const a = smoothingAlpha(timestep, 50 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.2);
+      const a = smoothingAlpha(timestep, 35 + (iv - NET_SMOOTH.MIN_INTERVAL) * 0.12);
       p.x += (p.tx - p.x) * a;
       p.y += (p.ty - p.y) * a;
     }
@@ -10257,7 +10257,7 @@ async function startOnlineTV(targetUid) {
       // Als Lebenszeichen zaehlt deshalb nur, wenn sich Spieler- oder Ball-Status wirklich geaendert hat.
       // Sonst wirkt ein Match mit eingefrorenem Host (z.B. Tab im Hintergrund) ewig lebendig: Zuschauer sehen
       // dann stehende Spieler und die letzten Baelle (z.B. 140 auf einmal), ohne dass das Match uebersprungen wird.
-      const _sig = JSON.stringify(data.p1State || null) + "|" + JSON.stringify(data.p2State || null) + "|" + (data.ballState || "");
+      const _a = data.p1State, _b = data.p2State, _sig = (_a ? _a.x + "," + _a.y + "," + _a.alive : "") + "|" + (_b ? _b.x + "," + _b.y + "," + _b.alive : "") + "|" + (data.ballState || "");
       const _fresh = _sig !== tvLastSig;
       tvLastSig = _sig;
       if (data.p1State) { feed(p1, data.p1State); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
@@ -10266,7 +10266,7 @@ async function startOnlineTV(targetUid) {
         try {
           const bsArr = JSON.parse(data.ballState);
           if (!tvClock) tvClock = { base: Math.max(0, bsArr.length - ONLINE_START_BALLS) * ONLINE_SPAWN_MS / 1000, at: Date.now() };
-          applyBallCorrection(bsArr, 0.35); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
+          applyBallCorrection(bsArr, 0.35, 110); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
         } catch(e) {}
       }
     });
