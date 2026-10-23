@@ -4538,10 +4538,16 @@ function placementElo(avg) {
   for (const [limit, elo] of PLACE_STEPS) if (avg < limit) return elo;
   return Math.round(1800 + (avg - 60) * 5);
 }
-function needsPlacement() { return !!(onlineAccount && onlineAccount.placed === false); }
+function _prArr(a) { const p = a && a.pr; return Array.isArray(p) ? p : (p && typeof p === "object" ? Object.values(p) : []); }
+// Platzierung noetig: neue Accounts (placed === false) ODER alte Accounts mit 0 Partien, Elo 1500 und noch nicht abgeschlossener Platzierung
+function needsPlacement() {
+  const a = onlineAccount; if (!a) return false;
+  if (a.placed === false) return true;
+  return (Number(a.wins) || 0) === 0 && (Number(a.losses) || 0) === 0 && Math.round(Number(a.elo) || 1500) === 1500 && _prArr(a).length < PLACE_RUNS;
+}
 async function recordPlacement(t) {   // gibt { n, avg, elo|null } zurueck
-  const a = onlineAccount; if (!a || a.placed !== false) return null;
-  a.pr = (Array.isArray(a.pr) ? a.pr : []).concat([t]).slice(0, PLACE_RUNS);
+  const a = onlineAccount; if (!a || !needsPlacement()) return null;
+  a.pr = _prArr(a).concat([t]).slice(0, PLACE_RUNS);
   const n = a.pr.length, avg = a.pr.reduce((x, y) => x + y, 0) / n;
   let elo = null;
   if (n >= PLACE_RUNS) {
@@ -6457,7 +6463,7 @@ async function deleteAccount() {
 let onlineSearchGen = 0;
 function enterOnlineQueue() {
   if (!onlineAccount) { showCreateAccount(); return; }
-  if (needsPlacement()) { alert("Placement first! Play " + PLACE_RUNS + " Survival runs to get your starting rating (" + ((onlineAccount.pr || []).length) + "/" + PLACE_RUNS + " done)."); return; }
+  if (needsPlacement()) { alert("Placement first! Play " + PLACE_RUNS + " Survival runs to get your starting rating (" + _prArr(onlineAccount).length + "/" + PLACE_RUNS + " done)."); return; }
   showScreen("onlineWait");
   document.getElementById("onlineStatus").textContent = arenaSess ? "🏟 Arena – looking for an opponent of similar rank…" : "Looking for an opponent…";
   // Erst nur "Looking for an opponent…"; nach 10s erscheint der kleine Bot-Hinweis
