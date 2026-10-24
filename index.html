@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1275,11 +1276,14 @@ window.SFX = (function () {
     ping:[{f:A5,t:0,d:.1,g:.16},{f:E6,t:.09,d:.24,g:.18}],
     eloup:[{f:G5,t:0,d:.15,g:.18},{f:C6,t:.1,d:.3,g:.2}], elodown:[{f:E5,t:0,d:.15,g:.18},{f:B4,t:.1,d:.3,g:.18}]
   };
-  function init() {
+  var idleT = null;
+  // Kein Ton mehr -> Kontext anhalten: sonst gilt die Seite fuer iOS/Safari dauerhaft als "spielt Audio" (Lautsprecher-Symbol) und Spotify wird pausiert
+  function scheduleIdle(ms) { clearTimeout(idleT); idleT = setTimeout(function () { try { if (ctx && ctx.state === "running") ctx.suspend(); } catch (e) {} }, ms || 3000); }
+  function init(wake) {
     // Audio-Session auf "ambient" stellen: die Seite mischt sich unter andere Apps (Spotify etc.), statt sie zu pausieren
     try { if (navigator.audioSession && navigator.audioSession.type !== "ambient") navigator.audioSession.type = "ambient"; } catch (e) {}
     if (ctx && ctx.state === "closed") ctx = null;
-    if (ctx) { if (ctx.state !== "running") { try { var rp = ctx.resume(); if (rp && rp.catch) rp.catch(function () {}); } catch (e) {} } return !!ctx; }
+    if (ctx) { if (wake && ctx.state !== "running") { try { var rp = ctx.resume(); if (rp && rp.catch) rp.catch(function () {}); } catch (e) {} } return !!ctx; }
     var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
     try {
       ctx = new AC(); master = ctx.createGain(); master.gain.value = st.vol;
@@ -1290,6 +1294,7 @@ window.SFX = (function () {
       var fb = ctx.createGain(); fb.gain.value = .38; var lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200;
       verb.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(master);
     } catch (e) { ctx = null; return false; }
+    scheduleIdle(2500);
     return true;
   }
   function tone(n, t0) {
@@ -1305,9 +1310,10 @@ window.SFX = (function () {
   var last = {};
   function play(name) {
     try {
-      if (!st.on || !S[name] || !init()) return;
+      if (!st.on || !S[name] || !init(true)) return;
       var now = Date.now(); if (last[name] && now - last[name] < 40) return; last[name] = now;
       var go = function () { var t0 = ctx.currentTime + .01; S[name].forEach(function (n) { tone(n, t0); }); };
+      scheduleIdle(3000);
       if (ctx.state === "running") { go(); return; }
       // Kontext schlaeft (Tab im Hintergrund, iOS "interrupted", Arena ohne Klick): erst aufwecken, dann spielen (nur wenn nicht zu spaet)
       var rp = ctx.resume();
@@ -1332,8 +1338,6 @@ window.SFX = (function () {
   ["pointerdown", "pointerup", "touchstart", "touchend", "click", "keydown"].forEach(function (ev) {
     document.addEventListener(ev, function () { if (st.on) init(); }, true);
   });
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && st.on && ctx && ctx.state !== "running") { try { ctx.resume(); } catch (e) {} } });
-  window.addEventListener("focus", function () { if (st.on && ctx && ctx.state !== "running") { try { ctx.resume(); } catch (e) {} } });
   document.addEventListener("click", function (e) {
     var b = e.target && e.target.closest && e.target.closest("button");
     if (!b || b.disabled) return;
@@ -1363,6 +1367,7 @@ function isRunning() { try { return !!running; } catch (e) { return false; } }
 
 const V_W = 1280;
 const V_H = 720;
+const KEEP_ASPECT = false;   // false = Vollbild (Arena wird auf den Bildschirm gezogen, im Hochformat verzerrt); true = 16:9 mit Rand, Baelle bleiben rund
 
 const stage   = document.getElementById("stage");
 const gameWrap= document.getElementById("gameWrap");
@@ -1378,8 +1383,21 @@ function resize() {
   const dpr = window.devicePixelRatio || 1;
   gameWrap.style.width  = "100%";
   gameWrap.style.height = "100%";
-  canvas.style.width    = "100%";
-  canvas.style.height   = "100%";
+  // Seitenverhaeltnis 16:9 beibehalten (keine verzerrten Baelle im Hochformat / auf 4:3-iPads); Rest bleibt dunkler Rand.
+  // Die Arena bleibt 1280x720, also fuer alle Geraete identisch. KEEP_ASPECT = false -> altes Verhalten (Bildschirm fuellen, verzerrt)
+  const cw = gameWrap.clientWidth || window.innerWidth, ch = gameWrap.clientHeight || window.innerHeight;
+  if (KEEP_ASPECT && cw > 0 && ch > 0) {
+    const w = Math.min(cw, ch * V_W / V_H), h = w * V_H / V_W;
+    canvas.style.position = "absolute";
+    canvas.style.width  = Math.floor(w) + "px";
+    canvas.style.height = Math.floor(h) + "px";
+    canvas.style.left   = Math.floor((cw - w) / 2) + "px";
+    canvas.style.top    = Math.floor((ch - h) / 2) + "px";
+  } else {
+    canvas.style.position = ""; canvas.style.left = ""; canvas.style.top = "";
+    canvas.style.width    = "100%";
+    canvas.style.height   = "100%";
+  }
   canvas.width  = Math.round(V_W * dpr);
   canvas.height = Math.round(V_H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1399,6 +1417,7 @@ function screenToVirtual(clientX, clientY) {
 
 window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", () => setTimeout(resize, 200));
+try { if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(gameWrap); } catch (e) {}
 resize();
 
 // ═══════════════════════════════════════════════
