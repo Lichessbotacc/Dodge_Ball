@@ -14252,6 +14252,7 @@ async function _modBan(uid, s, p) {
 //  4) Streak-Level kein ganzer Wert >= 1 oder > 1000
 // Sicherheitsnetze: Befund muss in ZWEI Scans (>= 30 s Abstand) identisch bestehen; vorher Backup (Profil/Survival/Streak) in sanctions/{uid}/backup,
 // damit "Unban" alles wiederherstellt; Admin, Bot und bereits Gebannte werden nie angefasst.
+const AUTO_BAN_ENABLED = false;   // false = KEINE automatischen Banns (Scan, Skript-Eingaben, Suspects). Manuell bannen im Cheaters-Menue geht weiter.
 const CHEAT_MAX_ELO_PER_WIN = 50, CHEAT_START_ELO = 1500, CHEAT_MAX_STREAK_LEVEL = 1000, CHEAT_REPLAY_TOL_S = 2, CHEAT_CONFIRM_MS = 30000;
 let _cheatPending = {}, _cheatScanning = false, _cheatIv = null;
 function _cheatPlayerEvidence(p) {
@@ -14264,7 +14265,10 @@ function _cheatPlayerEvidence(p) {
   const wOk = num(p.wins) && p.wins >= 0 && Number.isInteger(p.wins), lOk = num(p.losses) && p.losses >= 0 && Number.isInteger(p.losses);
   if (p.wins !== undefined && !wOk) out.push("invalid wins: " + p.wins);
   if (p.losses !== undefined && !lOk) out.push("invalid losses: " + p.losses);
-  if (num(p.elo) && wOk && p.elo > CHEAT_START_ELO + CHEAT_MAX_ELO_PER_WIN * p.wins) out.push("ELO " + Math.round(p.elo) + " impossible with " + p.wins + " wins (max " + (CHEAT_START_ELO + CHEAT_MAX_ELO_PER_WIN * p.wins) + ")");
+  // Platzierung: Wer 5 Platzierungs-Runs hat, darf mit der daraus berechneten Start-Elo beginnen (z.B. 1800), auch mit 0 Siegen
+  let _base = CHEAT_START_ELO;
+  try { const _pr = Array.isArray(p.pr) ? p.pr : (p.pr && typeof p.pr === "object" ? Object.values(p.pr) : []); if (_pr.length >= 5 && typeof placementElo === "function") _base = Math.max(_base, placementElo(_pr.reduce((a, b) => a + (Number(b) || 0), 0) / _pr.length)); } catch (e) {}
+  if (num(p.elo) && wOk && p.elo > _base + CHEAT_MAX_ELO_PER_WIN * p.wins) out.push("ELO " + Math.round(p.elo) + " impossible with " + p.wins + " wins (max " + (_base + CHEAT_MAX_ELO_PER_WIN * p.wins) + ")");
   return out;
 }
 async function _cheatCollect() {
@@ -14316,6 +14320,7 @@ async function _cheatBanOne(uid, name, why) {
 }
 const BOT_AUTOBAN_N = 60;   // so viele kuenstliche Eingaben (isTrusted=false) -> automatischer Ban (laeuft, solange du als Admin das Spiel offen hast)
 async function _autoBanScripters() {
+  if (!AUTO_BAN_ENABLED) return;
   try {
     const R = _modRPC(), fl = (await R.get("botFlags")) || {};
     for (const [uid, f] of Object.entries(fl)) {
@@ -14339,7 +14344,7 @@ async function _cheatScan(manual) {
     for (const [uid, f] of Object.entries(found)) {
       report.clean = false;
       const sig = f.why.slice().sort().join(" | "), pend = _cheatPending[uid];
-      if (pend && pend.sig === sig && now - pend.t >= CHEAT_CONFIRM_MS) {
+      if (AUTO_BAN_ENABLED && pend && pend.sig === sig && now - pend.t >= CHEAT_CONFIRM_MS) {
         // Beweislage eindeutig (unmoegliche Werte, in zwei Scans bestaetigt): Eintrag + Beweis-Replay in die Cheaters-Liste, DANN bannen.
         const whyStr = f.why.slice().sort().join(" | ").slice(0, 300);
         if (_cheatIgnoreGet()[uid] === whyStr) { delete _cheatPending[uid]; continue; }   // von dir freigegeben/entbannt, gleicher Befund -> nicht erneut bannen
@@ -14362,7 +14367,7 @@ async function _cheatScan(manual) {
 }
 async function _cheatScanTwice() {
   let r = await _cheatScan(true);
-  if (r && r.pending.length) { await new Promise(x => setTimeout(x, CHEAT_CONFIRM_MS + 1000)); r = await _cheatScan(true); }
+  if (AUTO_BAN_ENABLED && r && r.pending.length) { await new Promise(x => setTimeout(x, CHEAT_CONFIRM_MS + 1000)); r = await _cheatScan(true); }
   return r;
 }
 function _cheatStartAuto() {
@@ -14460,7 +14465,7 @@ async function _suspectsRefresh() {
   fresh.forEach(s => { _suspSeen[s.uid] = 1; });
   if (fresh.length) _suspToast("New suspect" + (fresh.length > 1 ? "s" : "") + ": " + fresh.slice(0, 3).map(s => s.name + " (" + s.score + ")").join(", ") + " – tap to review");
   let auto = false; try { auto = localStorage.getItem("dobSuspAuto") === "1"; } catch (e) {}
-  if (auto) for (const s of vis) {
+  if (AUTO_BAN_ENABLED && auto) for (const s of vis) {
     if (s.score < 120 || s.signals.length < 2) continue;
     try { await _modRPC().modFlagCheater(s.uid, s.name, ("suspicion " + s.score + ": " + s.signals.join("; ")).slice(0, 300), true, null); await _cheatBanOne(s.uid, s.name, s.signals); } catch (e) { console.warn("suspect auto-ban failed", e); }
   }
@@ -14484,7 +14489,7 @@ function _suspectsRender(list) {
   const lab = document.createElement("label"); lab.style.cssText = "font-size:12px;color:#8b93a6;display:flex;gap:4px;align-items:center;";
   const cb = document.createElement("input"); cb.type = "checkbox"; try { cb.checked = localStorage.getItem("dobSuspAuto") === "1"; } catch (e) {}
   cb.onchange = () => { try { localStorage.setItem("dobSuspAuto", cb.checked ? "1" : "0"); } catch (e) {} };
-  lab.appendChild(cb); lab.appendChild(document.createTextNode("auto-ban ≥ 120")); tools.appendChild(lab);
+  if (AUTO_BAN_ENABLED) { lab.appendChild(cb); lab.appendChild(document.createTextNode("auto-ban ≥ 120")); tools.appendChild(lab); }
   head.appendChild(tools); list.appendChild(head);
   if (!vis.length) { const d = document.createElement("div"); d.style.cssText = "color:#8b93a6;font-size:13px;padding:6px 2px;"; d.textContent = "No suspects right now (scan runs every 5 min)."; list.appendChild(d); return; }
   vis.forEach(sp => {
