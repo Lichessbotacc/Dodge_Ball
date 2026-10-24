@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11639,12 +11638,14 @@ const total = m => Object.values(m || {}).reduce((a, x) => a + pts(x), 0);
 function overlay(html) {
   let o = document.getElementById("clanOv");
   if (!o) { o = document.createElement("div"); o.id = "clanOv"; document.body.appendChild(o); }
+  o.style.display = "";
   o.innerHTML = '<div class="cl-wrap"><button class="cl-x" onclick="clanUI.close()">✕</button>' + html + '</div>';
 }
 const btn = (fn, t, cls) => `<button class="cl-b ${cls || ""}" onclick="${fn}">${t}</button>`;
 const rk = i => `<div class="cl-rank ${i < 3 ? "cl-r" + (i + 1) : ""}">${i + 1}</div>`;
 const ROLE = { leader: "👑 Leader", co: "⭐ Co-Leader", member: "Member" };
-async function run(f) { try { await f(); } catch (e) { alert("Clan: " + (e && e.message || e)); } openClans(true); }
+let _runBusy = false;
+async function run(f) { if (_runBusy) return; _runBusy = true; try { await f(); } catch (e) { alert("Clan: " + (e && e.message || e)); } finally { _runBusy = false; } openClans(true); }
 let _view = null;
 let _tab = null, _q = "", _cache = null, _chatUn = null, _chatKeys = [], _lastSend = 0;
 const stopChat = () => { if (_chatUn) { try { _chatUn(); } catch (e) {} _chatUn = null; } };
@@ -11668,14 +11669,60 @@ function clanRows(list, joinable) {
   return list.map((x, i) => `<div class="cl-card cl-click" onclick="clanUI.view('${x.id}')">${rk(i)}${badge(x.c.name)}<div class="cl-main"><b>${esc(x.c.name)}</b><small>${esc(x.c.desc) || "—"}</small><small>👥 ${x.n}/${MAXM}<span class="cl-mode">${MODE_T[modeOf(x.c)]}</span></small></div><div class="cl-pts">🏆 ${x.pts}<small>THIS MONTH</small></div>${joinable ? `<span onclick="event.stopPropagation()">${joinBtn(x)}</span>` : `<small class="cl-view">View ›</small>`}</div>`).join("") || '<p class="cl-sub">No clans found.</p>';
 }
 window.getMyClanName = async () => { try { const m = await loadMy(); return m ? { name: m.clan.name, cid: m.cid } : null; } catch (e) { return null; } };
+// Heilt kaputte Zustaende: Mitglied in MEHREREN Clans (Doppel-Beitritt/Doppel-Erstellen) oder clanOf zeigt auf den falschen Clan -> behalte den Clan mit der hoechsten Rolle (Leader > Co > Member), danach den in clanOf
+async function healMy(d) {
+  try {
+    const uid = W().myUid(); if (!uid || !d) return;
+    const mine = Object.keys(d.m).filter(cid => d.c[cid] && d.m[cid] && d.m[cid][uid]);
+    if (!mine.length) return;
+    let cof = null; try { cof = await W().get("clanOf/" + uid); } catch (e) {}
+    const rr = cid => ({ leader: 0, co: 1, member: 2 })[d.m[cid][uid].role] ?? 3;
+    mine.sort((a, b) => (rr(a) - rr(b)) || ((b === cof ? 1 : 0) - (a === cof ? 1 : 0)) || ((d.c[a].created || 0) - (d.c[b].created || 0)));
+    const keep = mine[0];
+    for (const cid of mine.slice(1)) {
+      const others = Object.keys(d.m[cid]).filter(x => x !== uid).length;
+      if (d.m[cid][uid].role === "leader" && others) continue;   // fremde Mitglieder im Doppel-Clan: nicht anfassen (sonst Clan ohne Leader)
+      try { await w("clanMembers/" + cid + "/" + uid, null); delete d.m[cid][uid]; } catch (e) {}
+    }
+    if (cof !== keep) { try { await w("clanOf/" + uid, keep); } catch (e) {} }
+  } catch (e) { console.warn("clan heal", e); }
+}
+// Geister-Mitglieder (gebannt/Account geloescht -> players/{uid} existiert nicht mehr) ausblenden; Zaehler und Punkte stimmen dadurch auch
+async function dropGhosts(d) {
+  const out = [];
+  try {
+    const pl = await W().get("players");
+    if (!pl || typeof pl !== "object" || !Object.keys(pl).length) return out;
+    let total = 0;
+    for (const cid of Object.keys(d.m)) for (const u of Object.keys(d.m[cid] || {})) { total++; if (!pl[u] || !pl[u].name) out.push([cid, u]); }
+    if (total > 4 && out.length > total * 0.5) return [];   // Sicherheitsnetz: unplausibel viele -> Daten wohl unvollstaendig geladen
+    out.forEach(([cid, u]) => { delete d.m[cid][u]; });
+  } catch (e) {}
+  return out;
+}
+function clanFixGhosts(my, d, ghosts) {
+  try {
+    const mine = ghosts.filter(g => g[0] === my.cid); if (!mine.length) return;
+    if (my.role === "leader" || my.role === "co") mine.forEach(([cid, u]) => { w("clanMembers/" + cid + "/" + u, null).catch(() => {}); w("clanOf/" + u, null).catch(() => {}); });
+    const ms = d.m[my.cid] || {};
+    if (!Object.values(ms).some(m => m && m.role === "leader")) {   // Leader war ein Geist -> naechster in der Reihe uebernimmt (nur der Betroffene selbst schreibt)
+      const best = Object.entries(ms).sort((a, b) => (ordR[a[1].role] - ordR[b[1].role]) || (pts(b[1]) - pts(a[1])))[0];
+      if (best && best[0] === W().myUid()) w("clanMembers/" + my.cid + "/" + best[0], rec(best[1], { role: "leader" })).then(() => w("clans/" + my.cid + "/leader", best[0])).catch(() => {});
+    }
+  } catch (e) {}
+}
 async function openClans(keep) {
   if (typeof onlineAccount === "undefined" || !onlineAccount) { showCreateAccount(); return; }
   stopChat();
   if (!keep) { _tab = null; _q = ""; _view = null; }
   overlay("<p>Loading…</p>");
   try {
-    const my = await loadMy(), d = await getAll();
+    const d = await getAll();
+    await healMy(d);
+    const ghosts = await dropGhosts(d);
+    const my = await loadMy();
     cleanEmpty(d);
+    if (my) clanFixGhosts(my, d, ghosts);
     if (_view && !d.c[_view]) _view = null;
     if (_view && my && my.cid === _view) _view = null;
     if (_view) return renderView(_view, d, my);
@@ -11775,12 +11822,21 @@ window.clanUI = {
   tab: k => { _tab = k; _view = null; openClans(true); },
   view: cid => { if (_my && _my.cid === cid) { _tab = "clan"; _view = null; } else _view = cid; openClans(true); },
   back: () => { _view = null; openClans(true); },
-  prof: u => { window.clanUI.close(); if (typeof openOnlineProfile === "function") openOnlineProfile(u); },
+  prof: async u => {
+    if (typeof openOnlineProfile !== "function") return;
+    const o = document.getElementById("clanOv"); stopChat();
+    if (o) o.style.display = "none";   // Clan-Ansicht nur verstecken, nicht schliessen
+    window._clanReturn = !!o;
+    try { await openOnlineProfile(u); } catch (e) {}
+    const as = document.getElementById("accountScreen");
+    if (window._clanReturn && (!as || getComputedStyle(as).display === "none")) { window._clanReturn = false; if (o) { o.style.display = ""; openClans(true); } }   // Profil nicht geoeffnet (z.B. nicht gefunden)
+  },
   search: v => { _q = v; const el = document.getElementById("clList"); if (el && _cache) el.innerHTML = clanRows(ranked(_cache).filter(x => !v || x.c.name.toLowerCase().includes(v.toLowerCase())), true); },
   create: () => run(async () => {
     const name = (document.getElementById("clN").value || "").trim();
     if (name.length < 3 || name.length > 24) throw new Error("Name must be 3-24 characters.");
     const desc = (document.getElementById("clD").value || "").trim().slice(0, 200);
+    await healMy(await getAll());
     if (await loadMy()) throw new Error("Already in a clan.");
     const d = await getAll();
     if (Object.values(d.c).some(c => c && String(c.name).trim().toLowerCase() === name.toLowerCase())) throw new Error("This clan name is already taken.");
@@ -11796,6 +11852,7 @@ window.clanUI = {
   }),
   join: cid => run(async () => {
     const u = me();
+    await healMy(await getAll());
     if (await loadMy()) throw new Error("Already in a clan.");
     const [clan, m] = await Promise.all([W().get("clans/" + cid), W().get("clanMembers/" + cid)]);
     if (!clan) throw new Error("Clan not found.");
@@ -11861,6 +11918,18 @@ window.clanUI = {
   })
 };
 window.openClans = () => openClans(false);
+// Zurueck aus dem Profil (showScreen(menu)) -> Clan-Ansicht wieder einblenden statt im Hauptmenue zu landen
+try {
+  const _ss = window.showScreen;
+  if (typeof _ss === "function" && !_ss._clanPatched) {
+    const f = function (name) {
+      const r = _ss.apply(this, arguments);
+      if (window._clanReturn && name !== "accountScreen") { window._clanReturn = false; const o = document.getElementById("clanOv"); if (o) { o.style.display = ""; openClans(true); } }
+      return r;
+    };
+    f._clanPatched = true; window.showScreen = f;
+  }
+} catch (e) {}
 if (inviteName || inviteCid) setTimeout(() => { try { if (typeof onlineAccount !== "undefined" && onlineAccount && !document.getElementById("clanOv")) openClans(false); } catch (e) {} }, 3000);
 async function clanAddWin() {
   try {
@@ -12611,12 +12680,12 @@ async function arenaRestoreTick() {
   const menu = document.getElementById("menu");
   if (!menu || menu.style.display === "none" || inMatchOrSurvival()) return;     // erst wenn man im Menue ist
   arenaRestoreTried = true;
-  if (!sv.paused) { arenaPlay(); return; }
+  // Immer pausiert wiederherstellen (kein Auto-Start der Suche, kein Oeffnen der Arena-Ansicht): Fortsetzen nur per Klick auf "Hourly Arena" -> Resume
   arenaSess = { id: inf.id, end: inf.end, lastOpp: null, qAt: Date.now(), unsub: null, paused: true };
   arenaStandings = {};
   arenaSess.unsub = dbOn("arenas/" + inf.id, d => { arenaStandings = d || {}; });
   try { await arenaEnsureEntry(); await arenaEnsureBot(inf.id); } catch (e) { arenaLeave(true); return; }
-  if (arenaSess) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); openArena(); }
+  if (arenaSess) { arenaSess.paused = true; arenaSave(); arenaWriteState("paused"); try { challengeToast("🏟 Arena paused – open Hourly Arena and press Resume when you are ready.", "#ffd700"); } catch (e) {} }
 }
 setInterval(arenaRestoreTick, 2500);
 setInterval(arenaBtnUpd, 10000); setTimeout(arenaBtnUpd, 600); setTimeout(arenaBtnUpd, 3000);
