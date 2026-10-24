@@ -1276,6 +1276,8 @@ window.SFX = (function () {
     eloup:[{f:G5,t:0,d:.15,g:.18},{f:C6,t:.1,d:.3,g:.2}], elodown:[{f:E5,t:0,d:.15,g:.18},{f:B4,t:.1,d:.3,g:.18}]
   };
   function init() {
+    // Audio-Session auf "ambient" stellen: die Seite mischt sich unter andere Apps (Spotify etc.), statt sie zu pausieren
+    try { if (navigator.audioSession && navigator.audioSession.type !== "ambient") navigator.audioSession.type = "ambient"; } catch (e) {}
     if (ctx && ctx.state === "closed") ctx = null;
     if (ctx) { if (ctx.state !== "running") { try { var rp = ctx.resume(); if (rp && rp.catch) rp.catch(function () {}); } catch (e) {} } return !!ctx; }
     var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
