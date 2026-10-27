@@ -1067,6 +1067,13 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <span class="slider"></span>
       </label><br><br>
 
+      <label>Opponent look in 1v1 👁</label><br>
+      <select id="oppStyleSel" onchange="setOppStyle(this.value)">
+        <option value="normal">Normal</option>
+        <option value="faded">Faded (transparent)</option>
+        <option value="name">Name tag only (invisible)</option>
+      </select><br><br>
+
       <label>Sound 🔊</label><br>
       <label class="switch">
         <input type="checkbox" id="sfxToggle" checked onchange="SFX.setOn(this.checked)">
@@ -1702,7 +1709,7 @@ async function rpcSetIdleBoard(name, total, best) {
 // before doing anything, and none of them accept "any path, any
 // value" the way `window._firebaseSet` did.
 async function rpcSendChat(name, text) {
-  const uid = requireUid();
+  const uid = requireUid(); requireNotBanned();
   return push(ref(db, "chat"), { uid, name, text: String(text).slice(0, 200), ts: Date.now() });
 }
 // Arena-Chat: arenaChat/<Arena-ID>/<Nachricht>; jede Nachricht traegt das Arena-Ende ("end"), danach darf jeder sie loeschen
@@ -2474,7 +2481,9 @@ async function onFirebaseAndAuthReady() {
       let _stale = false;   // Strafe nur, wenn das Match serverseitig wirklich noch laeuft und der Marker frisch ist
       try {
         if (!mk0 || !mk0.id || (Date.now() - (Number(mk0.ts) || 0)) > 6 * 3600 * 1000) _stale = true;
-        else { const cm = await RPC.getMatch(mk0.id); if (!cm || cm.status === "done" || cm.status === "abandoned" || (mk0.stamp && Number(cm.createdAt) !== Number(mk0.stamp))) _stale = true; }
+        else { const cm = await RPC.getMatch(mk0.id); // "abandoned" ist NICHT automatisch veraltet: schliesst man den Tab mitten im Match, setzt der Disconnect-Handler das Match sofort auf "abandoned" (forfeitBy = ich).
+        // Genau dann ist die Strafe faellig. Veraltet = Match fertig, anderes Match, oder von jemand anderem aufgegeben/ohne Verlierer (z.B. Bot-Match, Gegner ging).
+        if (!cm || cm.status === "done" || (cm.status === "abandoned" && cm.forfeitBy !== myUid) || (mk0.stamp && Number(cm.createdAt) !== Number(mk0.stamp))) _stale = true; }
       } catch (e) {}
       if (!_stale) {
         const loss = applyForfeitLoss(mk0 && mk0.loss, mk0 && mk0.opp);
@@ -3487,8 +3496,8 @@ const DAILY_CHALLENGES = [
   { icon: "🔦", name: "Laser + Balls",      field: { type: "laser" }, groups: [_onlGroup()] },
   { icon: "🪨", name: "Giants",             groups: [{ n: 0, cap: 99999, respawn: 120, v: 3.2, r: [55, 70] }] },   // startet leer, alle 2 s (120 Ticks) kommt ein Riese dazu, keiner verschwindet
   { icon: "🧱", name: "Shrinking Arena",    field: { type: "shrink" }, groups: [Object.assign(_onlGroup(), { cap: 10 })] },   // cap 10: nach 10 Baellen (die nie verschwinden) spawnt nichts mehr
-  { icon: "🔫", name: "8 Bullets",          groups: [{ n: 8, v: 11, r: [10, 14] }] },
-  { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 15, respawn: 20, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },
+  { icon: "🔫", name: "Bullets",            groups: [{ n: 1, cap: 99999, respawn: 300, v: 11, r: [10, 14] }] },   // startet mit 1 schnellen Ball, alle 5 s (300 Ticks) kommt einer dazu, keiner verschwindet -> kein endloser Modus
+  { icon: "🌋", name: "Meteor Shower",      groups: [{ n: 0, cap: 99999, respawn: 40, respawnGrow: -0.2, respawnMin: 6, life: 420, from: "top", v: 2, acc: 0.014, accMax: 9, r: [12, 20], col: "#ff7a3d" }] },   // Spawnabstand schrumpft mit jedem Meteor (40 -> 6 Ticks): immer mehr gleichzeitig, nach ca. 1-2 min nicht mehr zu schaffen
   // Echo Trail: startet mit 0 Baellen, nur blaue Echo-Baelle, die nie verschwinden (cap unbegrenzt, kein life)
   { icon: "👣", name: "Echo Trail",         groups: [{ n: 0, cap: 99999, respawn: 60, from: "echo", delay: 120, emerge: 40, v: 1.5, r: [17, 21], col: "#5ec8ff" }] },
   { icon: "🌀", name: "Portal",             field: { type: "portal" }, groups: [_onlGroup()] },
@@ -3977,6 +3986,7 @@ async function endSurvival(camped) {
   survPushLive(true, t);   // TV-Zuschauer sehen das Ende
   stopViewerCount();
   _survInfo = null;
+  try { statsRecordRun(_dailyKey ? "dl" : "sv", t); saveAccountLocal(); } catch (e) {}
   setTimeout(() => renderSurvivalResult(t, camped), 900);
   if (_dailyKey) { await _endDaily(t, camped, rec); return; }
   let best = 0, isRecord = false, saved = true, queued = false;
@@ -4214,7 +4224,10 @@ function playSurvivalReplay(rec, label) {
   ov.style.cssText = "position:fixed;inset:0;z-index:9500;background:#05050a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:env(safe-area-inset-top,0px) 8px env(safe-area-inset-bottom,0px);box-sizing:border-box;";
   ov.innerHTML = '<div style="color:#f0f0f5;font:700 16px system-ui,sans-serif;"></div>'
     + '<canvas style="width:100%;max-width:min(100%,calc((100vh - 120px) * 16 / 9));aspect-ratio:16/9;border:1px solid rgba(255,255,255,.15);border-radius:10px;background:#0a0a12;"></canvas>'
-    + '<div><button class="srR" style="margin:4px 6px;">↺ Restart</button><button class="srC" style="margin:4px 6px;">✕ Close</button></div>';
+    + '<div style="width:100%;max-width:640px;display:flex;align-items:center;gap:8px;color:#f0f0f5;font:600 13px system-ui,sans-serif;"><span class="srTm" style="min-width:96px;text-align:left;">0.0s</span><input class="srT" type="range" min="0" value="0" step="1" style="flex:1;" aria-label="Replay position"></div>'
+    + '<div style="display:flex;flex-wrap:wrap;justify-content:center;"><button class="srP" style="margin:3px 4px;">⏸ Pause</button>'
+    + '<button class="srS" data-sp="0.25" style="margin:3px 4px;">0.25×</button><button class="srS" data-sp="0.5" style="margin:3px 4px;">0.5×</button><button class="srS" data-sp="1" style="margin:3px 4px;">1×</button><button class="srS" data-sp="2" style="margin:3px 4px;">2×</button>'
+    + '<button class="srE" style="margin:3px 4px;">⏭ Last 3 s</button><button class="srR" style="margin:3px 4px;">↺ Restart</button><button class="srC" style="margin:3px 4px;">✕ Close</button></div>';
   document.body.appendChild(ov);
   const head = ov.firstChild, cv = ov.querySelector("canvas"), c = cv.getContext("2d");
   const Wd = cv.width = rec.w || 1280, Hd = cv.height = rec.h || 720;
@@ -4226,8 +4239,8 @@ function playSurvivalReplay(rec, label) {
     else { const k = Math.floor(tk / 3); ax = P[2 * k]; ay = P[2 * k + 1]; bx = P[2 * k + 2]; by = P[2 * k + 3]; f = (tk % 3) / 3; }
     f = Math.min(1, f); return [ax + (bx - ax) * f, ay + (by - ay) * f];
   };
-  let bl, tick, si, t0, raf = 0, closed = false;
-  const reset = () => { bl = []; tick = 0; si = 0; t0 = performance.now(); };
+  let bl, tick, si, raf = 0, closed = false, speed = 1, playing = true, acc = 0, lastT = 0, dragging = false;
+  const reset = () => { bl = []; tick = 0; si = 0; acc = 0; };
   const step = () => {
     tick++;
     bl = bl.filter(b => !b.exp || b.exp > tick);   // abgelaufene Baelle (Lebensdauer) entfernen
@@ -4240,10 +4253,20 @@ function playSurvivalReplay(rec, label) {
     for (const b of bl) if (b.h) { let d = Math.atan2(pp[1] - b.y, pp[0] - b.x) - Math.atan2(b.vy, b.vx); while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; const na = Math.atan2(b.vy, b.vx) + Math.max(-b.h, Math.min(b.h, d)); b.vx = Math.cos(na) * b.hs; b.vy = Math.sin(na) * b.hs; }
     for (const b of bl) { dailyAdv(b); dailyMoveBall(b, Wd, Hd, tick, rec.fd || null); }
   };
+  // Zeitleiste: rueckwaerts springen = von vorn neu simulieren (das Replay ist pro Tick deterministisch)
+  const seek = (x) => { x = Math.max(0, Math.min(rec.n, Math.floor(x))); if (x < tick) reset(); while (tick < x) step(); acc = 0; };
+  const sl = ov.querySelector(".srT"), tm = ov.querySelector(".srTm"), bP = ov.querySelector(".srP");
+  sl.max = String(rec.n);
+  const syncUi = () => {
+    if (!dragging) sl.value = String(tick);
+    tm.textContent = survFmt(tick / 60) + " / " + survFmt(rec.n / 60);
+    bP.textContent = playing ? "⏸ Pause" : "▶ Play";
+    ov.querySelectorAll(".srS").forEach(b => { b.style.borderColor = Number(b.dataset.sp) === speed ? "#00ff88" : ""; });
+  };
   const frame = () => {
     if (closed) return;
-    const target = Math.min(rec.n, Math.floor((performance.now() - t0) / (1000 / 60)));
-    while (tick < target) step();
+    const nowT = performance.now(), dt = Math.min(100, nowT - lastT); lastT = nowT;
+    if (playing && tick < rec.n) { acc += dt / (1000 / 60) * speed; const k = Math.floor(acc); acc -= k; const target = Math.min(rec.n, tick + k); while (tick < target) step(); }
     c.clearRect(0, 0, Wd, Hd);
     if (rec.fd) dailyFieldDraw(c, rec.fd, Math.min(tick, rec.n), Wd, Hd, rec.fs || 0);
     const _L = rec.lt || null, _pp = posAt(Math.min(tick, rec.n)), _alive = tick < rec.n;
@@ -4258,11 +4281,16 @@ function playSurvivalReplay(rec, label) {
     c.beginPath(); c.arc(px, py, rec.r || 18, 0, Math.PI * 2); c.fillStyle = rec.c || "#00ff88"; c.fill();
     c.fillStyle = "#fff"; c.font = "700 28px system-ui,sans-serif"; c.textAlign = "left";
     c.fillText(survFmt(tick / 60), 16, 40);
-    if (tick >= rec.n) { c.textAlign = "center"; c.font = "700 44px system-ui,sans-serif"; c.fillText("💥 " + survFmt(rec.n / 60), Wd / 2, Hd / 2); return; }
-    raf = requestAnimationFrame(frame);
+    if (tick >= rec.n) { c.textAlign = "center"; c.font = "700 44px system-ui,sans-serif"; c.fillText("💥 " + survFmt(rec.n / 60), Wd / 2, Hd / 2); }
+    syncUi(); raf = requestAnimationFrame(frame);   // Schleife laeuft auch am Ende weiter, damit man zurueckspulen kann
   };
-  reset(); raf = requestAnimationFrame(frame);
-  ov.querySelector(".srR").onclick = () => { cancelAnimationFrame(raf); reset(); raf = requestAnimationFrame(frame); };
+  reset(); lastT = performance.now(); raf = requestAnimationFrame(frame);
+  sl.addEventListener("input", () => { dragging = true; seek(Number(sl.value)); });
+  sl.addEventListener("change", () => { dragging = false; });
+  ov.querySelector(".srP").onclick = () => { if (!playing && tick >= rec.n) seek(0); playing = !playing; };
+  ov.querySelectorAll(".srS").forEach(b => { b.onclick = () => { speed = Number(b.dataset.sp) || 1; }; });
+  ov.querySelector(".srE").onclick = () => { seek(Math.max(0, rec.n - 180)); playing = true; };
+  ov.querySelector(".srR").onclick = () => { reset(); playing = true; };
   ov.querySelector(".srC").onclick = () => { closed = true; cancelAnimationFrame(raf); ov.remove(); };
 }
 
@@ -5405,6 +5433,7 @@ async function pushAccountToFirebase() {
     _createdAt = _sv ? (_sv.createdAt != null ? _sv.createdAt : (RPC.authCreatedAt ? RPC.authCreatedAt() : null)) : RPC.serverTimestamp();   // neuer Account: Erstellzeit vom Server (nicht faelschbar)
     _lgAt = ((onlineAccount.leagueTier ?? 0) !== _svTier) ? RPC.serverTimestamp() : (_sv && _sv.leagueAt != null ? _sv.leagueAt : null);
   } catch (e) { _lgAt = null; }
+  try { eloHistAdd(onlineAccount.elo); } catch (e) {}
   await RPC.setOwnPlayer({
     uid: myUid,
     name: onlineAccount.name,
@@ -5424,6 +5453,7 @@ async function pushAccountToFirebase() {
     worstLossOpp: onlineAccount.worstLossOpp,
     placed: onlineAccount.placed === false ? false : true,
     pr: onlineAccount.pr || [],
+    st: onlineAccount.st || {},
     survPlayed: onlineAccount.survPlayed || 0,
     streakPlayed: onlineAccount.streakPlayed || 0,
     dailyPlayed: onlineAccount.dailyPlayed || 0,
@@ -5568,6 +5598,9 @@ function drawBallImageAt(c, x, y, r, color) {   // Bild im Kreis (gleiche Groess
 }
 _loadBallImg();
 
+let OPP_STYLE = "normal"; try { OPP_STYLE = localStorage.getItem("dobOppStyle") || "normal"; } catch (e) {}
+function setOppStyle(v) { OPP_STYLE = (v === "faded" || v === "name") ? v : "normal"; try { localStorage.setItem("dobOppStyle", OPP_STYLE); } catch (e) {} }
+setTimeout(function () { const el = document.getElementById("oppStyleSel"); if (el) el.value = OPP_STYLE; }, 0);
 function setHideHud(on) {
   document.body.classList.toggle("hide-hud", !!on);
   try { localStorage.setItem("dobHideHud", on ? "1" : "0"); } catch (e) {}
@@ -5872,6 +5905,7 @@ function showMenuPage(id) {
 function updateChatLock() {
   const inp = document.getElementById("chatInput"), btn = document.getElementById("chatSendBtn"), note = document.getElementById("chatLockNote");
   if (!inp) return;
+  try { if (typeof _modChatBlock === "function" && _modChatBlock()) { _modChatLock(); return; } } catch (e) {}   // gebannt/gemutet/Hinweis: Sperre bleibt stehen (kein Flackern durch den 1-s-Timer)
   const locked = !onlineAccount;
   inp.disabled = locked;
   if (btn) btn.disabled = locked;
@@ -6014,6 +6048,115 @@ async function profileRanks(uid) {
   } catch (e) { console.warn("profile ranks failed", e); }
   return out;
 }
+// ── Elo-Verlauf (lokal pro Geraet, nur im eigenen Profil sichtbar) ──
+function _eloHistKey() { return "dobEloHist_" + (typeof myUid !== "undefined" && myUid ? myUid : "guest"); }
+function eloHistAdd(elo) {
+  try {
+    const e = Math.round(Number(elo)); if (!isFinite(e)) return;
+    const k = _eloHistKey(); let h = JSON.parse(localStorage.getItem(k) || "[]"); if (!Array.isArray(h)) h = [];
+    if (h.length && h[h.length - 1][1] === e) return;
+    h.push([Date.now(), e]); if (h.length > 300) h = h.slice(-300);
+    localStorage.setItem(k, JSON.stringify(h));
+  } catch (e) {}
+}
+function eloGraphHtml() {
+  try {
+    const h = JSON.parse(localStorage.getItem(_eloHistKey()) || "[]");
+    if (!Array.isArray(h) || h.length < 2) return '<div style="font-size:11px;opacity:.6;margin-top:6px;">Elo graph appears after a few matches on this device.</div>';
+    const W = 300, H = 90, P = 6, lo = Math.min(...h.map(x => x[1])), hi = Math.max(...h.map(x => x[1])), span = Math.max(1, hi - lo);
+    const pts = h.map((x, i) => (P + i * (W - 2 * P) / (h.length - 1)).toFixed(1) + "," + (H - P - (x[1] - lo) * (H - 2 * P) / span).toFixed(1)).join(" ");
+    return '<div style="margin-top:8px;"><svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:320px;height:auto;display:block;" role="img" aria-label="Elo over time"><polyline fill="none" stroke="#00e0ff" stroke-width="2" stroke-linejoin="round" points="' + pts + '"/></svg><div style="display:flex;justify-content:space-between;font-size:11px;opacity:.7;max-width:320px;"><span>' + lo + '</span><span>Elo history (this device)</span><span>' + hi + '</span></div></div>';
+  } catch (e) { return ""; }
+}
+// ── Erweiterte Statistiken: kompakte Zaehler in onlineAccount.st (werden mit dem Spielerprofil gespeichert) ──
+function _stObj() { if (!onlineAccount) return null; if (!onlineAccount.st || typeof onlineAccount.st !== "object") onlineAccount.st = {}; return onlineAccount.st; }
+function statsRecordMatch(won, oppName, oppElo, delta, secs, vsBot) {
+  const s = _stObj(); if (!s) return;
+  const myElo = Math.round(Number(onlineAccount.elo) || 1500); oppElo = Math.round(Number(oppElo) || 1500);
+  secs = Math.max(0, Math.round(Number(secs) || 0));
+  s.mt = (s.mt || 0) + secs; s.mc = (s.mc || 0) + 1;
+  if (secs > (s.ml || 0)) s.ml = secs;
+  if (secs > 0 && (!s.ms || secs < s.ms)) s.ms = secs;
+  if (won) s.lw = 0; else { s.lw = (s.lw || 0) + 1; if (s.lw > (s.bl || 0)) s.bl = s.lw; }
+  s.f = ((won ? "W" : "L") + (s.f || "")).slice(0, 10);   // neueste zuerst
+  const nm = String(oppName || "?").slice(0, 20);
+  if (vsBot) { s.bm = (s.bm || 0) + 1; if (won) s.bwn = (s.bwn || 0) + 1; }
+  else {
+    s.oe = (s.oe || 0) + oppElo; s.on = (s.on || 0) + 1;
+    if (won && oppElo > myElo) s.up = (s.up || 0) + 1;
+    if (!won && oppElo < myElo) s.dn = (s.dn || 0) + 1;
+    const k = nm.replace(/[.$#\[\]\/]/g, "_");
+    if (!s.oh || typeof s.oh !== "object") s.oh = {};
+    const r = Array.isArray(s.oh[k]) ? s.oh[k] : [0, 0]; r[won ? 0 : 1] = (r[won ? 0 : 1] || 0) + 1; s.oh[k] = r;
+    const ks = Object.keys(s.oh);
+    if (ks.length > 12) { ks.sort((a, b) => ((s.oh[a][0] || 0) + (s.oh[a][1] || 0)) - ((s.oh[b][0] || 0) + (s.oh[b][1] || 0))); delete s.oh[ks[0]]; }
+  }
+  s.mh = Array.isArray(s.mh) ? s.mh : (s.mh && typeof s.mh === "object" ? Object.values(s.mh) : []);
+  s.mh.unshift([Date.now(), nm, won ? 1 : 0, Math.round(Number(delta) * 10) / 10, secs, vsBot ? 1 : 0]); if (s.mh.length > 15) s.mh.length = 15;
+  const d = new Date().toISOString().slice(0, 10); if (s.ld !== d) { s.ld = d; s.ad = (s.ad || 0) + 1; }
+}
+function statsRecordRun(kind, secs) {   // kind: "sv" (Survival) | "dl" (Daily)
+  const s = _stObj(); if (!s) return;
+  secs = Math.max(0, Number(secs) || 0);
+  s[kind + "T"] = Math.round(((s[kind + "T"] || 0) + secs) * 10) / 10; s[kind + "N"] = (s[kind + "N"] || 0) + 1;
+  if (kind === "sv") { if (secs >= 30) s.sv30 = (s.sv30 || 0) + 1; if (secs >= 60) s.sv60 = (s.sv60 || 0) + 1; if (secs >= 120) s.sv120 = (s.sv120 || 0) + 1; }
+  const d = new Date().toISOString().slice(0, 10); if (s.ld !== d) { s.ld = d; s.ad = (s.ad || 0) + 1; }
+}
+function statsRecordStreak(wins) {
+  const s = _stObj(); if (!s) return; wins = Math.max(0, Number(wins) || 0);
+  s.skW = (s.skW || 0) + wins; if (wins >= 5) s.sk5 = (s.sk5 || 0) + 1; if (wins >= 10) s.sk10 = (s.sk10 || 0) + 1;
+}
+function _fmtDur(sec) { sec = Math.max(0, Math.round(Number(sec) || 0)); if (sec < 60) return sec + "s"; if (sec < 3600) return Math.floor(sec / 60) + "m " + (sec % 60) + "s"; return Math.floor(sec / 3600) + "h " + Math.floor((sec % 3600) / 60) + "m"; }
+function profileStatsHtml(p, R, G, B, svRec) {
+  const st = (p && p.st && typeof p.st === "object") ? p.st : {};
+  const n = (x) => Number(x) || 0, dash = "–";
+  const w = n(p.wins), l = n(p.losses), g = w + l;
+  const gained = n(p.totalEloGained), lost = n(p.totalEloLost), net = Math.round((gained - lost) * 10) / 10;
+  const hist = Array.isArray(st.mh) ? st.mh : (st.mh && typeof st.mh === "object" ? Object.values(st.mh) : []);
+  const oh = st.oh && typeof st.oh === "object" ? Object.entries(st.oh) : [];
+  const form = st.f ? String(st.f).split("").map(c => '<span style="color:' + (c === "W" ? "#00ff88" : "#ff4444") + ';font-weight:700;">' + c + "</span>").join("") : dash;
+  const timed = n(st.mc);
+  const m = [
+    R("Win / Loss ratio", l ? (w / l).toFixed(2) : (w ? "∞" : dash)),
+    (net >= 0 ? G : B)("Net Elo (won − lost)", (net >= 0 ? "+" : "") + net),
+    G("Avg Elo per win", w ? "+" + (gained / w).toFixed(1) : dash),
+    B("Avg Elo per loss", l ? "-" + (lost / l).toFixed(1) : dash),
+    R("Elo range (high − low)", Math.round(n(p.highestElo || p.elo) - n(p.lowestElo || p.elo))),
+    R("Form (last 10)", form),
+    G("Upset wins (beat higher Elo)", n(st.up)),
+    B("Losses vs lower Elo", n(st.dn)),
+    R("Avg opponent Elo", st.on ? Math.round(n(st.oe) / n(st.on)) : dash),
+    B("Longest losing streak", n(st.bl)),
+    R("Current losing streak", n(st.lw)),
+    R("Matches vs Online Bot", n(st.bm) + (st.bm ? " (" + n(st.bwn) + " won)" : "")),
+    R("Total time in matches", timed ? _fmtDur(st.mt) : dash),
+    R("Avg match length", timed ? _fmtDur(n(st.mt) / timed) : dash),
+    R("Longest match", st.ml ? _fmtDur(st.ml) : dash),
+    R("Shortest match", st.ms ? _fmtDur(st.ms) : dash),
+    R("Active days", n(st.ad) || dash)
+  ].join("");
+  const sv = n(st.svN), dl = n(st.dlN);
+  const srv = [
+    G("🏝 Survival record", n(svRec) > 0 ? survFmt(n(svRec)) : dash),
+    R("🏝 Avg survival time", sv ? survFmt(n(st.svT) / sv) : dash),
+    R("🏝 Total survival time", sv ? _fmtDur(st.svT) : dash),
+    R("🏝 Runs ≥ 30s / 60s / 120s", sv ? n(st.sv30) + " / " + n(st.sv60) + " / " + n(st.sv120) : dash),
+    R("📅 Daily runs timed", dl || dash),
+    R("📅 Avg daily time", dl ? survFmt(n(st.dlT) / dl) : dash),
+    R("📅 Total daily time", dl ? _fmtDur(st.dlT) : dash),
+    R("🔥 Total streak wins", n(st.skW) || dash),
+    R("🔥 Streak runs ≥ 5 / ≥ 10", (n(st.sk5) || n(st.sk10)) ? n(st.sk5) + " / " + n(st.sk10) : dash),
+    R("⏱ Total tracked play time", (timed || sv || dl) ? _fmtDur(n(st.mt) + n(st.svT) + n(st.dlT)) : dash)
+  ].join("");
+  const rec = hist.slice(0, 10).map(h => {
+    if (!Array.isArray(h)) return "";
+    const won = h[2] === 1, d = Number(h[3]) || 0;
+    return R((won ? "✅ " : "❌ ") + escapeHtml(h[1] || "?") + (h[5] ? " 🤖" : ""), '<span style="color:' + (won ? "#00ff88" : "#ff4444") + '">' + (d >= 0 ? "+" : "") + d.toFixed(1) + "</span> · " + _fmtDur(h[4]) + " · " + new Date(Number(h[0]) || 0).toLocaleDateString());
+  }).join("") || '<div style="opacity:.6;font-size:12px;">Match history is recorded from now on.</div>';
+  const riv = oh.map(([k, v]) => [k, n(v && v[0]), n(v && v[1])]).sort((a, b) => (b[1] + b[2]) - (a[1] + a[2])).slice(0, 5)
+    .map(([k, a, b]) => R(escapeHtml(k), '<span style="color:#00ff88">' + a + "W</span> – <span style=\"color:#ff4444\">" + b + "L</span>")).join("") || '<div style="opacity:.6;font-size:12px;">No rivals yet.</div>';
+  return "<div><h4>MATCH STATS</h4>" + m + "</div><div><h4>SURVIVAL, DAILY &amp; STREAKS</h4>" + srv + "</div><div><h4>RECENT MATCHES</h4>" + rec + "</div><div><h4>RIVALS (most played)</h4>" + riv + "</div>";
+}
 async function openOnlineProfile(uid) {
   if (!fbReady) return;
   try {
@@ -6069,9 +6212,10 @@ async function openOnlineProfile(uid) {
         </div>
         <div class="pr">
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}${R("Joined", p.createdAt && isFinite(Number(p.createdAt)) ? new Date(Number(p.createdAt)).toLocaleDateString() : "–")}</div>
-          <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}</div>
+          <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
+        ${profileStatsHtml(p, R, G, B, svRec)}
         </div>
       </div>`;
 
@@ -6230,6 +6374,32 @@ function openAccountScreen() {
 // but the real guarantee comes from Firebase Auth itself refusing a
 // duplicate email (auth/email-already-in-use) — the two can't
 // disagree for long since both are written together.
+// Kurze Einfuehrung nach der Registrierung (einmal pro Browser)
+function showTutorial() {
+  try {
+    if (localStorage.getItem("dobTutorialSeen") || document.getElementById("tutOv")) return;
+    const steps = [
+      ["🎮 Willkommen / Welcome", "Dodge the red balls – move with your mouse or finger. Touch a ball and the run is over. Survive as long as you can."],
+      ["🎯 Placement", "Your first 5 Survival runs set your starting Elo. The longer you survive on average, the higher you start. Online play unlocks afterwards."],
+      ["⚔ Online & Elo", "Play 1v1 matches online to win or lose Elo and climb the leaderboards. Leaving a match early counts as a loss."],
+      ["🏆 More to do", "Daily Challenges, Streaks, the Hourly Arena, clans and Idle Brick Breaker are in the menu. Be fair – cheaters get banned."]
+    ];
+    let n = 0;
+    const ov = document.createElement("div"); ov.id = "tutOv";
+    ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;";
+    const box = document.createElement("div");
+    box.style.cssText = "max-width:380px;width:100%;background:#14141e;border:1px solid rgba(255,215,0,.5);border-radius:16px;padding:24px 26px;text-align:center;color:#f0f0f5;font-family:var(--font-display);";
+    const h = document.createElement("div"); h.style.cssText = "font-size:21px;font-weight:700;color:#ffd700;margin-bottom:10px;";
+    const t = document.createElement("div"); t.style.cssText = "font-size:15px;line-height:1.5;margin-bottom:16px;opacity:.92;";
+    const dots = document.createElement("div"); dots.style.cssText = "font-size:12px;opacity:.6;margin-bottom:12px;";
+    const nx = document.createElement("button"); const sk = document.createElement("button"); sk.textContent = "Skip"; sk.style.marginLeft = "8px";
+    const close = () => { try { localStorage.setItem("dobTutorialSeen", "1"); } catch (e) {} ov.remove(); };
+    const draw = () => { h.textContent = steps[n][0]; t.textContent = steps[n][1]; dots.textContent = (n + 1) + " / " + steps.length; nx.textContent = n === steps.length - 1 ? "Let's go!" : "Next ›"; sk.style.display = n === steps.length - 1 ? "none" : ""; };
+    nx.onclick = () => { if (n >= steps.length - 1) close(); else { n++; draw(); } };
+    sk.onclick = close;
+    box.append(h, t, dots, nx, sk); ov.appendChild(box); document.body.appendChild(ov); draw();
+  } catch (e) {}
+}
 async function createAccount() {
   const name            = document.getElementById("authUsername").value.trim();
   const password         = document.getElementById("authPassword").value;
@@ -6310,6 +6480,7 @@ async function createAccount() {
     startMenuPresenceListener();
 
     showScreen("menu");
+    setTimeout(showTutorial, 300);
   } catch(e) {
     if (e && e.code === "auth/email-already-in-use") info.textContent = "Name already taken.";
     else if (e && e.code === "auth/weak-password")   info.textContent = "Password is too weak (min 6 characters).";
@@ -7512,6 +7683,7 @@ async function handleOnlineResult(winnerName, change) {
   onlineAccount = sanitizeAccount(onlineAccount);
 
   onlineAccount.rd = _gMe.rd; onlineAccount.vol = _gMe.vol; onlineAccount.rdTs = Date.now();
+  try { statsRecordMatch(won, oppName, oppOriginalElo, won ? eloChange : -eloChange, window._lastMatchSecs, !!onlineVsBot); } catch (e) {}
   if (won) {
     onlineAccount.elo = r1(onlineAccount.elo + eloChange);
     onlineAccount.wins++;
@@ -8491,6 +8663,7 @@ function streakEnd(why) {
   try { streakPushLive(true); stopViewerCount(); } catch (e) {}   // TV-Zuschauer sehen das Ende
   streakFlush();
   const isNew = streak.wins > 0 && streak.wins >= streak.best;
+  try { statsRecordStreak(streak.wins); saveAccountLocal(); } catch (e) {}
   streakHud();
   const o = streakSetOverlay(`<div class="sk-title" style="color:#ff4455">${why === "disconnect" ? "📡 " + tr("CONNECTION LOST") : tr("STREAKS ENDED")}</div>
     <div class="sk-sub">${streak.wins} ${tr("wins in a row")} · ${tr("Best")}: ${streak.best}</div>
@@ -9435,7 +9608,7 @@ function openProfile(name) {
     : null;
   const skillVal = Math.round(getSkillValue(p) * 100);
 
-  document.getElementById("profileName").innerHTML  = `<span style="color:${p.color}">${p.name}</span>`;
+  document.getElementById("profileName").innerHTML  = `<span style="color:${escapeHtml(p.color)}">${escapeHtml(p.name)}</span>`;
   document.getElementById("profileStats").innerHTML = `
     <div class="prof-row"><span class="prof-label">Rank</span><span class="prof-val">#${rank} / ${participants.length}</span></div>
     <div class="prof-row"><span class="prof-label">ELO</span><span class="prof-val">${Math.round(p.elo)}</span></div>
@@ -9585,7 +9758,7 @@ function draw() {
         if (opp) {
           const sorted  = [...participants].sort((a,b) => b.elo - a.elo);
          const oppRank = sorted.findIndex(p => p.name === opp.name) + 1;
-oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(getSkillValue(opp)*100)}%</b>`;
+oppDiv.innerHTML = `<b>Opponent: ${escapeHtml(opp.name)}</b><br>Rank: <b>#${oppRank}</b> of ${participants.length}<br>ELO: <b>${Math.round(opp.elo)}</b><br>Skill: <b>${Math.round(getSkillValue(opp)*100)}%</b>`;
 
         }
       } else { oppDiv.style.display = "none"; }
@@ -9671,6 +9844,8 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
       }
     }
 
+    const _opp = (mode === "online" && OPP_STYLE !== "normal" && !isLocalPlayer(p));
+    if (_opp) ctx.globalAlpha = OPP_STYLE === "faded" ? 0.3 : 0;   // nur Optik: "name" = Kreis unsichtbar, Namensschild bleibt
     ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fillStyle = p.color;
     const _pt = patronTier(p);
@@ -9725,8 +9900,10 @@ oppDiv.innerHTML = `<b>Opponent: ${opp.name}</b><br>Rank: <b>#${oppRank}</b> of 
       ctx.setLineDash([5,5]); ctx.stroke(); ctx.setLineDash([]);
     }
 
+    if (_opp) ctx.globalAlpha = OPP_STYLE === "faded" ? 0.6 : 1;
     ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
     ctx.fillText(p.label || dn(p.name), p.x, p.y - p.radius - 10);
+    ctx.globalAlpha = 1;
   }
 
   if (mode === "online") {
@@ -9987,6 +10164,7 @@ async function startOnlineTV(targetUid) {
   mode = "online_tv";
   document.body.classList.add("mode-tv");
   tvClock = null;
+  const TV_DELAY_MS = 2500;   // Live-TV laeuft absichtlich 2,5 s hinterher
   const tvUiDefault = `Time: <span id="time">0</span>s<br>Balls: <span id="balls">0</span><br>Mode: <span id="mode">Online TV</span>`;
   document.getElementById("ui").innerHTML = tvUiDefault;
   { const md = document.getElementById("mode"); if (md) md.textContent = "Online TV"; }
@@ -10259,7 +10437,7 @@ async function startOnlineTV(targetUid) {
       setT("onlineNameMe", dn(best.p1)); setT("onlineNameOpp", dn(best.p2));
       setT("onlineRankMe", "(" + Math.round(best.p1elo || 1500) + ")");
       setT("onlineRankOpp", "(" + Math.round(best.p2elo || 1500) + ")");
-      setT("onlineStatusHUD", "📺 Live");
+      setT("onlineStatusHUD", "📺 Live (2.5 s delay)");
       setT("onlineScoreHUD", "0 - 0");
       if (hud) hud.style.display = "flex";
       const tvId = bestId;
@@ -10280,7 +10458,7 @@ async function startOnlineTV(targetUid) {
     const feed = feedNetPlayer;
 
     const myId = bestId;
-    onlineTvInnerUnsubscribe = RPC.onMatch(myId, (data) => {
+    const _tvHandle = (data) => {   // wird mit TV_DELAY_MS Verzoegerung aufgerufen (siehe unten)
       if (myId !== onlineTvCurrentMatchId) return;
       if (!data || data.status === "done" || data.status === "abandoned") {
         // Gewinner anzeigen (Spielfeld bleibt ein paar Sekunden eingefroren), dann nächstes Match suchen
@@ -10331,7 +10509,9 @@ async function startOnlineTV(targetUid) {
           applyBallCorrection(bsArr, 0.35, 110); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
         } catch(e) {}
       }
-    });
+    };
+    // Zuschauer sehen das Match mit festem Abstand (TV_DELAY_MS): Pakete werden in Eingangsreihenfolge verzoegert angewendet, Ende/Sieger-Anzeige ebenfalls -> alles bleibt zeitlich zusammen
+    onlineTvInnerUnsubscribe = RPC.onMatch(myId, (data) => { if (myId !== onlineTvCurrentMatchId) return; setTimeout(() => _tvHandle(data), TV_DELAY_MS); });
     onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
   };
 
@@ -11198,7 +11378,12 @@ gameWrap.addEventListener("touchstart", e => {
       }
     }
   }
+  var gemOnlyT = 0;
   function stepWorld(dt) {
+    // Sicherheitsnetz gegen Haenger: sind nur noch Gem-Steine (oder gar keine Steine) uebrig und das Level wird nicht beendet, nach 12 s automatisch weiter (Wiki: Gem-Steine duerfen uebrig bleiben)
+    if (!bricks.length) { gemOnlyT += dt; if (gemOnlyT > 3) { gemOnlyT = 0; layout(); } }
+    else if (bricks.every(function (x) { return x.gem; })) { gemOnlyT += dt; if (gemOnlyT > 12) { gemOnlyT = 0; clearLevel(); } }
+    else gemOnlyT = 0;
     fireT += dt;                                    // Wiki: Brand-Schaden läuft auf einem globalen 1-Sekunden-Takt
     if (fireT >= 1) { fireT -= 1; bricks.slice().forEach(function (b) { if (b.fire > 0 && !b.dead) dmgBrick(b, b.fire, BM.fire); }); }
     piT += dt;                                      // Passives Einkommen: Prozent vom Stage-Bonus pro Sekunde
@@ -11327,7 +11512,9 @@ gameWrap.addEventListener("touchstart", e => {
       var g = document.createElement("div"); g.className = "btns2"; ballEls.unlock = [];
       shown.forEach(function (t) {
         var b = btn('<i class="sw" style="background:' + t.col + '"></i> ' + t.name, "$" + fmt(cost), function () {
-          if (S.cash < cost || totalBalls() >= M.maxBalls) return; S.cash -= cost; var st = S.balls[t.id]; st.own = 1; st.slot = slot; S.order.push(t.id); S.buyLog.push(t.id); S.offer = null; S.c.bought++; addBall(t); checkAch(); renderPanel();
+          if (S.cash < cost) return;
+          if (totalBalls() >= M.maxBalls) { toast("Ball limit reached (" + totalBalls() + " / " + M.maxBalls + "). Raise the limit (perk / cards) or prestige first."); return; }   // vorher: stiller Abbruch, Button wirkte kaputt
+          S.cash -= cost; var st = S.balls[t.id]; st.own = 1; st.slot = slot; S.order.push(t.id); S.buyLog.push(t.id); S.offer = null; S.c.bought++; addBall(t); checkAch(); renderPanel();
         });
         ballEls.unlock.push({ b: b, cost: cost }); g.appendChild(b);
       });
@@ -11349,7 +11536,7 @@ gameWrap.addEventListener("touchstart", e => {
       var ok = (st.bp === 0 && st.spd >= 39) || (st.bp === 1 && st.spd >= 79);
       e.bp.style.display = (st.bp < 2 && st.spd >= (st.bp === 0 ? 39 : 79)) ? "" : "none"; e.bp.disabled = !ok;
     });
-    if (ballEls.unlock) ballEls.unlock.forEach(function (u) { u.b.disabled = S.cash < u.cost || totalBalls() >= M.maxBalls; });
+    if (ballEls.unlock) ballEls.unlock.forEach(function (u) { u.b.disabled = S.cash < u.cost; });
   }
 
   // ── Karten ──
@@ -11395,15 +11582,29 @@ gameWrap.addEventListener("touchstart", e => {
   function showPerkModal() {
     if ($("perkOv") || !S.pend) return;
     var ov = document.createElement("div"); ov.className = "ov"; ov.id = "perkOv";
-    var m = document.createElement("div"); m.className = "modal"; m.innerHTML = "<h2>New Perk</h2><small>Choose one of three. Perks last until your next prestige.</small>";
-    S.pend.forEach(function (id) {
-      var p = pkDef(id), b = btn("<b>" + p.name + "</b><br><small>" + p.txt + "</small>", "", function () {
-        S.perks.push(id); S.perkN++; S.pend = null; S.c.perksPicked++; ov.remove(); recalc();
-        while (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) S.pend = rollPerks();
-        save(); renderTabs(); if (tab === "perks") renderPanel();
+    var m = document.createElement("div"); m.className = "modal";
+    function take(id) {
+      S.perks.push(id); S.perkN++; S.pend = null; S.c.perksPicked++; ov.remove(); recalc();
+      while (S.perkN < MAX_PERKS && !S.pend && S.level >= perkReq(S.perkN)) S.pend = rollPerks();
+      save(); renderTabs(); if (tab === "perks") renderPanel();
+    }
+    function choices() {
+      m.innerHTML = "<h2>New Perk</h2><small>Choose one of three. Perks last until your next prestige.</small>";
+      S.pend.forEach(function (id) {
+        var p = pkDef(id), b = btn("<b>" + p.name + "</b><br><small>" + p.txt + "</small>", "", function () { confirmView(id); });
+        b.classList.add("wide"); m.appendChild(b);
       });
-      b.classList.add("wide"); m.appendChild(b);
-    });
+    }
+    // Sicherheitsabfrage: erst anzeigen, dann bestaetigen (kein versehentlicher Klick auf den falschen Perk)
+    function confirmView(id) {
+      var p = pkDef(id);
+      m.innerHTML = "<h2>Take this perk?</h2><small>Perks cannot be changed until your next prestige.</small>";
+      var info = document.createElement("div"); info.style.cssText = "margin:12px 0;padding:10px;border:1px solid rgba(255,215,0,.5);border-radius:8px;";
+      info.innerHTML = "<b>" + p.name + "</b><br><small>" + p.txt + "</small>"; m.appendChild(info);
+      var ok = btn("<b>✓ Yes, take it</b>", "", function () { take(id); }); ok.classList.add("wide"); m.appendChild(ok);
+      var back = btn("← Back", "", choices); back.classList.add("wide"); m.appendChild(back);
+    }
+    choices();
     ov.appendChild(m); document.body.appendChild(ov);
   }
 
@@ -11488,7 +11689,8 @@ gameWrap.addEventListener("touchstart", e => {
   }
   cv.addEventListener("pointerdown", function (e) {
     var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
-    for (var i = 0; i < bricks.length; i++) { var b = bricks[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { dmgBrick(b, 1, TAP); break; } } // Wiki: Tipp-Schaden = 1
+    var hitB = null; for (var i = 0; i < bricks.length; i++) { var b = bricks[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { if (!hitB || (b.gem && !hitB.gem)) hitB = b; } }   // ueberlappende Steine: Gem-Stein hat Vorrang
+    if (hitB) dmgBrick(hitB, 1, TAP); // Wiki: Tipp-Schaden = 1
   });
 
   // ════════ Offline ════════
@@ -12922,8 +13124,9 @@ function idleBoardSchedule() { if (_IS.rt) return; _IS.rt = setTimeout(() => { _
 function idleBoardRender() {
   const rowsEl = document.getElementById("isRows"); if (!rowsEl || !_IS.board) return;
   const pl = window._lastPlayersData;
+  if (!pl && !_IS.plFail && !_IS.plLoading) { _IS.plLoading = true; dbGet("players").then(d => { if (d) window._lastPlayersData = d; else _IS.plFail = true; }).catch(() => { _IS.plFail = true; }).finally(() => { _IS.plLoading = false; try { idleBoardRender(); } catch (e) {} }); }
   const mine = (() => { try { const f = document.querySelector("#idleOverlay iframe"); return Number(f.contentWindow.__ib.S().c.tot) || 0; } catch (e) { return 0; } })();
-  const list = Object.entries(_IS.board).filter(([u, r]) => idleFresh(r && r.ts)).filter(([u]) => !pl || pl[u]).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
+  const list = Object.entries(_IS.board).filter(([u, r]) => idleFresh(r && r.ts)).filter(([u]) => pl ? pl[u] : _IS.plFail).map(([u, r]) => ({ uid: u, total: Number(r && r.total) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[u] && pl[u].name) || (r && r.name) || "?" }));
   if (myUid && onlineAccount && mine > 0) { const e = list.find(x => x.uid === myUid); if (e) { if (mine > e.total) e.total = mine; } else list.push({ uid: myUid, total: mine, ts: Date.now(), name: onlineAccount.name }); }
   const rows = list.filter(r => r.total > 0).sort((a, b) => b.total - a.total || a.ts - b.ts);
   rowsEl.textContent = "";
@@ -14397,6 +14600,30 @@ async function _cheatCollect() {
   _repCacheSet(rc);
   return found;
 }
+// Hebt AUTOMATISCHE Banns auf, die durch die falsche Elo-Regel entstanden sind (Elo-Befund) + deren "Alt-Account"-Folgebanns (gleiches Geraet). Stellt Backups wieder her und entsperrt die Geraete.
+// Andere Auto-Befunde (Replay passt nicht, Skript-Eingaben) bleiben gebannt und werden nur aufgelistet.
+async function _unbanAutoBans() {
+  const R = _modRPC();
+  let sanc; try { sanc = (await R.get("sanctions")) || {}; } catch (e) { alert("Could not load sanctions: " + (e && e.message || e)); return; }
+  const isElo = s => s.autoBan && /impossible with|ELO/i.test(String(s.autoBan.why || ""));
+  const isAlt = s => String(s.banReason || "") === "Alt account of a banned player (same device).";
+  const rows = Object.entries(sanc).filter(([uid, s]) => s && s.banned && (s.autoBan || isAlt(s) || String(s.banReason || "") === "Cheating detected (automatic).") && uid !== MOD_ADMIN_UID);
+  const lift = rows.filter(([, s]) => isElo(s) || isAlt(s)), keep = rows.filter(([, s]) => !(isElo(s) || isAlt(s)));
+  if (!rows.length) { alert("No automatic bans found."); return; }
+  const nBackup = lift.filter(([, s]) => s.backup).length;
+  if (!lift.length) { alert("No bans caused by the ELO rule / alt accounts. " + keep.length + " other automatic ban(s) stay."); return; }
+  if (!confirm("Unban " + lift.length + " account(s) (ELO rule + same-device alt accounts)?\n• " + nBackup + " have a backup that will be restored\n• " + (lift.length - nBackup) + " were wiped without backup (alts) - they can only start fresh\n• their devices get unbanned\n" + keep.length + " other automatic ban(s) (replay / scripted input) stay banned.")) return;
+  let ok = 0, restored = 0, fail = 0;
+  for (const [uid, s] of lift) {
+    try {
+      await R.modSetSanction(uid, { banned: null, banReason: null, autoBan: null });
+      try { await R.modUnbanDevice(uid); } catch (e) { console.warn("device unban failed", uid, e); }
+      if (s.backup) { try { await R.modRestoreUser(uid, s.backup); await R.modSetSanction(uid, { backup: null }); restored++; } catch (e) { console.warn("restore failed", uid, e); } }
+      ok++;
+    } catch (e) { fail++; console.warn("unban failed", uid, e); }
+  }
+  alert("Unbanned " + ok + " account(s), restored " + restored + " backup(s)" + (fail ? ", " + fail + " failed (see console)" : "") + ".");
+}
 async function _cheatBanOne(uid, name, why) {
   const R = _modRPC();
   const [pl, sv, sk] = await Promise.all([R.get("players/" + uid), R.get("survival/" + uid), R.get("streakBoard/" + uid)]);
@@ -14576,6 +14803,7 @@ function _suspectsRender(list) {
   const mk = (t, fn) => { const b = document.createElement("button"); b.textContent = t; b.style.cssText = "margin:0;padding:5px 9px;font-size:12px;"; b.onclick = fn; tools.appendChild(b); return b; };
   mk("🔄 Rescan", async function () { this.disabled = true; this.textContent = "Scanning…"; try { await _cheatScan(true); } catch (e) {} await _cheatersLoad(); });
   mk("🔨 Ban all ≥ 80", _suspectsBanAll);
+  mk("♻ Unban automatic bans", _unbanAutoBans);
   const lab = document.createElement("label"); lab.style.cssText = "font-size:12px;color:#8b93a6;display:flex;gap:4px;align-items:center;";
   const cb = document.createElement("input"); cb.type = "checkbox"; try { cb.checked = localStorage.getItem("dobSuspAuto") === "1"; } catch (e) {}
   cb.onchange = () => { try { localStorage.setItem("dobSuspAuto", cb.checked ? "1" : "0"); } catch (e) {} };
