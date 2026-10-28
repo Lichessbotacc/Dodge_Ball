@@ -1526,6 +1526,14 @@ function onValueRobust(r, cb) {
   return () => { stopped = true; clearTimeout(t); stopPoll(); try { unsub(); } catch (e) {} };
 }
 function rpcOn(path, cb)           { return onValueRobust(ref(db, path), cb); }
+// Wie rpcOn, aber snap.val() (teuer bei grossen Pfaden wie onlineMatches/survivalLive, feuert dutzende Male pro Sekunde) nur alle getMs() ms
+function rpcOnThrottled(path, cb, getMs) {
+  const r = ref(db, path); let latest = null, has = false, timer = null, last = 0, stopped = false, got = false, iv = null;
+  const flush = () => { timer = null; if (stopped || !has) return; has = false; last = Date.now(); try { cb(latest.val()); } catch (e) { console.warn("throttled listener", e); } };
+  const unsub = onValue(r, snap => { got = true; latest = snap; has = true; if (timer) return; const gap = Math.max(0, (Number(getMs && getMs()) || 0) - (Date.now() - last)); if (gap <= 0) flush(); else timer = setTimeout(flush, gap); }, err => console.warn("listener error", err && err.code, err && err.message));
+  const t = setTimeout(() => { if (got || stopped) return; iv = setInterval(async () => { if (stopped) return; try { latest = await get(r); has = true; flush(); } catch (e) {} }, 3000); }, 6000);
+  return () => { stopped = true; clearTimeout(t); clearTimeout(timer); if (iv) clearInterval(iv); try { unsub(); } catch (e) {} };
+}
 
 // ── identity-gated writes: target is ALWAYS derived from the caller's
 //    own uid, never accepted as a free-form path from the caller ──
@@ -2394,7 +2402,7 @@ window._dobRPC = {
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
-  get: rpcGet, on: rpcOn, setIdleBoard: rpcSetIdleBoard, removeIdleOld: rpcRemoveIdleOld, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
+  get: rpcGet, on: rpcOn, onThrottled: rpcOnThrottled, setIdleBoard: rpcSetIdleBoard, removeIdleOld: rpcRemoveIdleOld, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
@@ -2569,6 +2577,7 @@ async function dbGet(path) {
   return p;
 }
 function dbOn(path, cb)     { return RPC ? RPC.on(path, cb) : (() => {}); }
+function dbOnThrottled(path, cb, getMs) { return (RPC && RPC.onThrottled) ? RPC.onThrottled(path, cb, getMs) : dbOn(path, cb); }
 
 async function getHeadToHeadScore(uidA, uidB) {
   const score = await RPC.getHeadToHead(uidA, uidB);
@@ -7472,6 +7481,184 @@ function applyStreakTvBalls(arr) {
   }
   balls = out;
 }
+// ═══════════════════════════════════════════════
+//  ONLINE TV: Snapshot-Interpolation (ruckelfrei, unabhaengig von Bildrate und Paket-Jitter)
+//  Statt Baelle/Spieler alle ~200 ms auf eine veraltete Server-Position zurueckzuziehen, wird die Szene
+//  mit festem Abstand D hinter dem neuesten Paket abgespielt: Spieler werden zwischen zwei echten Paketen
+//  interpoliert, Baelle exakt per Physik (Wand-Reflexion) von ihrem letzten Paket aus vorgerechnet.
+//  Berechnet wird pro gezeichnetem Frame (60/120/144 Hz), nicht pro 60-Hz-Tick.
+// ═══════════════════════════════════════════════
+const TV_TICK_MS = 1000 / 60;
+let tvPipe = null;
+function tvPipeStart(kind) { tvPipe = { kind, ent: [[], []], bbuf: [], off: null, D: kind === "duel" ? 170 : 330, ivE: kind === "duel" ? 40 : 200, ivB: kind === "duel" ? 100 : 200, frozen: false }; }
+function tvPipeStop() { tvPipe = null; }
+function tvPipeReset() { const P = tvPipe; if (!P) return; P.ent = [[], []]; P.bbuf = []; P.off = null; P.rt = null; P.lastM = null; P.offM = null; P.lastA = null; P.frozen = false; }
+function tvPipeClock(s, a) {
+  const P = tvPipe, raw = a - s;
+  if (P.off === null || raw - P.off > 1200) P.off = raw;                                   // Pause/Countdown: neu ausrichten
+  else P.off += (raw < P.off) ? (raw - P.off) * 0.3 : (raw - P.off) * 0.01;                // Jitter: dem schnellsten Paket folgen
+}
+function tvPipePushEnt(k, s, x, y, alive) {
+  const P = tvPipe; if (!P) return;
+  const a = performance.now(); if (s == null) s = a;
+  const buf = P.ent[k] || (P.ent[k] = []);
+  let last = buf[buf.length - 1];
+  if (last && s <= last.s) { if (s < last.s - 400) { buf.length = 0; P.off = null; last = null; } else return; }
+  tvPipeClock(s, a);
+  if (last) P.ivE += (Math.max(10, Math.min(1000, s - last.s)) - P.ivE) * 0.1;
+  buf.push({ s, x, y, alive }); if (buf.length > 40) buf.shift();
+}
+function tvPipePushBalls(s, bl, T, fz) {
+  const P = tvPipe; if (!P) return;
+  const a = performance.now(); if (s == null) s = a;
+  const buf = P.bbuf; let last = buf[buf.length - 1];
+  if (last && s <= last.s) { if (s < last.s - 400) { buf.length = 0; P.off = null; last = null; } else return; }
+  tvPipeClock(s, a);
+  if (last) P.ivB += (Math.max(10, Math.min(1000, s - last.s)) - P.ivB) * 0.1;
+  buf.push({ s, bl, T: T || 0, fz: !!fz }); if (buf.length > 30) buf.shift();
+}
+// Rohdaten -> einheitliche Ball-Objekte
+function tvParseBalls(kind, arr) {
+  const out = [];
+  if (!Array.isArray(arr)) return out;
+  if (kind === "daily") {
+    return arr.map(a => {
+      if (!Array.isArray(a)) return null;
+      const [id, x, y, vx, vy, r, ex, rot, acc, accMax, grav, grow, rMax, col] = a;
+      const b = { id, x, y, vx, vy, radius: r, ex: ex || 0, rot: rot || 0, acc: acc || 0, accMax: accMax || 0, grav: grav || 0, grow: grow || 0, rMax: rMax || 0 };
+      if (col) b.col = col;
+      return b;
+    }).filter(Boolean);
+  }
+  for (const a of arr) {
+    const b = { id: a.i, x: a.x, y: a.y, vx: a.vx, vy: a.vy, radius: a.radius };
+    if (kind === "streak" && a.ch !== undefined) { b.chase = true; b.age0 = a.ch; if (a.cs) { b.cspd = a.cs; b.turn = a.tn || 0.03; } }
+    out.push(b);
+  }
+  return out;
+}
+function tvRefl(x, lo, hi) { const w = hi - lo; if (w <= 0) return lo; let m = (x - lo) % (2 * w); if (m < 0) m += 2 * w; return lo + (m > w ? 2 * w - m : m); }
+function tvEntAt(buf, Rt, Wd, Hd, r) {
+  const n = buf.length; if (!n) return null;
+  let i = n - 1; while (i > 0 && buf[i].s > Rt) i--;
+  if (i > 3) { buf.splice(0, i - 3); i = 3; }
+  const A = buf[i], B = buf[i + 1];
+  let x = A.x, y = A.y;
+  if (B) {
+    const f = Math.max(0, Math.min(1, (Rt - A.s) / Math.max(1, B.s - A.s)));
+    if (Math.hypot(B.x - A.x, B.y - A.y) > 400) { if (f >= 0.5) { x = B.x; y = B.y; } }   // Sprung (neue Runde): nicht ueberfahren
+    else { x = A.x + (B.x - A.x) * f; y = A.y + (B.y - A.y) * f; }
+  } else if (i > 0 && A.alive !== false && Rt > A.s) {   // Paket-Unterlauf: kurz weiterlaufen, dann halten
+    const Pv = buf[i - 1], span = Math.max(1, A.s - Pv.s);
+    if (Math.hypot(A.x - Pv.x, A.y - Pv.y) < 400) {
+      const dt = Math.min(Rt - A.s, span, 120);
+      let vx = (A.x - Pv.x) / span, vy = (A.y - Pv.y) / span; const sp = Math.hypot(vx, vy);
+      if (sp > 0.5) { vx *= 0.5 / sp; vy *= 0.5 / sp; }
+      x += vx * dt; y += vy * dt;
+    }
+  }
+  r = r || 0; x = Math.max(r, Math.min(Wd - r, x)); y = Math.max(r, Math.min(Hd - r, y));
+  return { x, y, alive: A.alive !== false };
+}
+function tvBallsAt(P, A, Rt, me) {
+  const Wd = W(), Hd = H(), out = [];
+  const n = A.fz ? 0 : Math.max(0, (Rt - A.s) / TV_TICK_MS), nf = Math.floor(n), fr = n - nf;
+  if (P.kind === "daily") {
+    const td = tvDaily, fk = td && td.ch && td.ch.field ? td.ch.field.type : null, T0 = A.T || 0;
+    for (const s of A.bl) {
+      const b = Object.assign({}, s); b.exp = s.ex ? T0 + s.ex : 0;
+      let dead = false;
+      for (let k = 1; k <= nf; k++) { const T = T0 + k; if (b.exp && b.exp <= T) { dead = true; break; } dailyAdv(b); dailyMoveBall(b, Wd, Hd, T, fk); }
+      if (dead) continue;
+      if (fr > 0) { b.x += b.vx * fr; b.y += b.vy * fr; if (fk !== "portal") { b.x = Math.max(b.radius, Math.min(Wd - b.radius, b.x)); b.y = Math.max(b.radius, Math.min(Hd - b.radius, b.y)); } }
+      out.push(b);
+    }
+    return out;
+  }
+  const lifeMs = (typeof STREAK_CFG !== "undefined" && STREAK_CFG.chaserLifeMs) || 9000, nowMs = Date.now();
+  for (const s of A.bl) {
+    if (s.chase && s.cspd) {   // Verfolger: pro Tick zum Spieler lenken (wie beim Spieler selbst)
+      const ageMs = s.age0 + (A.fz ? 0 : Rt - A.s);
+      if (ageMs > lifeMs) continue;
+      const b = { id: s.id, x: s.x, y: s.y, vx: s.vx, vy: s.vy, radius: s.radius, chase: true, cspd: s.cspd, turn: s.turn, born: nowMs - ageMs };
+      for (let k = 0; k < nf; k++) {
+        if (me && me.alive !== false) {
+          const want = Math.atan2(me.y - b.y, me.x - b.x), cur = Math.atan2(b.vy, b.vx); let dd = want - cur;
+          while (dd > Math.PI) dd -= Math.PI * 2; while (dd < -Math.PI) dd += Math.PI * 2;
+          const na = cur + Math.max(-b.turn, Math.min(b.turn, dd)); b.vx = Math.cos(na) * b.cspd; b.vy = Math.sin(na) * b.cspd;
+        }
+        b.x += b.vx; b.y += b.vy;
+        if (b.x - b.radius < 0) { b.vx = Math.abs(b.vx); b.x = b.radius; } if (b.x + b.radius > Wd) { b.vx = -Math.abs(b.vx); b.x = Wd - b.radius; }
+        if (b.y - b.radius < 0) { b.vy = Math.abs(b.vy); b.y = b.radius; } if (b.y + b.radius > Hd) { b.vy = -Math.abs(b.vy); b.y = Hd - b.radius; }
+      }
+      b.x += b.vx * fr; b.y += b.vy * fr;
+      out.push(b); continue;
+    }
+    const r = s.radius, b = { id: s.id, x: s.x, y: s.y, vx: s.vx, vy: s.vy, radius: r };
+    { const ex = s.x + s.vx * n, ey = s.y + s.vy * n;
+      if (ex >= r && ex <= Wd - r && ey >= r && ey <= Hd - r) { b.x = ex; b.y = ey; }   // kein Wandkontakt: direkt
+      else {   // Wandkontakt: Tick fuer Tick wie die echte Simulation
+        for (let k = 0; k < nf; k++) {
+          b.x += b.vx; b.y += b.vy;
+          if (b.x - r < 0) { b.vx = Math.abs(b.vx); b.x = r; } if (b.x + r > Wd) { b.vx = -Math.abs(b.vx); b.x = Wd - r; }
+          if (b.y - r < 0) { b.vy = Math.abs(b.vy); b.y = r; } if (b.y + r > Hd) { b.vy = -Math.abs(b.vy); b.y = Hd - r; }
+        }
+        b.x = Math.max(r, Math.min(Wd - r, b.x + b.vx * fr)); b.y = Math.max(r, Math.min(Hd - r, b.y + b.vy * fr));
+      } }
+    if (s.chase) { b.chase = true; b.born = nowMs - (s.age0 || 0); }
+    out.push(b);
+  }
+  return out;
+}
+function tvPipeEval(now) {
+  const P = tvPipe; if (!P || P.frozen) return;
+  const bb = P.bbuf; if (!bb.length && !P.ent[0].length) return;
+  if (P.off === null) return;
+  const iv = Math.max(P.ivE, P.ivB), tgt = Math.min(700, Math.max(P.kind === "duel" ? 150 : 250, iv * 1.5 + 60));
+  P.D += (tgt - P.D) * 0.02;
+  // Render-Uhr: folgt dem Ziel (now - off - D) nur mit max. +-10 % Tempo -> keine Spruenge bei Jitter/Offset-Korrektur
+  const tgtRt = now - P.off - P.D;
+  if (P.rt == null || P.rt === undefined || Math.abs(tgtRt - P.rt) > 400) { P.rt = tgtRt; P.lastNow = now; }
+  const dtF = Math.max(0, Math.min(100, now - P.lastNow)); P.lastNow = now;
+  P.rt += dtF; { const er = tgtRt - P.rt, lim = dtF * 0.1; P.rt += Math.max(-lim, Math.min(lim, er)); }
+  let Rt = P.rt;
+  if (bb.length) {   // Unterlauf (Netz-Hickser): Wiedergabe sanft verlangsamen statt zu springen
+    const lastS = bb[bb.length - 1].s;
+    if (Rt > lastS + 40) { P.D = Math.min(900, P.D + Math.min(4, (Rt - lastS) * 0.05)); }
+  }
+  const pl = players;
+  for (let k = 0; k < pl.length; k++) {
+    const p = pl[k], e = P.ent[k]; if (!p || !e) continue;
+    const res = tvEntAt(e, Rt, W(), H(), p.radius);
+    if (!res) continue;
+    p.x = res.x; p.y = res.y; p.tx = res.x; p.ty = res.y; p.alive = res.alive; p._cx = res.x; p._cy = res.y;
+  }
+  if (bb.length) {
+    let i = bb.length - 1; while (i > 0 && bb[i].s > Rt) i--;
+    if (i > 2) { bb.splice(0, i - 2); i = 2; }
+    const A = bb[i], Rb = Math.max(A.s, Math.min(Rt, A.s + 400));
+    const nb = tvBallsAt(P, A, Rb, pl[0]);
+    { // Fehler-Glaettung: weicht die neu vorgerechnete Position beim Paketwechsel ab (Rundung/Wandkontakt), wird der Versatz in ~0,1 s ausgeblendet statt zu springen
+      const sw = P.lastA !== A; P.lastA = A;
+      const dtT = A.fz ? 0 : dtF / TV_TICK_MS, dec = Math.exp(-dtF / 110), lastM = P.lastM || new Map(), offM = P.offM || (P.offM = new Map()), newM = new Map();
+      for (let q = 0; q < nb.length; q++) {
+        const b = nb[q], key = b.id !== undefined ? b.id : "i" + q;
+        let o = offM.get(key);
+        if (sw) {
+          const pv = lastM.get(key);
+          if (pv) { let ox = pv.x + pv.vx * dtT - b.x, oy = pv.y + pv.vy * dtT - b.y; if (Math.hypot(ox, oy) > 40) { ox = 0; oy = 0; } o = { x: ox, y: oy }; } else o = null;
+          if (o) offM.set(key, o); else offM.delete(key);
+        } else if (o) { o.x *= dec; o.y *= dec; }
+        if (o) { b.x += o.x; b.y += o.y; }
+        newM.set(key, { x: b.x, y: b.y, vx: b.vx, vy: b.vy });
+      }
+      P.lastM = newM; if (sw && offM.size > nb.length + 20) { for (const k of [...offM.keys()]) if (!newM.has(k)) offM.delete(k); }
+      balls = nb;
+    }
+    if (P.kind === "daily" && tvDaily) { const Tn = (A.T || 0) + (Rb - A.s) / TV_TICK_MS; tvDaily.T = Tn; survTick = Math.round(Tn); tvClock = { base: Tn / 60, at: Date.now() }; }
+    else if (P.kind === "surv") { const Tn = (A.T || 0) + (Rb - A.s) / TV_TICK_MS; tvClock = { base: Tn / 60, at: Date.now() }; }
+  }
+}
 let lastBallCorrectionAt = 0;
 // ═══ GEMEINSAME BALL-SIMULATION (echtes 1v1) ═══
 // Beide Spieler berechnen die Baelle selbst, aus demselben Seed und derselben Serverzeit (Tick = Zeit seit startAt).
@@ -8500,7 +8687,7 @@ function streakPushLive(done) {
   const d = { k: "streak", name: onlineAccount.name, c: myBallColor, elo: Math.round(onlineAccount.elo || 1500), r: me.radius,
     x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive,
     bx: bot ? Math.round(bot.x) : 0, by: bot ? Math.round(bot.y) : 0, ba: bot ? !!bot.alive : false,
-    t: _skTick, w: streak.wins, L: streakLevel(), rd: streak.rd || 0, ph: streak.phase, done: !!done };
+    t: _skTick, u: now, w: streak.wins, L: streakLevel(), rd: streak.rd || 0, ph: streak.phase, done: !!done };
   if (done) d.time = streak.wins;
   d.b = JSON.stringify(balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) { o.ch = Math.max(0, now - b.born); o.tn = +(b.turn || 0).toFixed(4); o.cs = +(b.cspd || 0).toFixed(2); } return o; }));
   RPC.setSurvivalLive(d).catch(() => {});
@@ -8978,6 +9165,7 @@ function update() {
   const bel = document.getElementById("balls");
   if (bel) bel.textContent = balls.length;
   if (mode === "online_tv") {
+    if (tvPipe) return;   // Positionen/Baelle kommen aus tvPipeEval (draw)
     const tvNow = Date.now();
     for (const p of players) {
       if (p.tx === undefined || p.ty === undefined) continue;
@@ -9742,7 +9930,11 @@ function resumePlay() {
 // ═══════════════════════════════════════════════
 //  DRAW
 // ═══════════════════════════════════════════════
-function draw() {
+function draw() {   // Online TV: Szene pro gezeichnetem Frame aus den Snapshots berechnen (glatt auf jedem Display)
+  if (mode === "online_tv" && tvPipe) { try { tvPipeEval(performance.now()); } catch (e) { console.warn("tv eval", e); } }
+  drawCore();
+}
+function drawCore() {
   if (mode === "minions") { if (typeof minionsDraw === "function") minionsDraw(); return; }
   ctx.clearRect(0, 0, W(), H());
 
@@ -10324,7 +10516,7 @@ async function startOnlineTV(targetUid) {
   const stopInner = () => {
     setStall(false);
     if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null; tvFreezeBalls = false; tvDaily = null;
+    onlineTvCurrentMatchId = null; curMeta = null; tvClock = null; tvFreezeBalls = false; tvDaily = null; tvPipeStop();
     { const u = document.getElementById("ui"); if (u && mode === "online_tv") u.innerHTML = tvUiDefault; }
     stopViewerCount();
     players = []; balls = [];
@@ -10395,6 +10587,7 @@ async function startOnlineTV(targetUid) {
       const spBot = isSk ? createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot") : null;
       if (isSk) { sp.label = dn(survD.name); spBot.label = "Online Bot"; }
       players = spBot ? [sp, spBot] : [sp]; balls = [];
+      tvPipeStart(isSk ? "streak" : isDl ? "daily" : "surv");
       const skUi = (d) => {
         const u = document.getElementById("ui"); if (!u || mode !== "online_tv") return;
         if (!document.getElementById("sk_w")) u.innerHTML = `🔥 ${tr("Streaks")}: <b id="sk_w">0</b><br>${tr("Round")}: <span id="sk_r">1</span><br>${tr("Bot level")}: <span id="sk_l">1</span>`;
@@ -10414,7 +10607,7 @@ async function startOnlineTV(targetUid) {
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
         if (d.done) {
           if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-          tvFreezeBalls = true;
+          tvFreezeBalls = true; if (tvPipe) tvPipe.frozen = true;
           showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
           badMatches.set(survId, Date.now() + 15000);
           specText.innerHTML = (isSk ? "Streaks" : isDl ? "Daily run" : "Survival run") + " finished. Searching for next game...";
@@ -10427,29 +10620,26 @@ async function startOnlineTV(targetUid) {
         if (isSk) {
           const rd = d.rd || 0;
           if (rd !== skRd) {            // neue Runde: alles hart auf den neuen Stand setzen statt hinzugleiten
-            skRd = rd; balls = [];
-            sp.lastPacketAt = 0; spBot.lastPacketAt = 0;
+            skRd = rd; balls = []; tvPipeReset();
           }
           tvFreezeBalls = d.ph !== "play";   // Intro/Rundensieg: die Baelle stehen auch beim Spieler still
-          feedNetPlayer(sp, { x: d.x, y: d.y, alive: d.ma !== false }, 250);
-          feedNetPlayer(spBot, { x: d.bx, y: d.by, alive: d.ba !== false }, 250);
+          { const su = Number(d.u) || null; tvPipePushEnt(0, su, d.x, d.y, d.ma !== false); tvPipePushEnt(1, su, d.bx, d.by, d.ba !== false); }
           setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (d.L || 1));
           skUi(d);
-          if (d.b) { try { applyStreakTvBalls(JSON.parse(d.b)); } catch(e) {} }
+          if (d.b) { try { tvPipePushBalls(Number(d.u) || null, tvParseBalls("streak", JSON.parse(d.b)), 0, d.ph !== "play"); } catch(e) {} }
           return;
         }
-        feedNetPlayer(sp, { x: d.x, y: d.y, alive: true }, 250);
+        tvPipePushEnt(0, (d.t || 0) * TV_TICK_MS, d.x, d.y, true);
         setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
-        tvClock = { base: (d.t || 0) / 60, at: Date.now() };
         if (isDl) {
           if (!tvDaily) {
             const key = d.dk || dailyKeyNow(), ci = Number.isInteger(d.ci) ? d.ci : dailyIdxFor(key);
             tvDaily = { ch: DAILY_CHALLENGES[ci] || DAILY_CHALLENGES[0], key, T: d.t || 0 };
           }
-          if (d.b) { try { applyDailyTvBalls(JSON.parse(d.b), d.t || 0); } catch(e) {} }
+          if (d.b) { try { tvPipePushBalls((d.t || 0) * TV_TICK_MS, tvParseBalls("daily", JSON.parse(d.b)), d.t || 0, false); } catch(e) {} }
           return;
         }
-        if (d.b) { try { applyBallCorrection(JSON.parse(d.b), 0.35); } catch(e) {} }
+        if (d.b) { try { tvPipePushBalls((d.t || 0) * TV_TICK_MS, tvParseBalls("surv", JSON.parse(d.b)), d.t || 0, false); } catch(e) {} }
       });
       onlineUnsubscribes.push(onlineTvInnerUnsubscribe);
       return;
@@ -10473,6 +10663,7 @@ async function startOnlineTV(targetUid) {
     const p1 = createPlayer(W() * 0.3, H() / 2, "#00ff88", best.p1);
     const p2 = createPlayer(W() * 0.7, H() / 2, "#ff8844", best.p2);
     players = [p1, p2];
+    tvPipeStart("duel"); let _lk1 = "", _lk2 = "", _lkb = null;
 
     // Score-HUD oben für Zuschauer
     {
@@ -10507,6 +10698,7 @@ async function startOnlineTV(targetUid) {
       if (!data || data.status === "done" || data.status === "abandoned") {
         // Gewinner anzeigen (Spielfeld bleibt ein paar Sekunden eingefroren), dann nächstes Match suchen
         if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
+        if (tvPipe) tvPipe.frozen = true;
         const winner = data && data.status === "done" && data.winner ? data.winner : null;
         const sc = data && Number.isFinite(data.p1Score) && Number.isFinite(data.p2Score) ? data.p1Score + " - " + data.p2Score : "";
         let eloRows = null;
@@ -10544,13 +10736,14 @@ async function startOnlineTV(targetUid) {
       const _a = data.p1State, _b = data.p2State, _sig = (_a ? _a.x + "," + _a.y + "," + _a.alive : "") + "|" + (_b ? _b.x + "," + _b.y + "," + _b.alive : "") + "|" + (data.ballState || "");
       const _fresh = _sig !== tvLastSig;
       tvLastSig = _sig;
-      if (data.p1State) { feed(p1, data.p1State); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
-      if (data.p2State) { feed(p2, data.p2State); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
+      if (data.p1State) { const q = data.p1State, kq = q.x + "," + q.y + "," + q.alive; if (kq !== _lk1) { _lk1 = kq; tvPipePushEnt(0, null, q.x, q.y, q.alive !== false); } if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
+      if (data.p2State) { const q = data.p2State, kq = q.x + "," + q.y + "," + q.alive; if (kq !== _lk2) { _lk2 = kq; tvPipePushEnt(1, null, q.x, q.y, q.alive !== false); } if (_fresh) lastPacketSeen = Date.now(); gotPacket = true; }
       if (data.ballState) {
         try {
           const bsArr = JSON.parse(data.ballState);
           if (!tvClock) tvClock = { base: Math.max(0, bsArr.length - ONLINE_START_BALLS) * ONLINE_SPAWN_MS / 1000, at: Date.now() };
-          applyBallCorrection(bsArr, 0.35, 110); if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
+          if (data.ballState !== _lkb) { _lkb = data.ballState; tvPipePushBalls(performance.now() - 110, tvParseBalls("duel", bsArr), 0, false); }
+          if (_fresh) lastPacketSeen = Date.now(); gotPacket = true;
         } catch(e) {}
       }
     };
@@ -10570,13 +10763,14 @@ async function startOnlineTV(targetUid) {
     pickMatch();
   };
   onlineUnsubscribes.push(() => { clearTimeout(_idlePickTimer); _idlePickTimer = null; });
-  onlineTvUnsubscribe = dbOn("onlineMatches", (d) => {
+  const _tvListenMs = () => (onlineTvCurrentMatchId ? 1500 : 150);   // laeuft schon etwas: Auswahl-Daten nur selten verarbeiten (haelt den Hauptthread frei)
+  onlineTvUnsubscribe = dbOnThrottled("onlineMatches", (d) => {
     const first = lastMatchesData === null;
     lastMatchesData = d || {};
     if (first) pickMatch(); else pickNow();
-  });
+  }, _tvListenMs);
   onlineUnsubscribes.push(onlineTvUnsubscribe);
-  const survUnsub = dbOn("survivalLive", (d) => { lastSurvData = d || {}; if (lastMatchesData === null) { lastMatchesData = {}; } else pickNow(); });
+  const survUnsub = dbOnThrottled("survivalLive", (d) => { lastSurvData = d || {}; if (lastMatchesData === null) { lastMatchesData = {}; } else pickNow(); }, _tvListenMs);
   onlineUnsubscribes.push(survUnsub);
   setTimeout(() => { if (mode !== "online_tv" || !running) return; if (lastMatchesData === null) lastMatchesData = {}; pickMatch(); }, 1200);
 
@@ -16088,7 +16282,7 @@ if (typeof module !== "undefined") module.exports = { BotSim, botMkRng };
     const s = run.sim, me = s.me; let d;
     if (run.kind === "streak") {
       const op = s.opp; run.skTick = (run.skTick || 0) + 1;
-      d = { k: "streak", name: NAME, c: COLOR, elo: liveElo(), r: me.r, x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive, bx: op ? Math.round(op.x) : 0, by: op ? Math.round(op.y) : 0, ba: op ? !!op.alive : false, t: run.skTick, w: run.wins, L: run.wins + 1, rd: run.rd, ph: run.phase, done: !!done };
+      d = { k: "streak", name: NAME, c: COLOR, elo: liveElo(), r: me.r, x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive, bx: op ? Math.round(op.x) : 0, by: op ? Math.round(op.y) : 0, ba: op ? !!op.alive : false, t: run.skTick, u: now, w: run.wins, L: run.wins + 1, rd: run.rd, ph: run.phase, done: !!done };
       if (done) d.time = run.wins;
       d.b = JSON.stringify(s.balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) { o.ch = Math.max(0, (b.age || 0) * 16.67); o.tn = +(b.turn || 0).toFixed(4); o.cs = +(b.cspd || 0).toFixed(2); } return o; }));
     } else {
