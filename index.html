@@ -987,6 +987,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <button onclick="startSurvival()">🏝 Survival</button>
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
+          <button id="minionsBtn" onclick="openMinions()">⚔️ Minions</button>
           <button id="idleBtn" onclick="openIdle()">🧱 Idle Brick Breaker</button>
           <button id="arenaBtn" onclick="openArena()">🏟 Hourly Arena</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
@@ -3358,7 +3359,7 @@ function escapeHtml(v) {
 // Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
 // (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
 function currentPresenceStatus() {
-  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks" };
+  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks", minions: "Minions" };
   try {
     if (window.__idleOpen) return "Idle Brick Breaker";
     if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
@@ -8925,6 +8926,7 @@ function gameOver() {
 // ═══════════════════════════════════════════════
 function update() {
   if (!running) return;
+  if (mode === "minions") { if (typeof minionsUpdate === "function") minionsUpdate(); return; }
   campGuardTick();           // Anti-Corner-Camping fuer jeden Modus
   if (!running) return;      // Disqualifikation kann das Spiel beendet haben
   if (mode === "tournament") { updateTournament(); return; }
@@ -9700,6 +9702,7 @@ function resumePlay() {
 //  DRAW
 // ═══════════════════════════════════════════════
 function draw() {
+  if (mode === "minions") { if (typeof minionsDraw === "function") minionsDraw(); return; }
   ctx.clearRect(0, 0, W(), H());
 
   if (mode === "tournament") {
@@ -12892,6 +12895,234 @@ async function arenaRestoreTick() {
 setInterval(arenaRestoreTick, 2500);
 setInterval(arenaBtnUpd, 10000); setTimeout(arenaBtnUpd, 600); setTimeout(arenaBtnUpd, 3000);
 window.openArena = openArena;
+</script>
+<script id="minionsMode">
+// ═══════════════════════════════════════════════
+//  MINIONS — Held + Minions gegen den Online Bot (lokal, nur Admin; fuer alle anderen gesperrt)
+// ═══════════════════════════════════════════════
+const MN_TYPES = [
+  { key:"1", name:"Runner",   icon:"🏃", cost:10, hp:1, sp:2.6, dmg:3,  r:7,  col:"#7CFC9A" },
+  { key:"2", name:"Tank",     icon:"🛡", cost:25, hp:4, sp:1.1, dmg:10, r:13, col:"#6FA8FF" },
+  { key:"3", name:"Splitter", icon:"✂️", cost:20, hp:1, sp:1.7, dmg:5,  r:9,  col:"#FFD166" },
+  { key:"4", name:"Bomber",   icon:"💣", cost:35, hp:2, sp:1.3, dmg:25, r:10, col:"#FF7A59" }
+];
+const MN_CFG = { heartHp:100, manaMax:100, regen:0.1, crystal:15, crystalEvery:360, heroR:14, heroSpeed:9, respawn:180, matchTicks:60*180, invuln:40 };
+let MN = null;
+function mnLocked() { return !_modIsAdminSafe(); }
+function openMinions() {
+  if (mnLocked()) { try { leagueToast("🔒 " + tr("Minions is locked – coming soon"), "#ffcc66"); } catch (e) {} return; }
+  startMinions();
+}
+window.openMinions = openMinions;
+function updMinionsBtn() {
+  const b = document.getElementById("minionsBtn"); if (!b) return;
+  const locked = mnLocked(), key = locked ? "L" : "U";
+  if (b.dataset.k !== key) {
+    b.dataset.k = key; b.textContent = "⚔️ Minions";
+    if (locked) { const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8"; sm.textContent = "🔒 " + tr("Locked"); b.appendChild(sm); }
+    else { const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8"; sm.textContent = "🛡 Admin Test · vs Online Bot"; b.appendChild(sm); }
+  }
+  b.style.opacity = locked ? "0.6" : "";
+}
+setInterval(updMinionsBtn, 3000); setTimeout(updMinionsBtn, 500); setTimeout(updMinionsBtn, 2500);
+
+function mnRand() { return Math.random(); }
+function mnNewBall() {
+  const a = mnRand() * Math.PI * 2, sp = 3.4 + mnRand() * 1.2;
+  return { x: W()/2 + (mnRand()-.5)*200, y: 80 + mnRand()*(H()-160), vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, radius: 12 };
+}
+function startMinions() {
+  if (mnLocked()) return;
+  clearAllTimers();
+  waitingQueue = []; matches = []; playerMatchMap.clear();
+  spectateModeActive = false; spectateMatchId = null; followMode = "none"; targetName = null; humanRemovedFromQueue = false;
+  coins = []; mirrorBot = null; myTrail = [];
+  ["coinHUD","opponentInfo","spectatorInfo","profileModal","winnerOverlay","onlineHUD","eloTable"].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = "none"; });
+  document.body.classList.remove("mode-online","mode-tv");
+  mode = "minions"; balls = []; players = []; eliminated = [];
+  hideAllScreensForGame();
+  const mk = (side) => ({ side, hp: MN_CFG.heartHp, mana: 30, hx: side === 0 ? 70 : W()-70, hy: H()/2,
+    hero: { x: side === 0 ? 170 : W()-170, y: H()/2, tx: side === 0 ? 170 : W()-170, ty: H()/2, dead: 0 }, thinkAt: 30 });
+  MN = { tick: 0, phase: "play", sides: [mk(0), mk(1)], minions: [], crystals: [], fx: [], balls: [], winner: null, nextBall: 60*20, mx: 0, my: 0 };
+  for (let i = 0; i < 4; i++) MN.balls.push(mnNewBall());
+  mnEndOverlay(null);
+  running = true; startTime = Date.now();
+}
+function mnEndOverlay(txt) {
+  let o = document.getElementById("mnEnd");
+  if (!txt) { if (o) o.style.display = "none"; return; }
+  if (!o) {
+    o = document.createElement("div"); o.id = "mnEnd";
+    o.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.65);z-index:60;color:#fff;font-family:Arial,sans-serif";
+    o.innerHTML = '<div id="mnEndT" style="font-size:44px;font-weight:bold"></div><div id="mnEndS" style="opacity:.8"></div><div style="display:flex;gap:12px"><button id="mnRetry" style="padding:12px 22px;font-size:18px;cursor:pointer">🔁 Retry</button><button id="mnHome" style="padding:12px 22px;font-size:18px;cursor:pointer">🏠 Menu</button></div>';
+    document.body.appendChild(o);
+    o.querySelector("#mnRetry").onclick = () => startMinions();
+    o.querySelector("#mnHome").onclick = () => exitToMenu();
+  }
+  o.style.display = "flex";
+  o.querySelector("#mnEndT").textContent = txt[0]; o.querySelector("#mnEndS").textContent = txt[1];
+}
+function mnSpawn(sideIdx, t) {
+  const S = MN.sides[sideIdx], T = MN_TYPES[t];
+  if (S.hero.dead > 0 || S.mana < T.cost) return false;
+  S.mana -= T.cost;
+  const x = sideIdx === 0 ? S.hx + 40 : S.hx - 40, y = Math.max(30, Math.min(H()-30, S.hero.y));
+  MN.minions.push({ side: sideIdx, t, x, y, hp: T.hp, r: T.r, inv: 0, id: MN.tick + Math.random() });
+  return true;
+}
+function mnFx(x, y, col, r) { MN.fx.push({ x, y, col, r: r || 18, life: 18 }); }
+function mnKill(m) {
+  m.hp = 0; mnFx(m.x, m.y, MN_TYPES[m.t].col, 14);
+  if (m.t === 2 && !m.noSplit) for (const dy of [-10, 10]) MN.minions.push({ side: m.side, t: 0, x: m.x, y: m.y + dy, hp: 1, r: 6, inv: 0, small: true });
+}
+function mnBotThink(S) {
+  const me = 1, H0 = S.hero;
+  const enemyMin = MN.minions.filter(m => m.side === 0).sort((a, b) => a.x - b.x);
+  const danger = enemyMin.length && enemyMin[0].x > W() - 520 ? enemyMin.length : 0;
+  const opts = [];
+  if (S.mana >= 10) opts.push(0, 0);
+  if (S.mana >= 20) opts.push(2);
+  if (S.mana >= 25) opts.push(1);
+  if (S.mana >= 35) opts.push(3);
+  if (S.mana >= 60 || (S.mana >= 20 && !danger) ) { if (opts.length) mnSpawn(me, opts[Math.floor(mnRand() * opts.length)]); }
+  S.thinkAt = MN.tick + 40 + Math.floor(mnRand() * 50);
+}
+function mnHeroAI(S) {
+  const h = S.hero; let tx = h.x, ty = h.y;
+  const eMin = MN.minions.filter(m => m.side === 0);
+  let best = null, bd = 1e9;
+  for (const m of eMin) { const d = Math.hypot(m.x - h.x, m.y - h.y); if (d < bd) { bd = d; best = m; } }
+  if (best && best.x > W()/2 - 100) { tx = best.x; ty = best.y; }
+  else if (MN.crystals.length) { let c = MN.crystals[0], cd = 1e9; for (const q of MN.crystals) { const d = Math.hypot(q.x - h.x, q.y - h.y); if (d < cd) { cd = d; c = q; } } tx = c.x; ty = c.y; }
+  else { tx = S.hx - 130; ty = H()/2 + Math.sin(MN.tick / 90) * 200; }
+  let ax = tx - h.x, ay = ty - h.y; const l = Math.hypot(ax, ay) || 1; ax /= l; ay /= l;
+  for (const b of MN.balls) {
+    const dx = h.x - b.x, dy = h.y - b.y, d = Math.hypot(dx, dy);
+    if (d < 110) { const w = (110 - d) / 110 * 3.5; ax += dx / (d || 1) * w; ay += dy / (d || 1) * w; }
+  }
+  const al = Math.hypot(ax, ay) || 1, sp = 5.2;
+  h.x = Math.max(20, Math.min(W()-20, h.x + ax / al * sp)); h.y = Math.max(20, Math.min(H()-20, h.y + ay / al * sp));
+}
+function minionsUpdate() {
+  if (!MN) return;
+  const M = MN, C = MN_CFG;
+  if (M.phase !== "play") return;
+  M.tick++;
+  const [P, B] = M.sides;
+  // Mana + Crystals
+  for (const S of M.sides) S.mana = Math.min(C.manaMax, S.mana + C.regen);
+  if (M.tick % C.crystalEvery === 0 && M.crystals.length < 3) M.crystals.push({ x: W()/2 + (mnRand()-.5)*300, y: 80 + mnRand()*(H()-160) });
+  if (M.tick >= M.nextBall && M.balls.length < 10) { M.balls.push(mnNewBall()); M.nextBall += 60*20; }
+  // Balls
+  for (const b of M.balls) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.x < b.radius) { b.x = b.radius; b.vx = Math.abs(b.vx); } else if (b.x > W()-b.radius) { b.x = W()-b.radius; b.vx = -Math.abs(b.vx); }
+    if (b.y < b.radius) { b.y = b.radius; b.vy = Math.abs(b.vy); } else if (b.y > H()-b.radius) { b.y = H()-b.radius; b.vy = -Math.abs(b.vy); }
+  }
+  // Heroes
+  const h0 = P.hero;
+  if (h0.dead <= 0) { const dx = h0.tx - h0.x, dy = h0.ty - h0.y, d = Math.hypot(dx, dy), sp = C.heroSpeed; if (d <= sp) { h0.x = h0.tx; h0.y = h0.ty; } else { h0.x += dx/d*sp; h0.y += dy/d*sp; } }
+  if (B.hero.dead <= 0) mnHeroAI(B);
+  if (M.tick >= B.thinkAt) mnBotThink(B);
+  for (const S of M.sides) {
+    const h = S.hero;
+    if (h.dead > 0) { h.dead--; if (h.dead === 0) { h.x = S.side === 0 ? 170 : W()-170; h.y = H()/2; h.tx = h.x; h.ty = h.y; } continue; }
+    for (const b of M.balls) if (Math.hypot(h.x - b.x, h.y - b.y) < C.heroR + b.radius - 2) { h.dead = C.respawn; S.mana = Math.max(0, S.mana - 15); mnFx(h.x, h.y, "#ff4444", 30); break; }
+    for (let i = M.crystals.length - 1; i >= 0; i--) { const q = M.crystals[i]; if (Math.hypot(h.x - q.x, h.y - q.y) < C.heroR + 10) { S.mana = Math.min(C.manaMax, S.mana + C.crystal); M.crystals.splice(i, 1); mnFx(q.x, q.y, "#66ccff", 16); } }
+  }
+  // Minions
+  for (const m of M.minions) {
+    if (m.hp <= 0) continue;
+    const T = MN_TYPES[m.t], dir = m.side === 0 ? 1 : -1, S = M.sides[m.side], E = M.sides[1 - m.side];
+    m.x += dir * (m.small ? 2.2 : T.sp);
+    if (m.inv > 0) m.inv--;
+    // Held des Gegners toetet
+    if (E.hero.dead <= 0 && Math.hypot(m.x - E.hero.x, m.y - E.hero.y) < C.heroR + m.r) { mnKill(m); continue; }
+    // Baelle
+    for (const b of M.balls) if (Math.hypot(m.x - b.x, m.y - b.y) < m.r + b.radius) {
+      if (m.inv > 0) break;
+      m.hp--; m.inv = C.invuln; mnFx(m.x, m.y, "#fff", 10);
+      if (m.hp <= 0) mnKill(m);
+      break;
+    }
+    if (m.hp <= 0) continue;
+    // Herz
+    if ((dir > 0 && m.x >= E.hx - 26) || (dir < 0 && m.x <= E.hx + 26)) {
+      const dmg = m.small ? 2 : T.dmg; E.hp -= dmg; mnFx(E.hx, E.hy, "#ff3355", 30);
+      if (m.t === 3) { for (const o of M.minions) if (o.side !== m.side && o.hp > 0 && Math.hypot(o.x - m.x, o.y - m.y) < 120) mnKill(o); }
+      m.hp = 0; m.noSplit = true;
+      if (E.hp <= 0) { E.hp = 0; M.phase = "over"; M.winner = m.side; }
+    }
+  }
+  M.minions = M.minions.filter(m => m.hp > 0);
+  for (const f of M.fx) f.life--; M.fx = M.fx.filter(f => f.life > 0);
+  if (M.phase === "play" && M.tick >= C.matchTicks) { M.phase = "over"; M.winner = P.hp === B.hp ? -1 : (P.hp > B.hp ? 0 : 1); }
+  if (M.phase === "over") {
+    const w = M.winner;
+    mnEndOverlay([w === 0 ? "🏆 You win!" : w === 1 ? "💀 Online Bot wins" : "🤝 Draw", "Hearts: You " + Math.ceil(P.hp) + " · Bot " + Math.ceil(B.hp)]);
+  }
+}
+function mnBtnRect(i) { const w = 150, g = 14, x0 = W()/2 - (4*w + 3*g)/2; return { x: x0 + i*(w+g), y: H() - 74, w, h: 62 }; }
+function minionsDraw() {
+  const M = MN; ctx.clearRect(0, 0, W(), H());
+  if (!M) return;
+  const [P, B] = M.sides;
+  ctx.fillStyle = "rgba(80,140,255,.07)"; ctx.fillRect(0, 0, W()/2, H());
+  ctx.fillStyle = "rgba(255,80,80,.07)"; ctx.fillRect(W()/2, 0, W()/2, H());
+  ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.setLineDash([8, 10]); ctx.beginPath(); ctx.moveTo(W()/2, 0); ctx.lineTo(W()/2, H()); ctx.stroke(); ctx.setLineDash([]);
+  // Herzen
+  for (const S of M.sides) {
+    const col = S.side === 0 ? "#6FA8FF" : "#ff6666", pulse = 1 + Math.sin(M.tick / 12) * 0.06;
+    ctx.font = (54 * pulse) + "px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("❤️", S.hx, S.hy);
+    ctx.fillStyle = "#222"; ctx.fillRect(S.hx - 40, S.hy + 44, 80, 8); ctx.fillStyle = col; ctx.fillRect(S.hx - 40, S.hy + 44, 80 * S.hp / MN_CFG.heartHp, 8);
+  }
+  for (const q of M.crystals) { ctx.fillStyle = "#66ccff"; ctx.beginPath(); ctx.moveTo(q.x, q.y - 11); ctx.lineTo(q.x + 8, q.y); ctx.lineTo(q.x, q.y + 11); ctx.lineTo(q.x - 8, q.y); ctx.closePath(); ctx.fill(); }
+  for (const b of M.balls) { ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2); ctx.fillStyle = "#ff4444"; ctx.fill(); }
+  for (const m of M.minions) {
+    const T = MN_TYPES[m.t]; ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI*2);
+    ctx.fillStyle = T.col; ctx.globalAlpha = m.inv > 0 && (M.tick % 6 < 3) ? 0.4 : 1; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 3; ctx.strokeStyle = m.side === 0 ? "#2f6bff" : "#ff2f2f"; ctx.stroke();
+  }
+  for (const S of M.sides) {
+    const h = S.hero; if (h.dead > 0) continue;
+    ctx.beginPath(); ctx.arc(h.x, h.y, MN_CFG.heroR, 0, Math.PI*2); ctx.fillStyle = S.side === 0 ? (typeof myBallColor === "string" ? myBallColor : "#4af") : "#fa4"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+  }
+  for (const f of M.fx) { ctx.globalAlpha = f.life / 18; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + (18 - f.life) / 18), 0, Math.PI*2); ctx.strokeStyle = f.col; ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1; }
+  // HUD
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial";
+  ctx.fillText("YOU  ❤ " + Math.ceil(P.hp), 16, 26);
+  ctx.textAlign = "right"; ctx.fillText("Online Bot  ❤ " + Math.ceil(B.hp), W() - 16, 26);
+  ctx.textAlign = "center"; const left = Math.max(0, Math.ceil((MN_CFG.matchTicks - M.tick) / 60));
+  ctx.fillText(Math.floor(left/60) + ":" + String(left%60).padStart(2, "0"), W()/2, 26);
+  if (P.hero.dead > 0) { ctx.fillStyle = "#ff8888"; ctx.fillText("Respawn in " + Math.ceil(P.hero.dead / 60) + "s", W()/2, 50); }
+  // Mana
+  const bx = W()/2 - 330, by = H() - 92;
+  ctx.fillStyle = "#222"; ctx.fillRect(bx, by, 660, 10); ctx.fillStyle = "#66ccff"; ctx.fillRect(bx, by, 660 * P.mana / MN_CFG.manaMax, 10);
+  for (let i = 0; i < 4; i++) {
+    const r = mnBtnRect(i), T = MN_TYPES[i], ok = P.mana >= T.cost && P.hero.dead <= 0;
+    ctx.globalAlpha = ok ? 1 : 0.4; ctx.fillStyle = "rgba(20,24,40,.9)"; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = T.col; ctx.lineWidth = 2; ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 15px Arial"; ctx.textAlign = "center"; ctx.fillText(T.icon + " " + T.name, r.x + r.w/2, r.y + 26);
+    ctx.font = "13px Arial"; ctx.fillStyle = "#9cf"; ctx.fillText("[" + T.key + "]  " + T.cost + " mana", r.x + r.w/2, r.y + 47);
+    ctx.globalAlpha = 1;
+  }
+}
+function mnBtnAt(x, y) { for (let i = 0; i < 4; i++) { const r = mnBtnRect(i); if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i; } return -1; }
+function mnPointer(cx, cy, down) {
+  if (mode !== "minions" || !MN || MN.phase !== "play") return;
+  const p = screenToVirtualClamped(cx, cy), bi = mnBtnAt(p.x, p.y);
+  if (bi >= 0) { if (down) mnSpawn(0, bi); return; }
+  MN.sides[0].hero.tx = Math.max(15, Math.min(W()-15, p.x)); MN.sides[0].hero.ty = Math.max(15, Math.min(H()-15, p.y));
+}
+gameWrap.addEventListener("mousemove", e => { if (e.target !== canvas && e.target !== gameWrap) return; mnPointer(e.clientX, e.clientY, false); });
+gameWrap.addEventListener("mousedown", e => { if (e.target !== canvas && e.target !== gameWrap) return; mnPointer(e.clientX, e.clientY, true); });
+gameWrap.addEventListener("touchstart", e => { if (e.target !== canvas && e.target !== gameWrap) return; const t = e.touches[0]; if (t) mnPointer(t.clientX, t.clientY, true); }, { passive: true });
+gameWrap.addEventListener("touchmove", e => { if (e.target !== canvas && e.target !== gameWrap) return; const t = e.touches[0]; if (t) mnPointer(t.clientX, t.clientY, false); }, { passive: true });
+document.addEventListener("keydown", e => {
+  if (mode !== "minions" || !MN || MN.phase !== "play") return;
+  const i = ["1","2","3","4"].indexOf(e.key); if (i >= 0) mnSpawn(0, i);
+});
 </script>
 <script id="idleMode">
 // ═══════════════════════════════════════════════
