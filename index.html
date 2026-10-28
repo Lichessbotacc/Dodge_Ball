@@ -13152,15 +13152,16 @@ const MN_SC = MN_PWID / MN_AW;                  // Skalierung der Gegner-Arena
 const MN_RY = 40;                               // Gegner-Arena beginnt hier (y)
 // Preise: Einkommen ~2/s am Start (steigt auf ~5/s nach 2 min, ~8/s nach 3 min), Start 50 Punkte.
 // Preis ~ Gefahr x Lebensdauer: billig = langsam/kurz, teuer = schnell, schlau oder gross.
+// Preise (Simulation, alle Baelle 10 s): Reg 8, Dsh 20, Tel 16, Zig 12, Bul 22, Cha 28, Spl 18, Gia 30
 const MN_TYPES = [
   { key:"1", id:"reg", name:"Regular",  cost: 8,  w:4 },   // langsam, 25 s
-  { key:"2", id:"spr", name:"Sprinter", cost: 12,  w:3 },   // schnell, 10 s
-  { key:"3", id:"tel", name:"Teleporter", cost: 16, w:3 },  // springt alle 3 s an eine neue Stelle
-  { key:"4", id:"bul", name:"Bullet",   cost: 26, w:3 },   // gezielt auf dich
-  { key:"5", id:"zig", name:"Zickzack", cost: 21, w:3 },   // schlaengelt sich
+  { key:"2", id:"dsh", name:"Dasher",   cost: 20,  w:3 },   // schleicht, bleibt kurz stehen (blinkt), schiesst dann auf dich
+  { key:"3", id:"tel", name:"Teleporter", cost: 16, w:3 },  // springt alle 2,5 s in deine Naehe (0,5 s Vorwarnung)
+  { key:"4", id:"bul", name:"Bullet",   cost: 22, w:3 },   // gezielt auf dich
+  { key:"5", id:"zig", name:"Zickzack", cost: 12, w:3 },   // schlaengelt sich
   { key:"6", id:"cha", name:"Chaser",   cost: 28, w:3 },   // verfolgt dich
-  { key:"7", id:"spl", name:"Splitter", cost: 34, w:2 },   // teilt sich in 3
-  { key:"8", id:"gia", name:"Giant",    cost: 32, w:2 }    // riesig, 20 s
+  { key:"7", id:"spl", name:"Splitter", cost: 18, w:2 },   // teilt sich in 3
+  { key:"8", id:"gia", name:"Giant",    cost: 30, w:2 }    // riesig, 20 s
 ];
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
 const MN_CFG = { startPts:50, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
@@ -13220,16 +13221,16 @@ function mnEndOverlay(txt) {
 // Ball vom Typ t, der in der Arena des Spielers S erscheint
 function mnMakeBall(t, S) {
   const R = Math.random;
-  let r, spd, life, col = "#ff4444", chase = false, turn = 0, aim = false, zig = false, split = 0, tele = 0;
-  if (t === "reg")      { r = 15 + R() * 20; spd = (5 + R() * 6) * 0.5; life = 60 * 25; }
-  else if (t === "spr") { r = 11 + R() * 3;  spd = 6.4; life = 60 * 10; col = "#4de1ff"; }
-  else if (t === "tel") { r = 13 + R() * 3;  spd = 3.6; life = 60 * 14; col = "#f2f2f2"; tele = 60 * 3; }
-  else if (t === "bul") { r = 9 + R() * 3;   spd = 7.6; life = 60 * 12; col = "#ffe14d"; aim = true; }
-  else if (t === "zig") { r = 13 + R() * 4;  spd = 4.2; life = 60 * 14; col = "#ff6ad5"; zig = true; }
-  else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 9;  col = "#ff9d00"; chase = true; turn = 0.03; }
-  else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 14; col = "#35d6a6"; split = 60 * 4; }
-  else if (t === "frg") { r = 9 + R() * 2;   spd = 4.6; life = 60 * 8;  col = "#35d6a6"; }
-  else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 20; col = "#b05a5a"; }
+  let r, spd, life, col = "#ff4444", chase = false, turn = 0, aim = false, zig = false, split = 0, tele = 0, dash = 0;
+  if (t === "reg")      { r = 15 + R() * 20; spd = (5 + R() * 6) * 0.5; life = 60 * 10; }
+  else if (t === "dsh") { r = 12 + R() * 3;  spd = 2.4; life = 60 * 10; col = "#4de1ff"; dash = 100; }
+  else if (t === "tel") { r = 13 + R() * 3;  spd = 3.6; life = 60 * 10; col = "#f2f2f2"; tele = 150; }
+  else if (t === "bul") { r = 9 + R() * 3;   spd = 7.6; life = 60 * 10; col = "#ffe14d"; aim = true; }
+  else if (t === "zig") { r = 13 + R() * 4;  spd = 4.2; life = 60 * 10; col = "#ff6ad5"; zig = true; }
+  else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 10;  col = "#ff9d00"; chase = true; turn = 0.03; }
+  else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 10; col = "#35d6a6"; split = 60 * 4; }
+  else if (t === "frg") { r = 9 + R() * 2;   spd = 4.6; life = 60 * 6;  col = "#35d6a6"; }
+  else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 10; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
   while (!ok && n++ < 80) {
     x = r + R() * (MN_AW - 2 * r); y = r + R() * (MN_AH - 2 * r);
@@ -13237,7 +13238,7 @@ function mnMakeBall(t, S) {
   }
   let a = R() * Math.PI * 2;
   if (aim) a = Math.atan2(S.y - y, S.x - x) + (R() - 0.5) * 0.7;
-  return { type: t, x, y, r, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, spd, life, col, chase, turn, zig, ph: R() * 6, split, tele, warm: MN_CFG.warm };
+  return { type: t, x, y, r, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, spd, life, col, chase, turn, zig, ph: R() * 6, split, tele, dash, dph: 0, warm: MN_CFG.warm };
 }
 // buyer kauft Ball -> landet in der Arena des Gegners
 function mnBuy(buyer, ti) {
@@ -13265,19 +13266,25 @@ function mnStepBalls(S) {
     if (--b.life <= 0) { S.balls.splice(i, 1); continue; }
     if (b.tele > 0 && --b.tele === 0) {
       let nx = b.x, ny = b.y, ok = false, n = 0;
-      while (!ok && n++ < 60) { nx = b.r + Math.random() * (MN_AW - 2 * b.r); ny = b.r + Math.random() * (MN_AH - 2 * b.r); ok = Math.hypot(S.x - nx, S.y - ny) > b.r + MN_CFG.playerR + 200; }
-      b.x = nx; b.y = ny; b.tele = 60 * 3; b.warm = 30; continue;
+      while (!ok && n++ < 60) { nx = b.r + Math.random() * (MN_AW - 2 * b.r); ny = b.r + Math.random() * (MN_AH - 2 * b.r); const dd = Math.hypot(S.x - nx, S.y - ny); ok = dd > b.r + MN_CFG.playerR + 110 && dd < 300; }
+      b.x = nx; b.y = ny; b.tele = 150; b.warm = 30;
+      { const a2 = Math.atan2(S.y - ny, S.x - nx) + (Math.random() - 0.5) * 0.8; b.vx = Math.cos(a2) * b.spd; b.vy = Math.sin(a2) * b.spd; } continue;
     }
     if (b.split > 0 && b.split < 50) b.col = (b.split >> 3) & 1 ? "#ffffff" : "#35d6a6";
     if (b.split > 0 && --b.split === 0) {
       S.balls.splice(i, 1);
       for (let k = 0; k < 3; k++) {
-        const f = mnMakeBall("frg", S), a = k * Math.PI * 2 / 3 + b.ph;
+        const f = mnMakeBall("frg", S), a = Math.atan2(S.y - b.y, S.x - b.x) + (k - 1) * 0.5 + (Math.random() - 0.5) * 0.15;
         f.x = b.x; f.y = b.y; f.vx = Math.cos(a) * f.spd; f.vy = Math.sin(a) * f.spd; f.warm = 40; f.x = Math.max(f.r, Math.min(MN_AW - f.r, f.x)); f.y = Math.max(f.r, Math.min(MN_AH - f.r, f.y));
         if (b.perm) { f.life = Infinity; f.perm = true; }
         S.balls.push(f);
       }
       continue;
+    }
+    if (b.dash > 0 || b.dph > 0) {
+      if (b.dph === 0) { if (--b.dash <= 0) { b.dph = 1; b.dash = 30; b.vx = 0; b.vy = 0; } }
+      else if (b.dph === 1) { b.col = (b.dash >> 2) & 1 ? "#ffffff" : "#4de1ff"; if (--b.dash <= 0) { const a3 = Math.atan2(S.y - b.y, S.x - b.x); b.vx = Math.cos(a3) * 9; b.vy = Math.sin(a3) * 9; b.dph = 2; b.dash = 22; b.col = "#4de1ff"; } }
+      else { if (--b.dash <= 0) { const a4 = Math.random() * Math.PI * 2; b.vx = Math.cos(a4) * b.spd; b.vy = Math.sin(a4) * b.spd; b.dph = 0; b.dash = 100; } }
     }
     if (b.zig) { const cur = Math.atan2(b.vy, b.vx) + Math.sin(b.ph += 0.13) * 0.075; b.vx = Math.cos(cur) * b.spd; b.vy = Math.sin(cur) * b.spd; }
     if (b.chase) {
@@ -13382,7 +13389,7 @@ function mnDrawArena(S, ox, oy, sc, mine) {
   for (const f of S.fx) { ctx.globalAlpha = f.life / 20; ctx.beginPath(); ctx.arc(f.x, f.y, 14 + (20 - f.life) * 2.5, 0, Math.PI * 2); ctx.strokeStyle = "#ff4444"; ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = 1; }
   ctx.restore();
 }
-const MN_COL = { reg:"#ff4d4d", spr:"#4de1ff", tel:"#f2f2f2", bul:"#ffd23f", zig:"#ff6ad5", cha:"#ff9a3c", spl:"#35d6a6", gia:"#9b7bff" };
+const MN_COL = { reg:"#ff4d4d", dsh:"#4de1ff", tel:"#f2f2f2", bul:"#ffd23f", zig:"#ff6ad5", cha:"#ff9a3c", spl:"#35d6a6", gia:"#9b7bff" };
 function mnRR(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 function mnHearts(cx, y, n, align) {
   for (let i = 0; i < MN_CFG.lives; i++) {
