@@ -12912,7 +12912,7 @@ const MN_TYPES = [
   { key:"3", id:"cha", name:"Chaser",  icon:"🟠", cost:15 },
   { key:"4", id:"gia", name:"Giant",   icon:"🪨", cost:25 }
 ];
-const MN_CFG = { startPts:50, maxPts:300, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
+const MN_CFG = { startPts:50, maxPts:500, hitBonus:20, permMul:4, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
 function mnLocked() { return !_modIsAdminSafe(); }
 function openMinions() {
@@ -12947,7 +12947,7 @@ function startMinions() {
   document.body.classList.remove("mode-online","mode-tv");
   mode = "minions"; balls = []; players = []; eliminated = [];
   hideAllScreensForGame();
-  MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], winner: -1, sent: 0 };
+  MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0 };
   mnEndOverlay(null);
   running = true; startTime = Date.now();
 }
@@ -12986,10 +12986,11 @@ function mnMakeBall(t, S) {
 // buyer kauft Ball -> landet in der Arena des Gegners
 function mnBuy(buyer, ti) {
   if (!MN || MN.phase !== "play") return false;
-  const T = MN_TYPES[ti], B = MN.sides[buyer], V = MN.sides[1 - buyer];
-  if (B.pts < T.cost || V.balls.length >= MN_CFG.maxBalls) return false;
-  B.pts -= T.cost;
-  V.balls.push(mnMakeBall(T.id, V));
+  const T = MN_TYPES[ti], B = MN.sides[buyer], V = MN.sides[1 - buyer], perm = MN.perm[buyer], cost = T.cost * (perm ? MN_CFG.permMul : 1);
+  if (B.pts < cost || V.balls.length >= MN_CFG.maxBalls) return false;
+  B.pts -= cost;
+  const nb = mnMakeBall(T.id, V); if (perm) { nb.life = Infinity; nb.perm = true; }
+  V.balls.push(nb);
   if (buyer === 0) { MN.sent++; try { SFX.play("spawn"); } catch (e) {} }
   return true;
 }
@@ -13041,10 +13042,11 @@ function mnBotBuy(S) {
   if (opts.length && (S.pts >= 30 || Math.random() < 0.6)) mnBuy(1, opts[Math.floor(Math.random() * opts.length)]);
   S.think = MN.tick + 50 + Math.floor(Math.random() * 80);
 }
+function mnIncome(tick) { const s = tick / 60; return 2 + s / 20 + s * s / 6000; }
 function minionsUpdate() {
   const M = MN; if (!M || M.phase !== "play") return;
   M.tick++;
-  const rate = (2 + M.tick / 3600) / 60;   // Punkte pro Tick: 2/s, +1/s pro Minute
+  const rate = mnIncome(M.tick) / 60;   // Punkte pro Tick, steigt langsam
   const [P, B] = M.sides;
   for (const S of M.sides) { S.pts = Math.min(MN_CFG.maxPts, S.pts + rate); S.r_ = MN_CFG.playerR; S.x0 = S.x; S.y0 = S.y; if (S.inv > 0) S.inv--; }
   // eigene Bewegung (Ziel folgen)
@@ -13060,6 +13062,7 @@ function minionsUpdate() {
       if (mnHit(S, b)) {
         S.balls.splice(i, 1); S.lives--; S.inv = MN_CFG.inv;
         S.fx.push({ x: S.x, y: S.y, life: 20 });
+        { const O = M.sides[S === P ? 1 : 0]; O.pts = Math.min(MN_CFG.maxPts, O.pts + MN_CFG.hitBonus); if (O === P) M.bonus = { t: M.tick, amt: MN_CFG.hitBonus }; }
         if (S === P) try { SFX.play("hit"); } catch (e) {}
         break;
       }
@@ -13072,8 +13075,9 @@ function minionsUpdate() {
     mnEndOverlay([M.winner === 0 ? "🏆 You win!" : M.winner === 1 ? "💀 Online Bot wins" : "🤝 Draw", "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") + " · Balls sent: " + M.sent]);
   }
 }
-function mnBtnRect(i) { const w = 244, h = 76, g = 8; return { x: MN_PX + 10 + (i % 2) * (w + g), y: 556 + Math.floor(i / 2) * (h + g), w, h }; }
-function mnBtnAt(x, y) { for (let i = 0; i < 4; i++) { const r = mnBtnRect(i); if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i; } return -1; }
+function mnBtnRect(i) { const w = 244, h = 68, g = 8; return { x: MN_PX + 10 + (i % 2) * (w + g), y: 566 + Math.floor(i / 2) * (h + g), w, h }; }
+function mnLeverRect() { return { x: MN_PX + MN_PWID - 200, y: 524, w: 190, h: 34 }; }
+function mnBtnAt(x, y) { { const l = mnLeverRect(); if (x >= l.x && x <= l.x + l.w && y >= l.y - 4 && y <= l.y + l.h + 4) return 4; }  for (let i = 0; i < 4; i++) { const r = mnBtnRect(i); if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i; } return -1; }
 function mnDrawArena(S, ox, oy, sc, mine) {
   ctx.save(); ctx.translate(ox, oy); ctx.scale(sc, sc);
   ctx.beginPath(); ctx.rect(0, 0, MN_AW, MN_AH); ctx.clip();
@@ -13083,6 +13087,7 @@ function mnDrawArena(S, ox, oy, sc, mine) {
     if (b.warm > 0) { ctx.globalAlpha = 0.25; ctx.fillStyle = b.col; ctx.fill(); ctx.globalAlpha = 0.9; ctx.lineWidth = 3; ctx.strokeStyle = b.col; ctx.stroke(); ctx.globalAlpha = 1; continue; }
     ctx.fillStyle = b.col; ctx.fill();
     if (b.chase) { ctx.lineWidth = 3; ctx.strokeStyle = "#fff6c8"; ctx.stroke(); }
+    if (b.perm) { ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.setLineDash([6, 5]); ctx.stroke(); ctx.setLineDash([]); }
     if (b.life < 120) { ctx.globalAlpha = 0.5; ctx.fillStyle = "#000"; ctx.fill(); ctx.globalAlpha = 1; }
   }
   if (S.lives > 0) {
@@ -13095,6 +13100,14 @@ function mnDrawArena(S, ox, oy, sc, mine) {
   for (const f of S.fx) { ctx.globalAlpha = f.life / 20; ctx.beginPath(); ctx.arc(f.x, f.y, 14 + (20 - f.life) * 2.5, 0, Math.PI * 2); ctx.strokeStyle = "#ff4444"; ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = 1; }
   ctx.restore();
 }
+const MN_COL = { reg:"#ff4d4d", bul:"#ffd23f", cha:"#ff9a3c", gia:"#9b7bff" };
+function mnRR(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function mnHearts(cx, y, n, align) {
+  for (let i = 0; i < MN_CFG.lives; i++) {
+    const x = align === "right" ? cx - (MN_CFG.lives - i) * 24 + 12 : cx + i * 24 + 12;
+    ctx.font = "20px Arial"; ctx.textAlign = "center"; ctx.fillStyle = i < n ? "#ff4d6d" : "rgba(255,255,255,.2)"; ctx.fillText(i < n ? "♥" : "♡", x, y);
+  }
+}
 function minionsDraw() {
   const M = MN; ctx.clearRect(0, 0, W(), H());
   if (!M) return;
@@ -13102,42 +13115,81 @@ function minionsDraw() {
   mnDrawArena(P, 0, 0, 1, true);
   ctx.fillStyle = "#0b0c14"; ctx.fillRect(MN_PX, 0, MN_PWID, H());
   mnDrawArena(B, MN_PX, MN_RY, MN_SC, false);
-  ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 2; ctx.strokeRect(MN_PX + 1, MN_RY, MN_PWID - 2, MN_AH * MN_SC);
-  ctx.beginPath(); ctx.moveTo(MN_PX, 0); ctx.lineTo(MN_PX, H()); ctx.stroke();
-  const hearts = n => "❤".repeat(Math.max(0, n)) + "♡".repeat(Math.max(0, MN_CFG.lives - n));
-  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left"; ctx.font = "bold 20px Arial";
-  ctx.fillStyle = "#ff6680"; ctx.fillText(hearts(P.lives), 14, 30);
-  const sec = Math.floor(M.tick / 60); ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial";
-  ctx.fillText(Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"), 14, 54);
-  ctx.fillStyle = "#9aa0aa"; ctx.font = "12px Arial"; ctx.fillText("Survive the balls the bot sends", 14, H() - 12);
-  ctx.font = "bold 15px Arial"; ctx.fillStyle = "#ff8844"; ctx.fillText("Online Bot", MN_PX + 10, 26);
-  ctx.textAlign = "right"; ctx.fillStyle = "#ff6680"; ctx.fillText(hearts(B.lives) + "   💰 " + Math.floor(B.pts), MN_PX + MN_PWID - 10, 26);
-  ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 20px Arial";
-  ctx.fillText("💰 " + Math.floor(P.pts), MN_PX + 12, 546);
-  ctx.textAlign = "right"; ctx.fillStyle = "#9aa0aa"; ctx.font = "13px Arial";
-  ctx.fillText("+" + (2 + M.tick / 3600).toFixed(1) + "/s · send balls to the bot ▶", MN_PX + MN_PWID - 10, 546);
+  // Rahmen
+  ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 2; ctx.strokeRect(MN_PX + 1, MN_RY, MN_PWID - 2, MN_AH * MN_SC);
+  const g = ctx.createLinearGradient(MN_PX - 6, 0, MN_PX + 6, 0); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(.5, "rgba(255,255,255,.3)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(MN_PX - 6, 0, 12, H());
+  ctx.textBaseline = "alphabetic";
+  // Linkes HUD (Pille)
+  ctx.fillStyle = "rgba(10,12,20,.72)"; mnRR(10, 10, 170, 46, 14); ctx.fill();
+  mnHearts(18, 40, P.lives, "left");
+  const sec = Math.floor(M.tick / 60);
+  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.fillText(Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"), 96, 38);
+  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "13px Arial"; ctx.textAlign = "left"; ctx.fillText("YOU", 20, 70);
+  // Gegner-Kopf
+  ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.fillRect(MN_PX, 0, MN_PWID, MN_RY);
+  ctx.textAlign = "left"; ctx.fillStyle = "#ff9a5c"; ctx.font = "bold 16px Arial"; ctx.fillText("🤖 Online Bot", MN_PX + 14, 26);
+  mnHearts(MN_PX + MN_PWID - 12, 27, B.lives, "right");
+  // Punkte-Leiste
+  const py = 526;
+  ctx.fillStyle = "rgba(255,255,255,.06)"; mnRR(MN_PX + 10, py, MN_PWID - 220, 32, 12); ctx.fill();
+  const fr = Math.min(1, P.pts / MN_CFG.maxPts);
+  ctx.save(); mnRR(MN_PX + 10, py, MN_PWID - 220, 32, 12); ctx.clip();
+  const pg = ctx.createLinearGradient(MN_PX, 0, MN_PX + MN_PWID, 0); pg.addColorStop(0, "#b8860b"); pg.addColorStop(1, "#ffd700");
+  ctx.globalAlpha = .35; ctx.fillStyle = pg; ctx.fillRect(MN_PX + 10, py, (MN_PWID - 220) * fr, 32); ctx.globalAlpha = 1; ctx.restore();
+  ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 22px Arial"; ctx.fillText("💰 " + Math.floor(P.pts), MN_PX + 20, py + 24);
+  ctx.textAlign = "right"; ctx.fillStyle = "#c9cdd6"; ctx.font = "13px Arial"; ctx.fillText("+" + mnIncome(M.tick).toFixed(1) + "/s", MN_PX + MN_PWID - 230, py + 21);
+  if (M.bonus && M.tick - M.bonus.t < 70) { const a = 1 - (M.tick - M.bonus.t) / 70; ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.fillStyle = "#6dff8a"; ctx.font = "bold 24px Arial"; ctx.fillText("+" + M.bonus.amt + " 💥 Treffer!", MN_PX + MN_PWID / 2, py - 14 - (1 - a) * 20); ctx.globalAlpha = 1; }
+  { const l = mnLeverRect(), on = M.perm[0];
+    ctx.fillStyle = on ? "rgba(255,215,0,.18)" : "rgba(255,255,255,.06)"; mnRR(l.x, l.y, l.w, l.h, 17); ctx.fill();
+    ctx.strokeStyle = on ? "#ffd700" : "rgba(255,255,255,.3)"; ctx.lineWidth = 2; mnRR(l.x, l.y, l.w, l.h, 17); ctx.stroke();
+    ctx.fillStyle = on ? "#ffd700" : "rgba(255,255,255,.55)"; ctx.beginPath(); ctx.arc(on ? l.x + l.w - 17 : l.x + 17, l.y + 17, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.textAlign = "center"; ctx.font = "bold 13px Arial"; ctx.fillStyle = on ? "#ffd700" : "#c9cdd6"; ctx.fillText(on ? "♾ Dauer-Bälle AN" : "♾ Dauer-Bälle", l.x + l.w / 2 + (on ? -8 : 8), l.y + 22); }
+  // Shop-Buttons
   for (let i = 0; i < 4; i++) {
-    const r = mnBtnRect(i), T = MN_TYPES[i], ok = P.pts >= T.cost && B.balls.length < MN_CFG.maxBalls && M.phase === "play";
-    ctx.globalAlpha = ok ? 1 : 0.4; ctx.fillStyle = "rgba(20,24,40,.92)"; ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = ok ? "#ffd700" : "#666"; ctx.lineWidth = 2; ctx.strokeRect(r.x, r.y, r.w, r.h);
-    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.fillText(T.icon + " " + T.name, r.x + r.w / 2, r.y + 32);
-    ctx.font = "15px Arial"; ctx.fillStyle = "#ffd96a"; ctx.fillText("[" + T.key + "]  " + T.cost + " pts", r.x + r.w / 2, r.y + 58);
+    const r = mnBtnRect(i), T = MN_TYPES[i], col = MN_COL[T.id] || "#fff";
+    const cst = T.cost * (M.perm[0] ? MN_CFG.permMul : 1), ok = P.pts >= cst && B.balls.length < MN_CFG.maxBalls && M.phase === "play";
+    const pressed = M.flash && M.flash.i === i && M.tick - M.flash.t < 10;
+    ctx.globalAlpha = ok ? 1 : 0.42;
+    ctx.fillStyle = pressed ? "rgba(255,255,255,.22)" : "rgba(24,28,46,.95)"; mnRR(r.x, r.y, r.w, r.h, 16); ctx.fill();
+    ctx.strokeStyle = ok ? col : "rgba(255,255,255,.2)"; ctx.lineWidth = 2.5; mnRR(r.x, r.y, r.w, r.h, 16); ctx.stroke();
+    // Ball-Vorschau
+    ctx.beginPath(); ctx.arc(r.x + 40, r.y + r.h / 2, T.id === "gia" ? 22 : T.id === "cha" ? 15 : 12, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+    if (T.id === "cha") { ctx.lineWidth = 3; ctx.strokeStyle = "#fff6c8"; ctx.stroke(); }
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.fillText(T.name, r.x + 76, r.y + 30);
+    ctx.fillStyle = "#ffd96a"; ctx.font = "bold 16px Arial"; ctx.fillText("💰 " + cst, r.x + 76, r.y + 55);
+    ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "bold 13px Arial"; ctx.fillText(T.key, r.x + r.w - 12, r.y + 22);
     ctx.globalAlpha = 1;
   }
+  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Tippe zum Senden · Finger halten zum Bewegen", MN_PX + MN_PWID / 2, H() - 6);
 }
-function mnPointer(cx, cy, down) {
-  if (mode !== "minions" || !MN || MN.phase !== "play") return;
-  const p = screenToVirtualClamped(cx, cy), bi = mnBtnAt(p.x, p.y);
-  if (bi >= 0) { if (down) mnBuy(0, bi); return; }
-  MN.sides[0].tx = Math.min(p.x, MN_AW); MN.sides[0].ty = p.y;
-}
-gameWrap.addEventListener("mousemove", e => { if (e.target !== canvas && e.target !== gameWrap) return; mnPointer(e.clientX, e.clientY, false); });
-gameWrap.addEventListener("mousedown", e => { if (e.target !== canvas && e.target !== gameWrap) return; mnPointer(e.clientX, e.clientY, true); });
-gameWrap.addEventListener("touchstart", e => { if (e.target !== canvas && e.target !== gameWrap) return; const t = e.touches[0]; if (t) mnPointer(t.clientX, t.clientY, true); }, { passive: true });
-gameWrap.addEventListener("touchmove", e => { if (e.target !== canvas && e.target !== gameWrap) return; const t = e.touches[0]; if (t) mnPointer(t.clientX, t.clientY, false); }, { passive: true });
+// --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
+let mnMoveId = null;
+function mnMoveTo(cx, cy) { const p = screenToVirtualClamped(cx, cy); const P = MN.sides[0]; P.tx = Math.min(p.x, MN_AW); P.ty = p.y; }
+function mnBuyAt(cx, cy) { const p = screenToVirtualClamped(cx, cy), bi = mnBtnAt(p.x, p.y); if (bi === 4) { MN.perm[0] = !MN.perm[0]; return true; }
+  if (bi >= 0) { mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true; } return false; }
+function mnOk() { return mode === "minions" && MN && MN.phase === "play"; }
+function mnOnCanvas(e) { return e.target === canvas || e.target === gameWrap; }
+gameWrap.addEventListener("mousemove", e => { if (!mnOnCanvas(e) || !mnOk()) return; const p = screenToVirtualClamped(e.clientX, e.clientY); if (mnBtnAt(p.x, p.y) < 0) mnMoveTo(e.clientX, e.clientY); });
+gameWrap.addEventListener("mousedown", e => { if (!mnOnCanvas(e) || !mnOk()) return; if (!mnBuyAt(e.clientX, e.clientY)) mnMoveTo(e.clientX, e.clientY); });
+gameWrap.addEventListener("touchstart", e => {
+  if (!mnOnCanvas(e) || !mnOk()) return;
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (mnBuyAt(t.clientX, t.clientY)) continue;
+    if (mnMoveId === null) { mnMoveId = t.identifier; mnMoveTo(t.clientX, t.clientY); }
+  }
+}, { passive: false });
+gameWrap.addEventListener("touchmove", e => {
+  if (!mnOnCanvas(e) || !mnOk()) return;
+  e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === mnMoveId) mnMoveTo(t.clientX, t.clientY);
+}, { passive: false });
+const mnTouchEnd = e => { for (const t of e.changedTouches) if (t.identifier === mnMoveId) mnMoveId = null; };
+window.addEventListener("touchend", mnTouchEnd); window.addEventListener("touchcancel", mnTouchEnd);
 document.addEventListener("keydown", e => {
-  if (mode !== "minions" || !MN || MN.phase !== "play") return;
-  const i = ["1","2","3","4"].indexOf(e.key); if (i >= 0) mnBuy(0, i);
+  if (!mnOk()) return;
+  const i = ["1","2","3","4"].indexOf(e.key); if (e.key === "5" || e.key === "l" || e.key === "L") MN.perm[0] = !MN.perm[0]; if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
 });
 </script>
 <script id="idleMode">
