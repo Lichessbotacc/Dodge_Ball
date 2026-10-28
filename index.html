@@ -1142,6 +1142,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
         <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streaks</button>
+        <button id="lbTabMinions" onclick="lbShowTab('minions')" style="margin:0;padding:8px 18px;font-size:14px;">⚔️ Minions</button>
         <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
@@ -1517,7 +1518,7 @@ async function rpcGet(path)        { return (await get(ref(db, path))).val(); }
 // Live-Listener mit Netz-Fallback: kommt innerhalb von 6 s kein Snapshot (WebSocket blockiert/instabil), wird alle 3 s per get() nachgeladen
 function onValueRobust(r, cb) {
   let got = false, stopped = false, iv = null;
-  const _slowPoll = ["players", "survival", "streakBoard", "dailyWins", "daily"].includes(r.key);   // grosse Pfade: Fallback-Polling nur alle 20 s statt 3 s
+  const _slowPoll = ["players", "survival", "streakBoard", "minionsBoard", "dailyWins", "daily"].includes(r.key);   // grosse Pfade: Fallback-Polling nur alle 20 s statt 3 s
   const stopPoll = () => { if (iv) { clearInterval(iv); iv = null; } };
   const unsub = onValue(r, snap => { got = true; stopPoll(); cb(snap.val()); }, err => console.warn("listener error", err && err.code, err && err.message));
   const t = setTimeout(() => {
@@ -1709,6 +1710,18 @@ async function rpcSetIdleBoard(name, total, best) {
   const uid = requireUid();
   total = Number(total); if (!isFinite(total) || total < 0) throw new Error("Bad total.");
   return set(ref(db, "idleBoard/" + uid), { name: String(name).slice(0, 20), total: Math.min(total, 1e300), best: Math.max(1, Math.floor(Number(best) || 1)), ts: serverTimestamp() });
+}
+
+// Minions: nur eigener Eintrag minionsBoard/{uid} (ELO, Siege, Niederlagen ...)
+async function rpcSetMinionsBoard(d) {
+  requireNotBanned();
+  const uid = requireUid();
+  const n = (v, hi) => Math.max(0, Math.min(hi, Math.floor(Number(v) || 0)));
+  return set(ref(db, "minionsBoard/" + uid), {
+    name: String(d.name).slice(0, 20), elo: n(d.elo, 5000), highestElo: n(d.highestElo, 5000), lowestElo: n(d.lowestElo, 5000),
+    wins: n(d.wins, 1e6), losses: n(d.losses, 1e6), draws: n(d.draws, 1e6), curStreak: n(d.curStreak, 1e6), bestStreak: n(d.bestStreak, 1e6),
+    ballsSent: n(d.ballsSent, 1e9), eloGained: n(d.eloGained, 1e9), eloLost: n(d.eloLost, 1e9), ts: serverTimestamp()
+  });
 }
 
 // Expose the guarded surface (functions only — no raw db/ref handles,
@@ -1992,7 +2005,7 @@ async function rpcModPurgeUser(uid, name) {
   uid = String(uid || "");
   if (!/^[A-Za-z0-9_-]{6,128}$/.test(uid) || uid === MOD_ADMIN_UID_RPC) throw new Error("Bad uid.");
   const paths = new Set(["players/" + uid, "survival/" + uid, "survivalReplays/" + uid, "streakBoard/" + uid, "survivalLive/" + uid,
-    "idleBoard/" + uid, "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid, "youtubeRequests/" + uid, "youtubeLinks/" + uid, "twitchRequests/" + uid, "twitchLinks/" + uid]);
+    "idleBoard/" + uid, "minionsBoard/" + uid, "queue/" + uid, "queue/" + uid + "_invite", "challenges/" + uid, "dailyWins/" + uid, "dailyBonusWins/" + uid, "dailyReplays/" + uid, "youtubeRequests/" + uid, "youtubeLinks/" + uid, "twitchRequests/" + uid, "twitchLinks/" + uid]);
   const safe = async (fn) => { try { return await fn(); } catch (e) { return null; } };
   const [un, wl, ch, h2h, chat, dly] = await Promise.all([
     safe(async () => (await get(ref(db, "usernames"))).val()),
@@ -2403,7 +2416,7 @@ window._dobRPC = {
   myUid, requireUid,
   sendAppeal: rpcSendAppeal, modRemoveAppeal: rpcModRemoveAppeal,
   registerDevice: rpcRegisterDevice, reportSynthetic: rpcReportSynthetic, modDeleteBotFlag: rpcModDeleteBotFlag, modFlagCheater: rpcModFlagCheater, isDeviceBanned: rpcIsDeviceBanned, modBanDevice: rpcModBanDevice, modBanLinked: rpcModBanLinked, modUnbanDevice: rpcModUnbanDevice,
-  get: rpcGet, on: rpcOn, onThrottled: rpcOnThrottled, setIdleBoard: rpcSetIdleBoard, removeIdleOld: rpcRemoveIdleOld, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
+  get: rpcGet, on: rpcOn, onThrottled: rpcOnThrottled, setIdleBoard: rpcSetIdleBoard, setMinionsBoard: rpcSetMinionsBoard, removeIdleOld: rpcRemoveIdleOld, setIdleSave: rpcSetIdleSave, setIdleLive: rpcSetIdleLive, armIdleLiveDisconnect: rpcArmIdleLiveDisconnect, removeIdleLive: rpcRemoveIdleLive,
   setOwnPlayer: rpcSetOwnPlayer, updateOwnPlayer: rpcUpdateOwnPlayer, removeOwnPlayer: rpcRemoveOwnPlayer,
   setUsernameIndex: rpcSetUsernameIndex, removeUsernameIndex: rpcRemoveUsernameIndex,
   setOwnQueueEntry: rpcSetOwnQueueEntry, removeOwnQueueEntry: rpcRemoveOwnQueueEntry,
@@ -2565,7 +2578,7 @@ async function onFirebaseAndAuthReady() {
 // Cache fuer grosse Tabellen: verhindert, dass jedes Leaderboard/Profil die komplette Tabelle neu laedt (spart Download-Traffic).
 // Parallele Aufrufe teilen sich denselben Request. TTL 60 s.
 const _DB_CACHE = {};
-const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "dailyWins", "daily"]);
+const _DB_CACHE_PATHS = new Set(["players", "survival", "streakBoard", "minionsBoard", "dailyWins", "daily"]);
 async function dbGet(path) {
   if (!RPC) return null;
   if (!_DB_CACHE_PATHS.has(path)) return RPC.get(path);
@@ -4378,10 +4391,11 @@ function lbShowTab(tab) {
   if (k) k.style.borderColor = tab === "streak" ? "#00ff88" : "";
   const dd = document.getElementById("lbTabDaily"), dw = document.getElementById("lbTabDailyWins");
   if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
+  const _lm = document.getElementById("lbTabMinions"); if (_lm) _lm.style.borderColor = tab === "minions" ? "#00ff88" : "";
   const _li = document.getElementById("lbTabIdle"); if (_li) _li.style.borderColor = tab === "idle" ? "#00ff88" : "";
   const _la = document.getElementById("lbTabActivity"); if (_la) _la.style.borderColor = tab === "activity" ? "#00ff88" : "";
   const _lar = document.getElementById("lbTabArena"); if (_lar) _lar.style.borderColor = tab === "arena" ? "#00ff88" : "";
-  if (tab === "arena") loadArenaBoard(); else if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
+  if (tab === "arena") loadArenaBoard(); else if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "minions") loadMinionsBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 // Falls das Leaderboard schon offen war, als die Verbindung hergestellt wurde: einmal automatisch neu laden
 window.addEventListener("dobAuthReady", () => {
@@ -4414,6 +4428,28 @@ async function loadArenaBoard() {
     if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No arena points yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.pts} pts · ${r.wins}W/${r.games - r.wins}L</span><span></span></div>`).join("");
+  } catch (e) { if (my === _lbToken) _lbErr(t, head); }
+}
+async function loadMinionsBoard() {
+  const t = document.getElementById("lbTable");
+  t.innerHTML = '<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
+  const my = ++_lbToken;
+  const head = t.innerHTML;
+  t.innerHTML = head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
+  if (!(await _lbReady(t, head))) return;
+  try {
+    const [mb, pl] = await Promise.all([_dbGetT("minionsBoard"), _dbGetT("players")]);
+    if (my !== _lbToken) return;
+    t.innerHTML = head;
+    const rows = Object.entries(mb || {})
+      .filter(([uid]) => !pl || pl[uid])                       // geloeschte Accounts ausblenden
+      .map(([uid, r]) => ({ uid, elo: Number(r && r.elo) || 0, w: Number(r && r.wins) || 0, l: Number(r && r.losses) || 0, d: Number(r && r.draws) || 0, ts: Number(r && r.ts) || 0, name: (pl && pl[uid] && pl[uid].name) || (r && r.name) || "?" }))
+      .filter(r => r.w + r.l + r.d > 0)
+      .sort((a, b) => b.elo - a.elo || b.w - a.w || a.ts - b.ts)
+      .slice(0, 100);
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No Minions games yet</span></div>'; return; }
+    t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
+      <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.elo}</span><span>${r.w}W/${r.l}L</span></div>`).join("");
   } catch (e) { if (my === _lbToken) _lbErr(t, head); }
 }
 async function loadStreakBoard() {
@@ -5927,6 +5963,9 @@ async function inviteFriends() {
 
 function exitToMenu() {
   try { cleanupOnline(); } catch (e) { console.warn(e); }
+  let _mnWait = null;
+  try { if (typeof mnLeave === "function") _mnWait = mnLeave(); } catch (e) {}   // Minions: Match verlassen = Niederlage (erst speichern, dann neu laden)
+  if (_mnWait && _mnWait.then) { Promise.race([_mnWait, new Promise(r => setTimeout(r, 2500))]).then(() => setTimeout(() => { window.location.reload(); }, 150), () => { window.location.reload(); }); return; }
   setTimeout(() => {
     window.location.reload();
   }, 150);
@@ -6223,7 +6262,8 @@ async function openOnlineProfile(uid) {
       const minGained = Math.max(0, Math.round((p.elo ?? 1500) - 1500 + (p.totalEloLost ?? 0)));
       if (!(p.totalEloGained >= minGained)) p.totalEloGained = Math.max(minGained, p.wins);
     }
-    let svRec = 0, skRec = 0;
+    let svRec = 0, skRec = 0, mnRec = null;
+    try { mnRec = await dbGet("minionsBoard/" + uid); } catch (e) {}
     try {
       const [sv, sk] = await Promise.all([dbGet("survival/" + uid).catch(() => null), dbGet("streakBoard/" + uid).catch(() => null)]);
       svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
@@ -6267,6 +6307,7 @@ async function openOnlineProfile(uid) {
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
+        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + B("Lowest Elo", Math.round(mnRec.lowestElo ?? mnRec.elo ?? 1500)) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0) + R("Balls sent", Number(mnRec.ballsSent) || 0) + G("Total Elo Won", "+" + fmtElo(Number(mnRec.eloGained) || 0)) + B("Total Elo Lost", "-" + fmtElo(Number(mnRec.eloLost) || 0)); })()}</div>
         ${profileStatsHtml(p, R, G, B, svRec)}
         </div>
       </div>`;
@@ -13168,19 +13209,25 @@ const MN_TYPES = [
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
 const MN_CFG = { startPts:10, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
-function mnLocked() { return !_modIsAdminSafe(); }
+const MN_UNLOCK_AT = Date.UTC(2026, 9, 29, 23, 0, 0);   // Fr 30.10.2026 00:00 Europe/Berlin (MEZ = UTC+1) - ab dann fuer alle
+function mnNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
+function mnUnlocked() { return mnNow() >= MN_UNLOCK_AT; }
+function mnLocked() { return !mnUnlocked() && !_modIsAdminSafe(); }
+function mnLeftText() { const ms = Math.max(0, MN_UNLOCK_AT - mnNow()), d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000); return (d ? d + "d " : "") + h + "h " + m + "m"; }
 function openMinions() {
-  if (mnLocked()) { try { leagueToast("🔒 " + tr("Minions is locked – coming soon"), "#ffcc66"); } catch (e) {} return; }
+  if (mnLocked()) { try { leagueToast("🔒 Minions unlocks on Friday · " + mnLeftText(), "#ffcc66"); } catch (e) {} return; }
   startMinions();
 }
 window.openMinions = openMinions;
 function updMinionsBtn() {
   const b = document.getElementById("minionsBtn"); if (!b) return;
-  const locked = mnLocked(), key = locked ? "L" : "U";
+  const locked = mnLocked(), pre = !mnUnlocked();
+  const sub = locked ? "🔒 Opens Friday · " + mnLeftText() : pre ? "🛡 Admin test (no ELO) · vs Online Bot" : "ELO · vs Online Bot";
+  const key = sub;
   if (b.dataset.k !== key) {
     b.dataset.k = key; b.textContent = "⚔️ Minions";
     const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8";
-    sm.textContent = locked ? "🔒 " + tr("Locked") : "🛡 Admin Test · vs Online Bot";
+    sm.textContent = sub;
     b.appendChild(sm);
   }
   b.style.opacity = locked ? "0.6" : "";
@@ -13206,19 +13253,49 @@ function startMinions() {
   mnEndOverlay(null); mnMoveId = null;
   running = true; startTime = Date.now();
 }
+// ── ELO / Stats (minionsBoard/{uid}) ──
+const MN_BOT_ELO = 1500, MN_K = 24;
+async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Unentschieden
+  const setE = (t, c) => { const e = document.getElementById("mnEndE"); if (e) { e.textContent = t; e.style.color = c || "#fff"; } };
+  const M = MN; if (!M || M.reported) return; M.reported = true;
+  if (!mnUnlocked()) { setE("🛡 Admin test – no ELO saved", "#c9cdd6"); return; }
+  if (!(fbReady && RPC && myUid && onlineAccount)) { setE("Log in to an online account to earn Minions ELO", "#c9cdd6"); return; }
+  try {
+    const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
+    const g = k => Number(cur[k]) || 0;
+    const e0 = cur.elo != null ? Number(cur.elo) : 1500;
+    const score = res === 0 ? 1 : res === 1 ? 0 : 0.5, exp = 1 / (1 + Math.pow(10, (MN_BOT_ELO - e0) / 400));
+    const d = Math.round(MN_K * (score - exp)), e1 = Math.max(0, e0 + d);
+    const st = res === 0 ? g("curStreak") + 1 : 0;
+    await RPC.setMinionsBoard({
+      name: onlineAccount.name, elo: e1, highestElo: Math.max(cur.highestElo != null ? g("highestElo") : e0, e1), lowestElo: Math.min(cur.lowestElo != null ? g("lowestElo") : e0, e1),
+      wins: g("wins") + (res === 0 ? 1 : 0), losses: g("losses") + (res === 1 ? 1 : 0), draws: g("draws") + (res === -1 ? 1 : 0),
+      curStreak: st, bestStreak: Math.max(g("bestStreak"), st), ballsSent: g("ballsSent") + (M.sent || 0),
+      eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d)
+    });
+    try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
+    setE((left ? "🚪 Left match · " : "") + (d >= 0 ? "+" : "") + d + " ELO  →  " + e1, d > 0 ? "#6dff8a" : d < 0 ? "#ff6b6b" : "#fff");
+  } catch (e) { console.warn("minions elo save failed", e); setE("ELO could not be saved", "#ffcc66"); }
+}
+function mnLeave() {   // Match mitten im Spiel verlassen = Niederlage
+  const M = MN;
+  if (mode !== "minions" || !M || M.phase !== "play") return null;
+  M.phase = "over"; M.winner = 1;
+  return mnReport(1, true);
+}
 function mnEndOverlay(txt) {
   let o = document.getElementById("mnEnd");
   if (!txt) { if (o) o.style.display = "none"; return; }
   if (!o) {
     o = document.createElement("div"); o.id = "mnEnd";
     o.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.65);z-index:60;color:#fff;font-family:Arial,sans-serif";
-    o.innerHTML = '<div id="mnEndT" style="font-size:44px;font-weight:bold"></div><div id="mnEndS" style="opacity:.8"></div><div style="display:flex;gap:12px"><button id="mnRetry" style="padding:12px 22px;font-size:18px;cursor:pointer">🔁 Retry</button><button id="mnHome" style="padding:12px 22px;font-size:18px;cursor:pointer">🏠 Menu</button></div>';
+    o.innerHTML = '<div id="mnEndT" style="font-size:44px;font-weight:bold"></div><div id="mnEndS" style="opacity:.8"></div><div id="mnEndE" style="font-size:22px;font-weight:bold;min-height:28px"></div><div style="display:flex;gap:12px"><button id="mnRetry" style="padding:12px 22px;font-size:18px;cursor:pointer">🔁 Retry</button><button id="mnHome" style="padding:12px 22px;font-size:18px;cursor:pointer">🏠 Menu</button></div>';
     document.body.appendChild(o);
     o.querySelector("#mnRetry").onclick = () => startMinions();
     o.querySelector("#mnHome").onclick = () => exitToMenu();
   }
   o.style.display = "flex";
-  o.querySelector("#mnEndT").textContent = txt[0]; o.querySelector("#mnEndS").textContent = txt[1];
+  o.querySelector("#mnEndT").textContent = txt[0]; o.querySelector("#mnEndS").textContent = txt[1]; o.querySelector("#mnEndE").textContent = "";
 }
 
 // Ball vom Typ t, der in der Arena des Spielers S erscheint
@@ -13322,13 +13399,40 @@ function mnBotMove(S) {
     const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1;
     if (dist < MN_BOT.awareness) { const f = Math.max(0, (MN_BOT.awareness - dist) / MN_BOT.awareness) * MN_BOT.dodgePower * 2; avoidX += dx / dist * f; avoidY += dy / dist * f; }
   }
-  let vx = moveX * 4 + avoidX * 10, vy = moveY * 4 + avoidY * 10;
+  let chX = 0, chY = 0;
+  for (const b of act) {
+    if (!b.chase) continue;
+    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1, RC = 260;
+    if (dist >= RC) continue;
+    const f = (RC - dist) / RC, ax = dx / dist, ay = dy / dist;
+    let tx = -ay, ty = ax;                                         // Tangente (seitlich zum Chaser)
+    if (tx * (MN_AW / 2 - p.x) + ty * (MN_AH / 2 - p.y) < 0) { tx = -tx; ty = -ty; }   // Richtung Mitte: nicht in die Ecke druecken lassen
+    chX += (ax * 0.5 + tx) * f * 3; chY += (ay * 0.5 + ty) * f * 3;
+  }
+  let vx = moveX * 4 + avoidX * 10 + chX * 9, vy = moveY * 4 + avoidY * 10 + chY * 9;
   vx += (Math.random() - 0.5) * MN_BOT.randomness; vy += (Math.random() - 0.5) * MN_BOT.randomness;
   const len = Math.hypot(vx, vy) || 1;
   p.x += vx / len * MN_BOT.speed; p.y += vy / len * MN_BOT.speed;
   p.x = Math.max(R, Math.min(MN_AW - R, p.x)); p.y = Math.max(R, Math.min(MN_AH - R, p.y));
 }
+// Bot-Einkauf: kauft meist sofort, spart aber manchmal (30 %) auf einen teuren Ball und will in ~15 % der Faelle einen Perma-Ball (3x Preis, nur guenstige Typen)
 function mnBotBuy(S) {
+  const t = S.save;
+  if (t) {   // gerade am Sparen
+    const T = MN_TYPES[t.i], cost = T.cost * (t.perm ? MN_CFG.permMul : 1);
+    if (S.pts >= cost) { MN.perm[1] = !!t.perm; mnBuy(1, t.i); MN.perm[1] = false; S.save = null; S.think = MN.tick + 40 + Math.floor(Math.random() * 60); return; }
+    if (MN.tick > t.until) S.save = null;           // zu lange gespart -> aufgeben
+    else { S.think = MN.tick + 20; return; }
+  }
+  const r = Math.random();
+  if (r < 0.15) {   // Perma-Ball: Typ waehlen und darauf sparen
+    const c = MN_TYPES.map((T, i) => i).filter(i => MN_TYPES[i].cost <= 22), i = c[Math.floor(Math.random() * c.length)];
+    S.save = { i, perm: true, until: MN.tick + 60 * 25 }; S.think = MN.tick + 20; return;
+  }
+  if (r < 0.40) {   // auf einen teuren Ball sparen (>= 20 Punkte), falls noch nicht genug da
+    const c = MN_TYPES.map((T, i) => i).filter(i => MN_TYPES[i].cost >= 20 && MN_TYPES[i].cost > S.pts), i = c[Math.floor(Math.random() * c.length)];
+    if (i != null) { S.save = { i, perm: false, until: MN.tick + 60 * 12 }; S.think = MN.tick + 20; return; }
+  }
   const opts = [];
   MN_TYPES.forEach((T, i) => { if (S.pts >= T.cost) { const w = T.w || 1; for (let k = 0; k < w; k++) opts.push(i); } });
   if (opts.length && (S.pts >= 30 || Math.random() < 0.6)) mnBuy(1, opts[Math.floor(Math.random() * opts.length)]);
@@ -13365,6 +13469,7 @@ function minionsUpdate() {
     M.phase = "over"; M.winner = P.lives <= 0 && B.lives <= 0 ? -1 : (P.lives <= 0 ? 1 : 0);
     const sec = Math.floor(M.tick / 60);
     mnEndOverlay([M.winner === 0 ? "🏆 You win!" : M.winner === 1 ? "💀 Online Bot wins" : "🤝 Draw", "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") + " · Balls sent: " + M.sent]);
+    mnReport(M.winner === 0 ? 0 : M.winner === 1 ? 1 : -1, false);
   }
 }
 function mnBtnRect(i) { const w = 117, h = 70, g = 8; return { x: MN_PX + 10 + (i % 4) * (w + g), y: 566 + Math.floor(i / 4) * (h + 6), w, h }; }
