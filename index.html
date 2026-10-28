@@ -12906,13 +12906,19 @@ const MN_AW = 768, MN_AH = 720;                 // logische Groesse jeder Arena
 const MN_PX = 768, MN_PWID = 512;               // rechtes Panel (40 %)
 const MN_SC = MN_PWID / MN_AW;                  // Skalierung der Gegner-Arena
 const MN_RY = 40;                               // Gegner-Arena beginnt hier (y)
+// Preise: Einkommen ~2/s am Start (steigt auf ~5/s nach 2 min, ~8/s nach 3 min), Start 50 Punkte.
+// Preis ~ Gefahr x Lebensdauer: billig = langsam/kurz, teuer = schnell, schlau oder gross.
 const MN_TYPES = [
-  { key:"1", id:"reg", name:"Regular", icon:"🔴", cost:5  },
-  { key:"2", id:"bul", name:"Bullet",  icon:"🔫", cost:13  },
-  { key:"3", id:"cha", name:"Chaser",  icon:"🟠", cost:15 },
-  { key:"4", id:"gia", name:"Giant",   icon:"🪨", cost:17 }
+  { key:"1", id:"reg", name:"Regular",  cost:4,  w:4 },   // langsam, 25 s
+  { key:"2", id:"spr", name:"Sprinter", cost:7,  w:3 },   // schnell, 10 s
+  { key:"3", id:"swm", name:"Schwarm",  cost:9,  w:3 },   // 3 kleine Baelle
+  { key:"4", id:"bul", name:"Bullet",   cost:11, w:3 },   // gezielt auf dich
+  { key:"5", id:"zig", name:"Zickzack", cost:13, w:3 },   // schlaengelt sich
+  { key:"6", id:"cha", name:"Chaser",   cost:16, w:3 },   // verfolgt dich
+  { key:"7", id:"spl", name:"Splitter", cost:20, w:2 },   // teilt sich in 3
+  { key:"8", id:"gia", name:"Giant",    cost:26, w:2 }    // riesig, 20 s
 ];
-const MN_CFG = { startPts:50, maxPts:500, hitBonus:20, permMul:4, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
+const MN_CFG = { startPts:50, maxPts:300, hitBonus:15, permMul:5, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
 function mnLocked() { return !_modIsAdminSafe(); }
 function openMinions() {
@@ -12969,10 +12975,15 @@ function mnEndOverlay(txt) {
 // Ball vom Typ t, der in der Arena des Spielers S erscheint
 function mnMakeBall(t, S) {
   const R = Math.random;
-  let r, spd, life, col = "#ff4444", chase = false, turn = 0, aim = false;
+  let r, spd, life, col = "#ff4444", chase = false, turn = 0, aim = false, zig = false, split = 0;
   if (t === "reg")      { r = 15 + R() * 20; spd = (5 + R() * 6) * 0.5; life = 60 * 25; }
+  else if (t === "spr") { r = 11 + R() * 3;  spd = 6.4; life = 60 * 10; col = "#4de1ff"; }
+  else if (t === "swm") { r = 8 + R() * 2;   spd = 3.4; life = 60 * 14; col = "#8dff6a"; }
   else if (t === "bul") { r = 9 + R() * 3;   spd = 7.6; life = 60 * 12; col = "#ffe14d"; aim = true; }
+  else if (t === "zig") { r = 13 + R() * 4;  spd = 4.2; life = 60 * 14; col = "#ff6ad5"; zig = true; }
   else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 9;  col = "#ff9d00"; chase = true; turn = 0.03; }
+  else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 14; col = "#35d6a6"; split = 60 * 4; }
+  else if (t === "frg") { r = 9 + R() * 2;   spd = 4.6; life = 60 * 8;  col = "#35d6a6"; }
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 20; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
   while (!ok && n++ < 80) {
@@ -12981,16 +12992,16 @@ function mnMakeBall(t, S) {
   }
   let a = R() * Math.PI * 2;
   if (aim) a = Math.atan2(S.y - y, S.x - x) + (R() - 0.5) * 0.7;
-  return { type: t, x, y, r, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, spd, life, col, chase, turn, warm: MN_CFG.warm };
+  return { type: t, x, y, r, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, spd, life, col, chase, turn, zig, ph: R() * 6, split, warm: MN_CFG.warm };
 }
 // buyer kauft Ball -> landet in der Arena des Gegners
 function mnBuy(buyer, ti) {
   if (!MN || MN.phase !== "play") return false;
   const T = MN_TYPES[ti], B = MN.sides[buyer], V = MN.sides[1 - buyer], perm = MN.perm[buyer], cost = T.cost * (perm ? MN_CFG.permMul : 1);
-  if (B.pts < cost || V.balls.length >= MN_CFG.maxBalls) return false;
+  const cnt = T.id === "swm" ? 3 : 1;
+  if (B.pts < cost || V.balls.length + cnt > MN_CFG.maxBalls) return false;
   B.pts -= cost;
-  const nb = mnMakeBall(T.id, V); if (perm) { nb.life = Infinity; nb.perm = true; }
-  V.balls.push(nb);
+  for (let k = 0; k < cnt; k++) { const nb = mnMakeBall(T.id, V); if (perm) { nb.life = Infinity; nb.perm = true; } V.balls.push(nb); }
   if (buyer === 0) { MN.sent++; try { SFX.play("spawn"); } catch (e) {} }
   return true;
 }
@@ -13007,6 +13018,17 @@ function mnStepBalls(S) {
     const b = S.balls[i];
     if (b.warm > 0) { b.warm--; continue; }
     if (--b.life <= 0) { S.balls.splice(i, 1); continue; }
+    if (b.split > 0 && --b.split === 0) {
+      S.balls.splice(i, 1);
+      for (let k = 0; k < 3; k++) {
+        const f = mnMakeBall("frg", S), a = k * Math.PI * 2 / 3 + b.ph;
+        f.x = b.x; f.y = b.y; f.vx = Math.cos(a) * f.spd; f.vy = Math.sin(a) * f.spd; f.warm = 25;
+        if (b.perm) { f.life = Infinity; f.perm = true; }
+        S.balls.push(f);
+      }
+      continue;
+    }
+    if (b.zig) { const cur = Math.atan2(b.vy, b.vx) + Math.sin(b.ph += 0.13) * 0.075; b.vx = Math.cos(cur) * b.spd; b.vy = Math.sin(cur) * b.spd; }
     if (b.chase) {
       const want = Math.atan2(S.y - b.y, S.x - b.x), cur = Math.atan2(b.vy, b.vx);
       let d = want - cur; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
@@ -13038,7 +13060,7 @@ function mnBotMove(S) {
 }
 function mnBotBuy(S) {
   const opts = [];
-  MN_TYPES.forEach((T, i) => { if (S.pts >= T.cost) { const w = [4, 3, 3, S.pts >= 40 ? 3 : 1][i]; for (let k = 0; k < w; k++) opts.push(i); } });
+  MN_TYPES.forEach((T, i) => { if (S.pts >= T.cost) { const w = T.w || 1; for (let k = 0; k < w; k++) opts.push(i); } });
   if (opts.length && (S.pts >= 30 || Math.random() < 0.6)) mnBuy(1, opts[Math.floor(Math.random() * opts.length)]);
   S.think = MN.tick + 50 + Math.floor(Math.random() * 80);
 }
@@ -13075,9 +13097,9 @@ function minionsUpdate() {
     mnEndOverlay([M.winner === 0 ? "🏆 You win!" : M.winner === 1 ? "💀 Online Bot wins" : "🤝 Draw", "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") + " · Balls sent: " + M.sent]);
   }
 }
-function mnBtnRect(i) { const w = 244, h = 68, g = 8; return { x: MN_PX + 10 + (i % 2) * (w + g), y: 566 + Math.floor(i / 2) * (h + g), w, h }; }
+function mnBtnRect(i) { const w = 117, h = 70, g = 8; return { x: MN_PX + 10 + (i % 4) * (w + g), y: 566 + Math.floor(i / 4) * (h + 6), w, h }; }
 function mnLeverRect() { return { x: MN_PX + MN_PWID - 200, y: 524, w: 190, h: 34 }; }
-function mnBtnAt(x, y) { { const l = mnLeverRect(); if (x >= l.x && x <= l.x + l.w && y >= l.y - 4 && y <= l.y + l.h + 4) return 4; }  for (let i = 0; i < 4; i++) { const r = mnBtnRect(i); if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i; } return -1; }
+function mnBtnAt(x, y) { { const l = mnLeverRect(); if (x >= l.x && x <= l.x + l.w && y >= l.y - 4 && y <= l.y + l.h + 4) return MN_TYPES.length; }  for (let i = 0; i < MN_TYPES.length; i++) { const r = mnBtnRect(i); if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i; } return -1; }
 function mnDrawArena(S, ox, oy, sc, mine) {
   ctx.save(); ctx.translate(ox, oy); ctx.scale(sc, sc);
   ctx.beginPath(); ctx.rect(0, 0, MN_AW, MN_AH); ctx.clip();
@@ -13100,7 +13122,7 @@ function mnDrawArena(S, ox, oy, sc, mine) {
   for (const f of S.fx) { ctx.globalAlpha = f.life / 20; ctx.beginPath(); ctx.arc(f.x, f.y, 14 + (20 - f.life) * 2.5, 0, Math.PI * 2); ctx.strokeStyle = "#ff4444"; ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = 1; }
   ctx.restore();
 }
-const MN_COL = { reg:"#ff4d4d", bul:"#ffd23f", cha:"#ff9a3c", gia:"#9b7bff" };
+const MN_COL = { reg:"#ff4d4d", spr:"#4de1ff", swm:"#8dff6a", bul:"#ffd23f", zig:"#ff6ad5", cha:"#ff9a3c", spl:"#35d6a6", gia:"#9b7bff" };
 function mnRR(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 function mnHearts(cx, y, n, align) {
   for (let i = 0; i < MN_CFG.lives; i++) {
@@ -13144,24 +13166,27 @@ function minionsDraw() {
     ctx.fillStyle = on ? "rgba(255,215,0,.18)" : "rgba(255,255,255,.06)"; mnRR(l.x, l.y, l.w, l.h, 17); ctx.fill();
     ctx.strokeStyle = on ? "#ffd700" : "rgba(255,255,255,.3)"; ctx.lineWidth = 2; mnRR(l.x, l.y, l.w, l.h, 17); ctx.stroke();
     ctx.fillStyle = on ? "#ffd700" : "rgba(255,255,255,.55)"; ctx.beginPath(); ctx.arc(on ? l.x + l.w - 17 : l.x + 17, l.y + 17, 12, 0, Math.PI * 2); ctx.fill();
-    ctx.textAlign = "center"; ctx.font = "bold 13px Arial"; ctx.fillStyle = on ? "#ffd700" : "#c9cdd6"; ctx.fillText(on ? "♾ Dauer-Bälle AN" : "♾ Dauer-Bälle", l.x + l.w / 2 + (on ? -8 : 8), l.y + 22); }
+    ctx.textAlign = "center"; ctx.font = "bold 13px Arial"; ctx.fillStyle = on ? "#ffd700" : "#c9cdd6"; ctx.fillText(on ? "♾ Dauer-Bälle AN" : "♾ Dauer-Bälle [L]", l.x + l.w / 2 + (on ? -8 : 8), l.y + 22); }
   // Shop-Buttons
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < MN_TYPES.length; i++) {
     const r = mnBtnRect(i), T = MN_TYPES[i], col = MN_COL[T.id] || "#fff";
     const cst = T.cost * (M.perm[0] ? MN_CFG.permMul : 1), ok = P.pts >= cst && B.balls.length < MN_CFG.maxBalls && M.phase === "play";
     const pressed = M.flash && M.flash.i === i && M.tick - M.flash.t < 10;
     ctx.globalAlpha = ok ? 1 : 0.42;
-    ctx.fillStyle = pressed ? "rgba(255,255,255,.22)" : "rgba(24,28,46,.95)"; mnRR(r.x, r.y, r.w, r.h, 16); ctx.fill();
-    ctx.strokeStyle = ok ? col : "rgba(255,255,255,.2)"; ctx.lineWidth = 2.5; mnRR(r.x, r.y, r.w, r.h, 16); ctx.stroke();
+    ctx.fillStyle = pressed ? "rgba(255,255,255,.22)" : "rgba(24,28,46,.95)"; mnRR(r.x, r.y, r.w, r.h, 14); ctx.fill();
+    ctx.strokeStyle = ok ? col : "rgba(255,255,255,.2)"; ctx.lineWidth = 2.5; mnRR(r.x, r.y, r.w, r.h, 14); ctx.stroke();
     // Ball-Vorschau
-    ctx.beginPath(); ctx.arc(r.x + 40, r.y + r.h / 2, T.id === "gia" ? 22 : T.id === "cha" ? 15 : 12, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
-    if (T.id === "cha") { ctx.lineWidth = 3; ctx.strokeStyle = "#fff6c8"; ctx.stroke(); }
-    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.fillText(T.name, r.x + 76, r.y + 30);
-    ctx.fillStyle = "#ffd96a"; ctx.font = "bold 16px Arial"; ctx.fillText("💰 " + cst, r.x + 76, r.y + 55);
-    ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "bold 13px Arial"; ctx.fillText(T.key, r.x + r.w - 12, r.y + 22);
+    const pr = T.id === "gia" ? 15 : T.id === "spl" ? 13 : T.id === "swm" ? 5 : T.id === "bul" ? 7 : 10, cx = r.x + r.w / 2, cy = r.y + 21;
+    ctx.fillStyle = col;
+    if (T.id === "swm") { for (const [dx, dy] of [[-9, 4], [9, 4], [0, -6]]) { ctx.beginPath(); ctx.arc(cx + dx, cy + dy, pr, 0, Math.PI * 2); ctx.fill(); } }
+    else { ctx.beginPath(); ctx.arc(cx, cy, pr, 0, Math.PI * 2); ctx.fill(); }
+    if (T.id === "cha") { ctx.beginPath(); ctx.arc(cx, cy, pr, 0, Math.PI * 2); ctx.lineWidth = 3; ctx.strokeStyle = "#fff6c8"; ctx.stroke(); }
+    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "bold 14px Arial"; ctx.fillText(T.name, cx, r.y + 49);
+    ctx.fillStyle = "#ffd96a"; ctx.font = "bold 14px Arial"; ctx.fillText("💰 " + cst, cx, r.y + 65);
+    ctx.textAlign = "left"; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.font = "bold 13px Arial"; ctx.fillText(T.key, r.x + 8, r.y + 17);
     ctx.globalAlpha = 1;
   }
-  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Tippe zum Senden · Finger halten zum Bewegen", MN_PX + MN_PWID / 2, H() - 6);
+  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Tasten 1–8 = Ball senden · L = Dauer-Bälle · Tippen zum Senden", MN_PX + MN_PWID / 2, H() - 6);
 }
 // --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
 let mnMoveId = null;
@@ -13173,7 +13198,7 @@ function mnBuyAt(cx, cy) {
   const now = performance.now();
   if (mnLastBuy.i === bi && now - mnLastBuy.t < 80) return true;   // Pointer- und Touch-Event derselben Beruehrung nicht doppelt zaehlen
   mnLastBuy = { i: bi, t: now };
-  if (bi === 4) { MN.perm[0] = !MN.perm[0]; return true; }
+  if (bi === MN_TYPES.length) { MN.perm[0] = !MN.perm[0]; return true; }
   mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true;
 }
 function mnOk() { return mode === "minions" && MN && MN.phase === "play"; }
@@ -13206,7 +13231,9 @@ const mnTouchEnd = e => { for (const t of e.changedTouches) if (mnMoveId === "t"
 window.addEventListener("touchend", mnTouchEnd, CAP); window.addEventListener("touchcancel", mnTouchEnd, CAP);
 document.addEventListener("keydown", e => {
   if (!mnOk()) return;
-  const i = ["1","2","3","4"].indexOf(e.key); if (e.key === "5" || e.key === "l" || e.key === "L") MN.perm[0] = !MN.perm[0]; if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "9" || e.key === "l" || e.key === "L") { MN.perm[0] = !MN.perm[0]; return; }
+  const i = MN_TYPES.findIndex(T => T.key === e.key); if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
 });
 </script>
 <script id="idleMode">
