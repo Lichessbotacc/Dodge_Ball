@@ -2341,8 +2341,49 @@ async function rpcClanWrite(path, v) {
   if (path.indexOf("clanCreateAt/") === 0) { if (path !== "clanCreateAt/" + requireUid() || !v || !/^[A-Za-z0-9]{1,40}$/.test(String(v.cid))) throw new Error("Bad clan path."); return set(ref(db, path), { ts: serverTimestamp(), cid: String(v.cid) }); }
   return v === null ? remove(ref(db, path)) : set(ref(db, path), v);
 }
+// ── ONLINE BOT (kein echtes Konto): darf NUR unter der festen Bot-UID und nur diese Pfade schreiben ──
+// Die Simulation laeuft in einem normalen Browser-Client (Lease). Damit die Datenbank die Schreibzugriffe annimmt,
+// muessen die Rules fuer die UID "bot__online_bot" freigegeben sein (siehe bot-rules.txt).
+const BOT_UID_RPC = "bot__online_bot", BOT_NAME_RPC = "Online Bot";
+const BOT_PLAYER_KEYS = /^(name|elo|status|lastActive|st|survPlayed|dailyPlayed|streakPlayed|botCtl\/(lease|lastStart|mode))$/;
+async function rpcBotUpdatePlayer(data) {
+  requireNotBanned(); requireUid();
+  if (!data || typeof data !== "object") throw new Error("Bad bot data.");
+  for (const k of Object.keys(data)) if (!BOT_PLAYER_KEYS.test(k)) throw new Error("Bot field not allowed: " + k);
+  return update(ref(db, "players/" + BOT_UID_RPC), data);
+}
+async function rpcBotSetForce(mode) {   // nur Admin: Modus erzwingen (non stop) oder null = Auto
+  requireAdmin();
+  if (mode !== null && mode !== "survival" && mode !== "daily" && mode !== "streak") throw new Error("Bad mode.");
+  return update(ref(db, "players/" + BOT_UID_RPC), { "botCtl/force": mode, "botCtl/forceBy": requireUid() });
+}
+async function rpcBotAbort() { requireAdmin(); return update(ref(db, "players/" + BOT_UID_RPC), { "botCtl/abort": Date.now() }); }
+async function rpcBotSaveSurvival(time, replayStr) {
+  requireNotBanned(); requireUid();
+  await set(ref(db, "survival/" + BOT_UID_RPC), { name: BOT_NAME_RPC, time: Number(time), ts: serverTimestamp() });
+  try { if (replayStr && String(replayStr).length <= 600000) await set(ref(db, "survivalReplays/" + BOT_UID_RPC), String(replayStr)); else await remove(ref(db, "survivalReplays/" + BOT_UID_RPC)); } catch (e) { console.warn("bot replay not saved", e); }
+}
+async function rpcBotSaveDaily(day, time, ch) {
+  requireNotBanned(); requireUid();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error("Bad day.");
+  ch = Number(ch); if (!Number.isInteger(ch) || ch < 0 || ch > 500) throw new Error("Bad mode.");
+  return set(ref(db, "daily/" + day + "/" + BOT_UID_RPC), { name: BOT_NAME_RPC, time: Number(time), ts: serverTimestamp(), ch });
+}
+async function rpcBotSetStreak(level) { requireNotBanned(); requireUid(); return set(ref(db, "streakBoard/" + BOT_UID_RPC), { name: BOT_NAME_RPC, level: Number(level), ts: serverTimestamp() }); }
+async function rpcBotSetLive(d) { requireNotBanned(); requireUid(); return set(ref(db, "survivalLive/" + BOT_UID_RPC), d); }
+async function rpcBotBeat(n) { requireNotBanned(); requireUid(); return set(ref(db, "liveBeat/" + BOT_UID_RPC), Number(n) || Date.now()); }
+async function rpcBotClearLive() { requireUid(); try { remove(ref(db, "liveBeat/" + BOT_UID_RPC)).catch(() => {}); } catch (e) {} return remove(ref(db, "survivalLive/" + BOT_UID_RPC)); }
+// Bricht der Runner-Browser ab (Tab zu / Netz weg), raeumt Firebase den Live-Eintrag selbst auf (wie bei Menschen)
+async function rpcBotArmDisconnect() {
+  requireUid();
+  try { onDisconnect(ref(db, "liveBeat/" + BOT_UID_RPC)).remove(); } catch (e) {}
+  try { onDisconnect(ref(db, "players/" + BOT_UID_RPC)).update({ status: "Idle in Menu" }); } catch (e) {}
+  return onDisconnect(ref(db, "survivalLive/" + BOT_UID_RPC)).remove();
+}
+
 window._dobRPC = {
   clanWrite: rpcClanWrite,
+  botUpdatePlayer: rpcBotUpdatePlayer, botSetForce: rpcBotSetForce, botAbort: rpcBotAbort, botSaveSurvival: rpcBotSaveSurvival, botSaveDaily: rpcBotSaveDaily, botSetStreak: rpcBotSetStreak, botSetLive: rpcBotSetLive, botBeat: rpcBotBeat, botClearLive: rpcBotClearLive, botArmDisconnect: rpcBotArmDisconnect,
   tournSave: rpcTournSave, tournRun: rpcTournRun, tournDelete: rpcTournDelete,
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
@@ -7832,7 +7873,7 @@ async function handleOnlineResult(winnerName, change) {
 // Cloud Function instead.
 async function dbSetBotPlayer(data) {
   if (!RPC) return;
-  const { ref, set } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+  const { ref, set, update } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
   // We deliberately do NOT use RPC.setOwnPlayer here since the target
   // is not our own uid. This path MUST be restricted server-side (see
   // RULES.txt) to only allow writes that match the bot's expected
@@ -7842,7 +7883,7 @@ async function dbSetBotPlayer(data) {
     const dbInst = (await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js")).getApp();
     const { getDatabase } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
     const db = getDatabase(dbInst);
-    await set(ref(db, "players/" + ONLINE_BOT_UID), data);
+    await update(ref(db, "players/" + ONLINE_BOT_UID), data);   // update statt set: Survival-/Daily-/Streak-Stats, Zaehler und Lease des Bots bleiben erhalten
   } catch(e) {
     console.warn("Bot stat write failed (expected if Rules restrict it):", e);
   }
@@ -13040,23 +13081,32 @@ function mnStepBalls(S) {
     if (b.y - b.r < 0) { b.vy = Math.abs(b.vy); b.y = b.r; } if (b.y + b.r > MN_AH) { b.vy = -Math.abs(b.vy); b.y = MN_AH - b.r; }
   }
 }
+// Online-Bot: EXAKT dieselbe KI wie in den anderen Modi (updateAI, Staerke s = 0.17 wie im Online-Match),
+// nur mit den Grenzen der Minions-Arena. Gefahr = Baelle innerhalb "awareness".
+const MN_BOT = (() => { const s = 0.17; return { speed: 2.5 + s * 8, awareness: 80 + s * 100, dodgePower: 0.5 + s * 3.5, randomness: (1 - s) * 4 }; })();
 function mnBotMove(S) {
-  let ax = 0, ay = 0;
-  for (const b of S.balls) {
-    if (b.warm > 0) continue;
-    const px = b.x + b.vx * 14, py = b.y + b.vy * 14;
-    for (const [qx, qy] of [[b.x, b.y], [px, py]]) {
-      const dx = S.x - qx, dy = S.y - qy, d = Math.hypot(dx, dy) || 1, R = b.r + 95;
-      if (d < R) { const w = (R - d) / R * 3; ax += dx / d * w; ay += dy / d * w; }
-    }
+  const p = S, R = MN_CFG.playerR, act = S.balls.filter(b => !(b.warm > 0));
+  let danger = false;
+  for (const b of act) { if (Math.hypot(p.x - b.x, p.y - b.y) < MN_BOT.awareness) { danger = true; break; } }
+  if (!danger) {
+    if (p.targetX == null || p.targetY == null || Math.random() < 0.02) { p.targetX = Math.random() * MN_AW; p.targetY = Math.random() * MN_AH; }
   }
-  const m = 110;
-  if (S.x < m) ax += (m - S.x) / m * 1.5; if (S.x > MN_AW - m) ax -= (S.x - (MN_AW - m)) / m * 1.5;
-  if (S.y < m) ay += (m - S.y) / m * 1.5; if (S.y > MN_AH - m) ay -= (S.y - (MN_AH - m)) / m * 1.5;
-  ax += (MN_AW / 2 - S.x) * 0.0007; ay += (MN_AH / 2 - S.y) * 0.0007;
-  const l = Math.hypot(ax, ay);
-  if (l > 0.02) { S.x += ax / l * MN_CFG.botSpeed; S.y += ay / l * MN_CFG.botSpeed; }
-  S.x = Math.max(MN_CFG.playerR, Math.min(MN_AW - MN_CFG.playerR, S.x)); S.y = Math.max(MN_CFG.playerR, Math.min(MN_AH - MN_CFG.playerR, S.y));
+  let moveX = (p.targetX == null ? MN_AW / 2 : p.targetX) - p.x, moveY = (p.targetY == null ? MN_AH / 2 : p.targetY) - p.y;
+  const md = Math.hypot(moveX, moveY) || 1; moveX /= md; moveY /= md;
+  let avoidX = 0, avoidY = 0; const wm = 140;
+  if (p.x < wm) avoidX += (wm - p.x) * 0.03;
+  if (p.x > MN_AW - wm) avoidX -= (p.x - (MN_AW - wm)) * 0.03;
+  if (p.y < wm) avoidY += (wm - p.y) * 0.03;
+  if (p.y > MN_AH - wm) avoidY -= (p.y - (MN_AH - wm)) * 0.03;
+  for (const b of act) {
+    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1;
+    if (dist < MN_BOT.awareness) { const f = Math.max(0, (MN_BOT.awareness - dist) / MN_BOT.awareness) * MN_BOT.dodgePower * 2; avoidX += dx / dist * f; avoidY += dy / dist * f; }
+  }
+  let vx = moveX * 4 + avoidX * 10, vy = moveY * 4 + avoidY * 10;
+  vx += (Math.random() - 0.5) * MN_BOT.randomness; vy += (Math.random() - 0.5) * MN_BOT.randomness;
+  const len = Math.hypot(vx, vy) || 1;
+  p.x += vx / len * MN_BOT.speed; p.y += vy / len * MN_BOT.speed;
+  p.x = Math.max(R, Math.min(MN_AW - R, p.x)); p.y = Math.max(R, Math.min(MN_AH - R, p.y));
 }
 function mnBotBuy(S) {
   const opts = [];
@@ -14733,6 +14783,7 @@ function _modPanelRender() {
       && (!q || String(p.name).toLowerCase().includes(q) || uid.toLowerCase().includes(q)))
     .sort((a, b) => (_modBadges(b[0], b[1]).length - _modBadges(a[0], a[1]).length) || String(a[1].name).localeCompare(String(b[1].name)));
   list.textContent = "";
+  try { if (typeof botModCard === "function" && !q) botModCard(list); } catch (e) { console.warn("bot card", e); }
   Object.entries(_modAppeals || {}).filter(([, a]) => a && a.text).sort((x, y) => (y[1].ts || 0) - (x[1].ts || 0)).forEach(([uid, a]) => {
     const ar = document.createElement("div"); ar.style.cssText = "border:1px solid #ffd700;border-radius:10px;padding:8px 10px;";
     const h = document.createElement("div"); h.style.cssText = "font-size:12px;color:#ffd700;margin-bottom:3px;";
@@ -15765,6 +15816,435 @@ async function modDeleteChatMsg(key) {
     if (isAdmin()) { $("bugTabs").style.display = "flex"; startAdminList(); updateTabLabel(); setTab(tab); } else { $("bugTabs").style.display = "none"; setTab("new"); }
   };
 })();
+</script>
+<script id="botRunner">
+/* ── BOT ENGINE: headless Simulation (kein DOM), gleiche Regeln wie Online-Survival / Daily / Streaks ── */
+function botMkRng(seed) { let a = (seed >>> 0) || 1; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function botRefl(x, lo, hi) { const w = hi - lo; if (w <= 0) return lo; let m = (x - lo) % (2 * w); if (m < 0) m += 2 * w; return lo + (m > w ? 2 * w - m : m); }
+function BotSim(o) {
+  this.W = o.W || 1280; this.H = o.H || 720; this.rng = o.rng || Math.random;
+  this.kind = o.kind;                      // "surv" | "daily" | "round"
+  this.T = 0; this.balls = []; this.nid = 0; this.over = false;
+  this.mul = o.mul || 1; this.L = o.L || 1; this.chasers = o.chasers || 0;
+  const sk = o.skill == null ? 0.6 : o.skill;
+  this.me = this.mkAgent(o.mx == null ? this.W / 2 : o.mx, this.H / 2, o.r || 18, sk, o.sp);
+  this.opp = o.opp ? this.mkAgent(o.ox, this.H / 2, 18, o.opp.skill, o.opp.sp) : null;
+  this.ch = o.ch || null; this.seed = o.seed || 0; this.fk = (this.ch && this.ch.field) ? this.ch.field.type : null;
+  this.fieldClear = o.fieldClear || null; this.fieldMargin = o.fieldMargin || null;
+  this.nextSpawn = 60; this.chaseNext = 90; this.dr = null;
+  this.trail = [Math.round(this.me.x), Math.round(this.me.y)]; this.spawns = [];
+  if (this.kind === "daily") this.dailyInit();
+  else if (this.kind === "round") { const nc = o.chasers || 0; for (let i = 0; i < nc; i++) this.balls.push(this.mkBall(true)); }
+}
+BotSim.prototype.mkAgent = function (x, y, r, sk, sp) {
+  return { x, y, r, alive: true, sk, speed: sp || (3.4 + 3.6 * sk), look: 9 + Math.round(8 * sk), react: 2 + Math.round((1 - sk) * 7), aware: 190 + 330 * sk, noise: (1 - sk) * 1.1, a: 0, go: false };
+};
+BotSim.prototype.mkBall = function (chase) {   // wie makeOnlineBall()/streakMakeBall()
+  const rng = this.rng, W = this.W, H = this.H; let r = 15 + rng() * 20, x = r, y = r, valid = false, tries = 0;
+  const ps = [this.me, this.opp].filter(p => p && p.alive);
+  while (!valid && tries++ < 100) {
+    x = r + rng() * (W - r * 2); y = r + rng() * (H - r * 2); valid = true;
+    for (const p of ps) if (Math.hypot(p.x - x, p.y - y) < p.r + r + 220) { valid = false; break; }
+  }
+  const spd = 5 + rng() * 6, an = rng() * Math.PI * 2, k = 0.5 * this.mul;
+  const b = { id: ++this.nid, x, y, radius: r, vx: Math.cos(an) * spd * k, vy: Math.sin(an) * spd * k };
+  if (chase) { b.chase = true; b.age = 0; b.radius = 13 + rng() * 6; b.cspd = Math.hypot(b.vx, b.vy) * 0.85; b.turn = Math.min(0.06, 0.018 + 0.0018 * this.L); }
+  return b;
+};
+/* ── Daily (Gruppen wie dailyMakeBall/dailyTick; Felder per fieldClear/fieldMargin der Seite) ── */
+BotSim.prototype.dailyBall = function (g, gi, T, initial) {
+  const rng = this.rng, W = this.W, H = this.H, me = this.me;
+  if (g.online) { const ob = this.mkBall(false); if (g.spdMul) { ob.vx *= g.spdMul; ob.vy *= g.spdMul; } ob.gi = gi; return ob; }
+  const r = g.r ? g.r[0] + rng() * (g.r[1] - g.r[0]) : 14 + rng() * 10, a = rng() * Math.PI * 2, vx = Math.cos(a) * g.v, vy = Math.sin(a) * g.v;
+  let x = null, y = null, tries = 0, b;
+  if (g.from === "top") { do { x = r + rng() * (W - 2 * r); } while (Math.abs(x - me.x) < me.r + r + 140 && tries++ < 40); b = { x, y: r, radius: r, vx: (rng() - 0.5) * 2, vy: g.v, gi }; }
+  else if (g.from === "echo") { const P = this.trail, k = Math.floor((T - (g.delay || 120)) / 3); if (P && k >= 0 && P[2 * k + 1] !== undefined) { x = P[2 * k]; y = P[2 * k + 1]; } else if (P && P.length >= 2) { x = P[0]; y = P[1]; } if (x !== null) { x = Math.min(W - r, Math.max(r, x)); y = Math.min(H - r, Math.max(r, y)); b = { x, y, radius: r, vx, vy, gi }; } }
+  if (!b && g.from === "near") { do { const an = rng() * Math.PI * 2, d = 130 + rng() * 100; x = Math.min(W - r, Math.max(r, me.x + Math.cos(an) * d)); y = Math.min(H - r, Math.max(r, me.y + Math.sin(an) * d)); } while (Math.hypot(x - me.x, y - me.y) < 110 && tries++ < 30); b = { x, y, radius: r, vx, vy, gi }; }
+  if (!b) { x = r; y = r; tries = 0; let ok = false; while (!ok && tries++ < 100) { x = r + rng() * (W - r * 2); y = r + rng() * (H - r * 2); ok = Math.hypot(me.x - x, me.y - y) >= me.r + r + 220; } b = { x, y, radius: r, vx, vy, gi }; }
+  b.id = ++this.nid;
+  if (g.h) { b.chase = true; b.dch = { spd: g.v, turn: g.h }; }
+  if (g.rot) b.rot = g.rot * (g.rotRand && rng() < 0.5 ? -1 : 1);
+  if (g.acc) { b.acc = g.acc; b.accMax = g.accMax; }
+  if (g.g) b.grav = g.g;
+  if (g.grow) { b.grow = g.grow; b.rMax = g.rMax; }
+  if (g.emerge) { b.grow = (r - 4) / g.emerge; b.rMax = r; b.radius = 4; }
+  if (g.life) { let age = 0; if (initial && g.stagger) age = Math.floor(rng() * g.life * 0.7); b.exp = T + g.life - age; if (g.grow && age) b.radius = Math.min(g.rMax, r + g.grow * age); }
+  if (g.col) b.col = g.col; if (g.burst) b.burst = g.burst;
+  return b;
+};
+BotSim.prototype.dailyInit = function () {
+  const ch = this.ch; this.dr = { next: ch.groups.map(g => g.respawn || 0), cnt: ch.groups.map(() => 0) };
+  ch.groups.forEach((g, gi) => { for (let i = 0; i < g.n; i++) this.balls.push(this.dailyBall(g, gi, 0, true)); });
+  if (ch.playerR) this.me.r = ch.playerR;
+};
+BotSim.prototype.dailyTick = function () {
+  const T = this.T, ch = this.ch, balls = this.balls;
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i]; if (!b.exp || b.exp > T) continue; balls.splice(i, 1);
+    if (b.burst) { const B = b.burst, a0 = this.rng() * Math.PI * 2; for (let k = 0; k < B.n; k++) { const an = a0 + k * 2 * Math.PI / B.n; balls.push({ id: ++this.nid, x: b.x, y: b.y, radius: B.r[0] + this.rng() * (B.r[1] - B.r[0]), vx: Math.cos(an) * B.v, vy: Math.sin(an) * B.v, gi: -1, exp: T + B.life, col: B.col }); } }
+  }
+  ch.groups.forEach((g, gi) => {
+    if (!g.respawn || T < this.dr.next[gi]) return;
+    let alive = 0; for (const b of balls) if (b.gi === gi) alive++;
+    if (alive >= (g.cap != null ? g.cap : g.n)) return;
+    if (g.from === "echo" && T < (g.delay || 150)) return;
+    this.dr.next[gi] = T + Math.max(g.respawnMin || 1, g.respawn + (g.respawnGrow || 0) * this.dr.cnt[gi]++);
+    balls.push(this.dailyBall(g, gi, T, false));
+  });
+};
+/* ── KI: Blickrichtung mit der groessten Freiheit in den naechsten Ticks ── */
+BotSim.prototype.danger = function (a, ag, ang, v, others) {   // kleinster Abstand (px) auf dem Weg in Richtung ang
+  const W = this.W, H = this.H, L = ag.look, dx = Math.cos(ang) * v, dy = Math.sin(ang) * v, aw = ag.aware, balls = this.balls;
+  let minC = 400, px = ag.x, py = ag.y;
+  const near = [];
+  for (const b of balls) { const d = Math.hypot(b.x - ag.x, b.y - ag.y) - b.radius - ag.r; if (d < aw) near.push(b); }
+  for (let k = 1; k <= L; k++) {
+    px = Math.min(W - ag.r, Math.max(ag.r, px + dx)); py = Math.min(H - ag.r, Math.max(ag.r, py + dy));
+    let mx = 0, my = 0;
+    if (this.fk === "shrink" && this.fieldMargin) { const m = this.fieldMargin(this.T + k, W, H); mx = m[0]; my = m[1]; px = Math.min(W - mx - ag.r, Math.max(mx + ag.r, px)); py = Math.min(H - my - ag.r, Math.max(my + ag.r, py)); }
+    if (this.fk && this.fk !== "portal" && this.fk !== "shrink" && this.fieldClear) { const fc = this.fieldClear(this.fk, px, py, this.T + k, W, H, this.seed) - ag.r; if (fc < minC) minC = fc; }
+    for (const b of near) {
+      const bx = this.fk === "portal" ? ((b.x + b.vx * k) % W + W) % W : botRefl(b.x + b.vx * k, b.radius, W - b.radius);
+      const by = this.fk === "portal" ? ((b.y + b.vy * k) % H + H) % H : botRefl(b.y + b.vy * k, b.radius, H - b.radius);
+      const c = Math.hypot(bx - px, by - py) - b.radius - ag.r; if (c < minC) minC = c;
+    }
+    if (others) for (const o of others) { /* Gegner ist kein Hindernis */ }
+  }
+  return minC;
+};
+BotSim.prototype.aiStep = function (ag) {
+  if (!ag.alive) return;
+  if (this.T % ag.react === 0 || !ag.go) {
+    const N = 20; let best = -1e9, bestA = ag.a;
+    for (let i = 0; i < N; i++) {
+      const ang = i * 2 * Math.PI / N;
+      let sc = this.danger(null, ag, ang, ag.speed);
+      sc = Math.min(sc, 160);
+      const ex = ag.x + Math.cos(ang) * ag.speed * ag.look, ey = ag.y + Math.sin(ang) * ag.speed * ag.look;
+      const wall = Math.min(ex, this.W - ex, ey, this.H - ey); if (wall < 90) sc -= (90 - wall) * 0.35;
+      if (this.fk === "laser") { const dc = Math.hypot(ex - this.W / 2, ey - this.H / 2); if (dc > 230) sc -= (dc - 230) * 0.5; }   // Laser: in der Mitte bleiben (aussen ist er zu schnell)
+      sc -= Math.abs(((ang - ag.a + Math.PI * 3) % (2 * Math.PI)) - Math.PI) * 1.5;   // nicht ruckartig umdrehen
+      if (sc > best) { best = sc; bestA = ang; }
+    }
+    ag.a = bestA + (this.rng() - 0.5) * ag.noise; ag.go = true;
+    const stay = this.danger(null, ag, 0, 0);
+    ag.hold = stay > 70 && this.T > 30;    // ruhig stehen, wenn nichts in der Naehe ist
+    if (ag.hold && (this.T % 45) < 30) ag.hold = false;   // aber nicht dauerhaft stehen (Camping-Wache)
+  }
+  if (ag.hold && this.fk !== "shrink" && this.fk !== "laser") return;
+  ag.x += Math.cos(ag.a) * ag.speed; ag.y += Math.sin(ag.a) * ag.speed;
+  ag.x = Math.min(this.W - ag.r, Math.max(ag.r, ag.x)); ag.y = Math.min(this.H - ag.r, Math.max(ag.r, ag.y));
+  if (this.fk === "shrink" && this.fieldMargin) { const m = this.fieldMargin(this.T, this.W, this.H); ag.x = Math.min(this.W - m[0] - ag.r - 3, Math.max(m[0] + ag.r + 3, ag.x)); ag.y = Math.min(this.H - m[1] - ag.r - 3, Math.max(m[1] + ag.r + 3, ag.y)); }
+};
+BotSim.prototype.hit = function (ag) {
+  for (const b of this.balls) if (Math.hypot(b.x - ag.x, b.y - ag.y) < b.radius + ag.r) return true;
+  if (this.fk && this.fk !== "portal" && this.fieldClear && this.fieldClear(this.fk, ag.x, ag.y, this.T, this.W, this.H, this.seed) < ag.r) return true;
+  if (this.fk === "shrink" && this.fieldMargin) { const m = this.fieldMargin(this.T, this.W, this.H); if (ag.x < m[0] + ag.r - 1 || ag.x > this.W - m[0] - ag.r + 1 || ag.y < m[1] + ag.r - 1 || ag.y > this.H - m[1] - ag.r + 1) return true; }
+  return false;
+};
+BotSim.prototype.step = function () {
+  if (this.over) return; this.T++; const T = this.T, W = this.W, H = this.H;
+  if (this.kind === "daily") this.dailyTick();
+  else if (T >= this.nextSpawn) { this.nextSpawn += 60; if (this.balls.length < 200) { const nb = this.mkBall(false); this.balls.push(nb); if (this.kind === "surv") this.spawns.push([T, nb.x, nb.y, nb.vx, nb.vy, nb.radius]); } }
+  for (const b of this.balls) {
+    if (b.chase && b.cspd && this.me.alive) { const want = Math.atan2(this.me.y - b.y, this.me.x - b.x), cur = Math.atan2(b.vy, b.vx); let d = want - cur; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; const na = cur + Math.max(-b.turn, Math.min(b.turn, d)); b.vx = Math.cos(na) * b.cspd; b.vy = Math.sin(na) * b.cspd; }
+    if (b.chase && b.cspd) b.age++;
+    if (this.kind === "daily") {
+      if (b.rot) { const c = Math.cos(b.rot), sn = Math.sin(b.rot), nx = b.vx * c - b.vy * sn; b.vy = b.vx * sn + b.vy * c; b.vx = nx; }
+      if (b.acc) { const sp = Math.hypot(b.vx, b.vy); if (sp > 0 && sp < b.accMax) { const f = Math.min(b.accMax / sp, 1 + b.acc); b.vx *= f; b.vy *= f; } }
+      if (b.grav) b.vy += b.grav;
+      if (b.grow && b.radius < b.rMax) b.radius = Math.min(b.rMax, b.radius + b.grow);
+      b.x += b.vx; b.y += b.vy;
+      if (this.fk === "portal") { if (b.x < 0) b.x += W; else if (b.x >= W) b.x -= W; if (b.y < 0) b.y += H; else if (b.y >= H) b.y -= H; }
+      else { const m = this.fk === "shrink" && this.fieldMargin ? this.fieldMargin(T, W, H) : [0, 0]; const l = m[0] + b.radius, r = W - m[0] - b.radius, tp = m[1] + b.radius, bt = H - m[1] - b.radius; if (b.x < l) { b.vx = Math.abs(b.vx); b.x = l; } if (b.x > r) { b.vx = -Math.abs(b.vx); b.x = r; } if (b.y < tp) { b.vy = Math.abs(b.vy); b.y = tp; } if (b.y > bt) { b.vy = -Math.abs(b.vy); b.y = bt; } }
+    } else {
+      b.x += b.vx; b.y += b.vy;
+      if (b.x - b.radius < 0) { b.vx = Math.abs(b.vx); b.x = b.radius; } if (b.x + b.radius > W) { b.vx = -Math.abs(b.vx); b.x = W - b.radius; }
+      if (b.y - b.radius < 0) { b.vy = Math.abs(b.vy); b.y = b.radius; } if (b.y + b.radius > H) { b.vy = -Math.abs(b.vy); b.y = H - b.radius; }
+    }
+  }
+  if (this.kind === "round") {   // verfolgende Baelle laufen ab, neue kommen nach (wie streak)
+    for (let i = this.balls.length - 1; i >= 0; i--) if (this.balls[i].chase && this.balls[i].age > 540) this.balls.splice(i, 1);
+    const want = this.chasers || 0; let have = 0; for (const b of this.balls) if (b.chase) have++;
+    if (have < want && T >= this.chaseNext) { this.chaseNext = T + 90; this.balls.push(this.mkBall(true)); }
+  }
+  this.aiStep(this.me); if (this.opp) this.aiStep(this.opp);
+  if (this.trail && T % 3 === 0) this.trail.push(Math.round(this.me.x), Math.round(this.me.y));
+  const mh = this.me.alive && this.hit(this.me), oh = this.opp && this.opp.alive && this.hit(this.opp);
+  if (mh) { this.me.alive = false; this.over = true; this.result = "lose"; }
+  else if (oh) { this.opp.alive = false; this.over = true; this.result = "win"; }
+};
+if (typeof module !== "undefined") module.exports = { BotSim, botMkRng };
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONLINE BOT RUNNER
+   Der Online Bot spielt alle 15 Minuten einen zufaelligen Modus (Survival / Daily / Streaks), taucht dabei in der
+   Spielerliste auf, ist ueber Online TV / 📺 zuschaubar und speichert Zeiten, Stats und Zaehler wie ein Mensch.
+   Es gibt keinen Server: EIN offener Browser (Lease in players/bot__online_bot/botCtl/lease, 22 s gueltig) fuehrt die
+   Simulation aus. Schliesst dieser Tab, uebernimmt automatisch der naechste offene Client. Ist keiner online, pausiert der Bot.
+   Mod: Mod Panel -> "Online Bot" -> Modus erzwingen (non stop) / Auto / Lauf abbrechen.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  "use strict";
+  const UID = "bot__online_bot", NAME = "Online Bot", COLOR = "#b388ff";
+  const CYCLE_MS = 15 * 60 * 1000, FORCE_GAP_MS = 8000, LEASE_TTL = 22000, MAX_TICKS = 60 * 60 * 8;
+  const MODES = ["survival", "daily", "streak"];
+  const LBL = { survival: "🏝 Survival", daily: "📅 Daily", streak: "🔥 Streaks" };
+  const R = { rec: undefined, viewers: null, runner: false, leaseAt: 0, run: null, starting: false, lastEnd: 0, hiddenSince: 0, busy: false, listening: false, beatAt: 0, err: "", runId: 0, clearT: null };
+
+  function ready() { try { return !!(fbReady && RPC && myUid && RPC.botUpdatePlayer && !window.__dobBanned); } catch (e) { return false; } }
+  function ctl() { return (R.rec && R.rec.botCtl) || {}; }
+  function liveGap() { return (R.viewers === null || R.viewers > 0) ? 200 : 3000; }
+  function note(e) { R.err = String((e && (e.code || e.message)) || e || "error").slice(0, 120); try { console.warn("Online Bot:", e); } catch (x) {} }
+  function ensureListeners() {
+    if (R.listening) return; R.listening = true;
+    try { RPC.on("players/" + UID, v => { R.rec = v || null; }); } catch (e) { R.listening = false; }
+    try { RPC.on("tvViewers/surv_" + UID, d => { R.viewers = d ? Object.keys(d).length : 0; }); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", () => { R.hiddenSince = document.hidden ? Date.now() : 0; });
+
+  // ── Stats wie beim Menschen (statsRecordRun / statsRecordStreak) ──
+  function stDay(s) { const d = new Date().toISOString().slice(0, 10); if (s.ld !== d) { s.ld = d; s.ad = (s.ad || 0) + 1; } }
+  function stRun(s, kind, secs) {
+    secs = Math.max(0, Number(secs) || 0);
+    s[kind + "T"] = Math.round(((s[kind + "T"] || 0) + secs) * 10) / 10; s[kind + "N"] = (s[kind + "N"] || 0) + 1;
+    if (kind === "sv") { if (secs >= 30) s.sv30 = (s.sv30 || 0) + 1; if (secs >= 60) s.sv60 = (s.sv60 || 0) + 1; if (secs >= 120) s.sv120 = (s.sv120 || 0) + 1; }
+    stDay(s);
+  }
+  function stStreak(s, wins) { wins = Math.max(0, Number(wins) || 0); s.skW = (s.skW || 0) + wins; if (wins >= 5) s.sk5 = (s.sk5 || 0) + 1; if (wins >= 10) s.sk10 = (s.sk10 || 0) + 1; stDay(s); }
+  async function persistStats(fn) {
+    const cur = (await RPC.get("players/" + UID)) || {};
+    const st = (cur.st && typeof cur.st === "object") ? JSON.parse(JSON.stringify(cur.st)) : {};
+    fn(st);
+    await RPC.botUpdatePlayer({ st, name: NAME, elo: Number(cur.elo) || 1500, lastActive: Date.now() });
+  }
+
+  // ── Lease / Praesenz ──
+  function leaseMine() { const l = ctl().lease; return !!(l && l.u === myUid && Date.now() - Number(l.ts) < LEASE_TTL); }
+  function leaseForeign() { const l = ctl().lease; return !!(l && l.u !== myUid && Date.now() - Number(l.ts) < LEASE_TTL); }
+  function statusNow() { const r = R.run; return r ? (r.kind === "daily" ? "Daily" : r.kind === "streak" ? "Playing Streaks" : "Survival") : "Idle in Menu"; }
+  async function renewLease() {
+    if (leaseForeign()) { R.runner = false; if (R.run) abortRun(); return false; }
+    R.leaseAt = Date.now();
+    const cur = R.rec || {};
+    try { await RPC.botUpdatePlayer({ "botCtl/lease": { u: myUid, ts: Date.now() }, status: statusNow(), lastActive: Date.now(), name: NAME, elo: Number(cur.elo) || 1500 }); R.runner = true; return true; }
+    catch (e) { note(e); return false; }
+  }
+  async function tryClaim() {
+    R.leaseAt = Date.now();
+    const cur = R.rec || {};
+    try {
+      await RPC.botUpdatePlayer({ "botCtl/lease": { u: myUid, ts: Date.now() }, status: "Idle in Menu", lastActive: Date.now(), name: NAME, elo: Number(cur.elo) || 1500 });
+      await new Promise(r => setTimeout(r, 1500));   // Gegenstimme abwarten: gewonnen hat, wer zuletzt geschrieben hat
+      const l = await RPC.get("players/" + UID + "/botCtl/lease");
+      R.runner = !!(l && l.u === myUid);
+    } catch (e) { note(e); R.runner = false; }
+    return R.runner;
+  }
+  function canClaim() {
+    try { if (document.hidden) return false; if (typeof running !== "undefined" && running && !(typeof _modIsAdminSafe === "function" && _modIsAdminSafe())) return false; } catch (e) {}
+    return true;
+  }
+  function beat() { const n = Date.now(); if (n - R.beatAt < 5000) return; R.beatAt = n; try { RPC.botBeat(n).catch(() => {}); } catch (e) {} }
+
+  // ── Live-Daten (gleiches Format wie survPushLive / streakPushLive) ──
+  function liveElo() { return Math.round(Number(R.rec && R.rec.elo) || 1500); }
+  function pushLive(run, done, finalVal) {
+    const now = Date.now();
+    if (!done && now - run.liveAt < liveGap()) return;
+    run.liveAt = now; beat();
+    const s = run.sim, me = s.me; let d;
+    if (run.kind === "streak") {
+      const op = s.opp; run.skTick = (run.skTick || 0) + 1;
+      d = { k: "streak", name: NAME, c: COLOR, elo: liveElo(), r: me.r, x: Math.round(me.x), y: Math.round(me.y), ma: !!me.alive, bx: op ? Math.round(op.x) : 0, by: op ? Math.round(op.y) : 0, ba: op ? !!op.alive : false, t: run.skTick, w: run.wins, L: run.wins + 1, rd: run.rd, ph: run.phase, done: !!done };
+      if (done) d.time = run.wins;
+      d.b = JSON.stringify(s.balls.map(b => { const o = { i: b.id, x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius }; if (b.chase) { o.ch = Math.max(0, (b.age || 0) * 16.67); o.tn = +(b.turn || 0).toFixed(4); o.cs = +(b.cspd || 0).toFixed(2); } return o; }));
+    } else {
+      d = { name: NAME, c: COLOR, elo: liveElo(), r: me.r, x: Math.round(me.x), y: Math.round(me.y), t: s.T, done: !!done };
+      if (run.kind === "daily") {
+        d.k = "daily"; d.dk = run.key; d.ci = run.idx;
+        const r5 = v => v ? +(+v).toFixed(5) : 0;
+        d.b = JSON.stringify(s.balls.map(b => { const a = [b.id, Math.round(b.x * 10) / 10, Math.round(b.y * 10) / 10, +b.vx.toFixed(3), +b.vy.toFixed(3), Math.round(b.radius * 10) / 10, b.exp ? Math.max(1, b.exp - s.T) : 0, r5(b.rot), r5(b.acc), r5(b.accMax), r5(b.grav), r5(b.grow), r5(b.rMax), b.col || 0]; while (a.length > 6 && !a[a.length - 1]) a.pop(); return a; }));
+        if (d.b.length > 19500) d.b = JSON.stringify(s.balls.slice(0, 400).map(b => [b.id, Math.round(b.x), Math.round(b.y), +b.vx.toFixed(2), +b.vy.toFixed(2), Math.round(b.radius)]));
+      } else d.b = JSON.stringify(s.balls.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: parseFloat(b.vx.toFixed(2)), vy: parseFloat(b.vy.toFixed(2)), radius: b.radius })));
+      if (done) d.time = finalVal;
+    }
+    RPC.botSetLive(d).catch(note);
+  }
+  function clearLiveLater(ms) { clearTimeout(R.clearT); R.clearT = setTimeout(() => { if (!R.run) { try { RPC.botClearLive().catch(() => {}); } catch (e) {} } }, ms); }
+
+  // ── Lauf-Steuerung ──
+  function abortRun() {
+    const run = R.run; if (!run) return;
+    run.aborted = true; clearInterval(run.iv); R.run = null; R.lastEnd = Date.now();
+    try { RPC.botClearLive().catch(() => {}); RPC.botUpdatePlayer({ status: "Idle in Menu", lastActive: Date.now() }).catch(() => {}); } catch (e) {}
+  }
+  function mkSim(opts) { return new BotSim(Object.assign({ fieldClear: (typeof fieldClear === "function" ? fieldClear : null), fieldMargin: (typeof fieldMargin === "function" ? fieldMargin : null) }, opts)); }
+  async function startRun(kind) {
+    if (R.run || R.starting) return;
+    R.starting = true;
+    try {
+      let key = null, idx = null, ch = null;
+      if (kind === "daily") {
+        try { key = dailyKeyNow(); for (let i = 0; i < 4 && !_dailyPicksLoaded; i++) await dailyPicksRefresh(); if (!_dailyPicksLoaded) throw new Error("daily picks"); idx = dailyIdxFor(key); ch = DAILY_CHALLENGES[idx]; if (!ch) throw new Error("no challenge"); }
+        catch (e) { kind = "survival"; key = null; }
+      }
+      const cur = (await RPC.get("players/" + UID)) || {};
+      const field = kind === "daily" ? "dailyPlayed" : kind === "streak" ? "streakPlayed" : "survPlayed";
+      await RPC.botUpdatePlayer({ "botCtl/lastStart": Date.now(), "botCtl/mode": kind, "botCtl/lease": { u: myUid, ts: Date.now() }, [field]: (Number(cur[field]) || 0) + 1, name: NAME, elo: Number(cur.elo) || 1500, status: kind === "daily" ? "Daily" : kind === "streak" ? "Playing Streaks" : "Survival", lastActive: Date.now() });
+      R.leaseAt = Date.now();
+      try { await RPC.botArmDisconnect(); } catch (e) {}
+      clearTimeout(R.clearT);
+      const run = { id: ++R.runId, abortBase: Number(ctl().abort) || 0, kind, key, idx, ch, liveAt: 0, startedAt: Date.now(), aborted: false, sim: null, phase: "play", wins: 0, rd: 0, skTick: 0 };
+      R.run = run;
+      if (kind === "streak") await beginStreak(run); else beginSolo(run);
+      run.iv = setInterval(() => { try { driveRun(run); } catch (e) { note(e); abortRun(); } }, 16);
+    } catch (e) { note(e); R.run = null; R.lastEnd = Date.now(); }
+    finally { R.starting = false; }
+  }
+  function beginSolo(run) {
+    const skill = 0.3 + Math.random() * 0.55, seed = Math.floor(Math.random() * 1e9) + 1;
+    run.sim = mkSim({ kind: run.kind === "daily" ? "daily" : "surv", rng: botMkRng(seed), skill, ch: run.ch, seed: run.key && typeof dailySeed === "function" ? dailySeed(run.key) : 0 });
+    run.base = Date.now(); run.startAt = run.kind === "daily" ? Date.now() + 3000 : Date.now(); run.begun = false;
+  }
+  async function beginStreak(run) {
+    try { const b = await RPC.get("streakBoard/" + UID); run.boardLvl = b ? (Number(b.level) || 0) : 0; run.boardTs = b ? (Number(b.ts) || 0) : 0; } catch (e) { run.boardLvl = 0; run.boardTs = 0; }
+    run.skill = 0.45 + Math.random() * 0.45; run.boardTarget = 0; run.boardBusy = false;
+    newRound(run);
+  }
+  function newRound(run) {
+    const L = run.wins + 1, sk = Math.min(0.97, 0.10 + 0.065 * (L - 1)), nc = L < 4 ? 0 : Math.min(4, 1 + Math.floor((L - 4) / 3));
+    run.rd++; run.phase = "intro"; run.phaseUntil = Date.now() + 1600;
+    run.sim = mkSim({ kind: "round", rng: Math.random, skill: run.skill, mx: 1280 * 0.25, ox: 1280 * 0.75, opp: { skill: sk, sp: 2.2 + sk * 5.5 }, mul: Math.min(2, 1 + 0.04 * (L - 1)), L, chasers: nc });
+    run.sim.chasers = nc;
+  }
+  async function boardSync(run) {   // Bestenliste: +1 Level pro Schreibvorgang, mind. 6,3 s Abstand (wie streakFlush)
+    if (run.boardBusy) return; run.boardBusy = true;
+    try {
+      while (run.boardLvl < run.boardTarget) {
+        const wait = Math.max(run.boardTs || 0, run.boardLast || 0) + 6300 - Date.now();
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
+        await RPC.botSetStreak(run.boardLvl + 1);
+        run.boardLvl++; run.boardLast = Date.now();
+      }
+    } catch (e) { note(e); }
+    run.boardBusy = false;
+  }
+  function driveRun(run) {
+    if (run.aborted || R.run !== run) return;
+    const now = Date.now(), c = ctl();
+    if ((Number(c.abort) || 0) !== run.abortBase) { abortRun(); return; }
+    if (now - R.leaseAt > 8000) renewLease();
+    const s = run.sim;
+    if (run.kind === "streak") {
+      if (run.phase === "intro") { if (now >= run.phaseUntil) { run.phase = "play"; run.base = now; } pushLive(run, false); return; }
+      if (run.phase === "won") { if (now >= run.phaseUntil) newRound(run); pushLive(run, false); return; }
+      const due = Math.min(Math.floor((now - run.base) / (1000 / 60)) - s.T, 900);
+      for (let i = 0; i < due && !s.over; i++) s.step();
+      if (s.over) {
+        if (s.result === "win") { run.wins++; run.boardTarget = Math.max(run.boardTarget, run.wins); run.phase = "won"; run.phaseUntil = now + 1500; boardSync(run); pushLive(run, false); }
+        else finishStreak(run);
+        return;
+      }
+      pushLive(run, false); return;
+    }
+    if (!run.begun) { if (now < run.startAt) { pushLive(run, false); return; } run.begun = true; run.base = now; }
+    const due = Math.min(Math.floor((now - run.base) / (1000 / 60)) - s.T, 1800);
+    for (let i = 0; i < due && !s.over && s.T < MAX_TICKS; i++) s.step();
+    if (s.over || s.T >= MAX_TICKS) { finishSolo(run); return; }
+    pushLive(run, false);
+  }
+  async function finishSolo(run) {
+    if (R.run !== run) return;
+    clearInterval(run.iv); R.run = null; R.lastEnd = Date.now();
+    const s = run.sim, t = Math.round(s.T / 60 * 100) / 100, daily = run.kind === "daily";
+    run.sim.me.alive = false; pushLive(run, true, t);
+    clearLiveLater(9000);
+    try { RPC.botUpdatePlayer({ status: "Idle in Menu", lastActive: Date.now() }).catch(() => {}); } catch (e) {}
+    try { await persistStats(st => stRun(st, daily ? "dl" : "sv", t)); } catch (e) { note(e); }
+    try {
+      if (t >= 1) {
+        if (daily) {
+          const old = await RPC.get("daily/" + run.key + "/" + UID), oi = old && typeof old.ch === "number" ? old.ch : null;
+          const best = (old && (oi === null || oi === run.idx) && Number(old.time)) || 0;
+          if (t > best) await RPC.botSaveDaily(run.key, t, run.idx);
+        } else {
+          const old = await RPC.get("survival/" + UID), best = (old && Number(old.time)) || 0;
+          if (t > best) { const rep = JSON.stringify({ v: 1, w: 1280, h: 720, c: COLOR, r: s.me.r, p: s.trail, s: s.spawns, n: s.T, e: [Math.round(s.me.x), Math.round(s.me.y)] }); await RPC.botSaveSurvival(t, rep.length <= 600000 ? rep : null); }
+        }
+      }
+      R.err = "";
+    } catch (e) { note(e); }
+  }
+  async function finishStreak(run) {
+    if (R.run !== run) return;
+    clearInterval(run.iv); R.run = null; R.lastEnd = Date.now();
+    run.sim.me.alive = false; run.phase = "over"; pushLive(run, true);
+    clearLiveLater(9000);
+    try { RPC.botUpdatePlayer({ status: "Idle in Menu", lastActive: Date.now() }).catch(() => {}); } catch (e) {}
+    try { await persistStats(st => stStreak(st, run.wins)); } catch (e) { note(e); }
+    try { await boardSync(run); if (!run.boardErr) R.err = ""; } catch (e) { note(e); }
+  }
+
+  // ── Haupt-Takt: Lease, 15-Min-Zeitplan, erzwungener Modus ──
+  async function tick() {
+    if (R.busy) return; R.busy = true;
+    try {
+      if (!ready()) return;
+      ensureListeners();
+      if (R.rec === undefined) return;
+      const now = Date.now(), c = ctl();
+      if (document.hidden && R.hiddenSince && now - R.hiddenSince > 3 * 60 * 1000) {   // lange im Hintergrund: Browser bremst Timer -> Lease abgeben
+        if (R.runner) { R.runner = false; if (R.run) abortRun(); try { await RPC.botUpdatePlayer({ "botCtl/lease": { u: myUid, ts: 0 } }); } catch (e) {} }
+        return;
+      }
+      if (leaseMine()) { R.runner = true; if (now - R.leaseAt > 8000) await renewLease(); }
+      else if (leaseForeign()) { R.runner = false; if (R.run) abortRun(); return; }
+      else { R.runner = false; if (!canClaim()) return; if (!(await tryClaim())) return; }
+      if (!R.runner || R.run || R.starting) return;
+      let kind = null;
+      if (MODES.indexOf(c.force) >= 0) { if (now - R.lastEnd > FORCE_GAP_MS) kind = c.force; }
+      else if (now - (Number(c.lastStart) || 0) >= CYCLE_MS) kind = MODES[Math.floor(Math.random() * MODES.length)];
+      if (kind) await startRun(kind);
+    } catch (e) { note(e); }
+    finally { R.busy = false; }
+  }
+  setInterval(tick, 2000);
+  window.addEventListener("pagehide", () => { try { if (R.runner) RPC.botClearLive().catch(() => {}); } catch (e) {} });
+
+  // ── Mod-Steuerung (nur Admin; die Rules pruefen zusaetzlich) ──
+  window.botForce = async function (mode) { try { await RPC.botSetForce(MODES.indexOf(mode) >= 0 ? mode : null); } catch (e) { note(e); alert("Online Bot: " + R.err); } };
+  window.botAbortRun = async function () { try { await RPC.botAbort(); } catch (e) { note(e); alert("Online Bot: " + R.err); } };
+  window.botModCard = function (list) {
+    const box = document.createElement("div");
+    box.style.cssText = "border:1px solid #b388ff;border-radius:10px;padding:10px 12px;margin-bottom:6px;background:rgba(179,136,255,.07);";
+    const head = document.createElement("div"); head.style.cssText = "font-weight:700;color:#d1b8ff;margin-bottom:4px;"; head.textContent = "🤖 Online Bot";
+    const info = document.createElement("div"); info.style.cssText = "font-size:12px;opacity:.9;line-height:1.5;margin-bottom:8px;white-space:pre-wrap;";
+    const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+    const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = "margin:0;padding:5px 10px;font-size:12px;"; b.onclick = fn; row.appendChild(b); return b; };
+    const bAuto = mk("🔄 Auto (15 min)", () => window.botForce(null));
+    const bS = mk("🏝 Survival non stop", () => window.botForce("survival"));
+    const bD = mk("📅 Daily non stop", () => window.botForce("daily"));
+    const bK = mk("🔥 Streaks non stop", () => window.botForce("streak"));
+    mk("⏭ Lauf abbrechen", () => window.botAbortRun());
+    box.append(head, info, row); list.appendChild(box);
+    const upd = () => {
+      if (!document.body.contains(box)) { clearInterval(iv); return; }
+      const c = ctl(), now = Date.now(), f = c.force, r = R.run;
+      const l = c.lease && now - Number(c.lease.ts) < LEASE_TTL ? c.lease : null;
+      const nxt = Math.max(0, (Number(c.lastStart) || 0) + CYCLE_MS - now);
+      info.textContent = "Modus: " + (f ? "⛔ ERZWUNGEN → " + LBL[f] + " (non stop, bis „Auto“)" : "Auto – zufaellig alle 15 Min.")
+        + "\nStatus: " + (r ? "spielt " + LBL[r.kind] + " (" + (r.kind === "streak" ? r.wins + " Siege" : ((r.sim ? r.sim.T : 0) / 60).toFixed(1) + " s") + ")" : (c.mode ? "wartet · zuletzt " + LBL[c.mode] : "wartet"))
+        + "\nRunner: " + (l ? (l.u === myUid ? "dieser Browser (du)" : "anderer Browser " + String(l.u).slice(0, 6) + "…") : "KEINER online – Bot pausiert")
+        + (f ? "" : "\nNaechster Lauf in: " + Math.floor(nxt / 60000) + ":" + String(Math.floor(nxt / 1000) % 60).padStart(2, "0"))
+        + (R.err ? "\n⚠ Schreibfehler: " + R.err + " (Rules fuer bot__online_bot noetig, siehe bot-rules.txt)" : "");
+      [[bAuto, !f], [bS, f === "survival"], [bD, f === "daily"], [bK, f === "streak"]].forEach(([b, on]) => { b.style.outline = on ? "2px solid #b388ff" : "none"; });
+    };
+    const iv = setInterval(upd, 1000); upd();
+  };
+})();
+
 </script>
 </body>
 </html>
