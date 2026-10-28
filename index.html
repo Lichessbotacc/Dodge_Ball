@@ -710,6 +710,7 @@ label{font-family:var(--font-display);letter-spacing:.4px;color:var(--text-dim);
 
 /* ── Kompakte Spiel-UI ── */
 #ui,#onlineHUD,#coinHUD,#pingDisplay,#opponentInfo,#spectatorInfo{transition:opacity .2s ease;}
+body.mode-minions #ui{display:none !important;}
 #ui{top:10px;left:10px;font-size:13px;padding:6px 10px 6px 10px;border-radius:8px;}
 #onlineHUD{top:8px;padding:5px 14px;border-radius:10px;font-size:12px;}
 .online-names{font-size:14px;gap:12px;}
@@ -5977,7 +5978,7 @@ window.showScreen = function(id) {
     const el = document.getElementById(s);
     if (el) el.style.display = (s === id) ? "flex" : "none";
   });
-  document.body.classList.remove("ingame", "mode-online", "mode-tv");
+  document.body.classList.remove("ingame", "mode-online", "mode-tv", "mode-minions");
   if (id === "menu") updateAccountBtn();
   const hideHome = ["menu","settings","offlineSettings","accountScreen","leaderboardScreen","leagueScreen"].includes(id);
   document.getElementById("homeBtn").style.display = hideHome ? "none" : "block";
@@ -9013,6 +9014,7 @@ function hideAllScreensForGame() {
   });
   document.getElementById("homeBtn").style.display = "block";
   document.body.classList.add("ingame");
+  document.body.classList.remove("mode-minions");
 }
 
 // ═══════════════════════════════════════════════
@@ -13150,21 +13152,21 @@ const MN_AW = 768, MN_AH = 720;                 // logische Groesse jeder Arena
 const MN_PX = 768, MN_PWID = 512;               // rechtes Panel (40 %)
 const MN_SC = MN_PWID / MN_AW;                  // Skalierung der Gegner-Arena
 const MN_RY = 40;                               // Gegner-Arena beginnt hier (y)
-// Preise: Einkommen ~2/s am Start (steigt auf ~5/s nach 2 min, ~8/s nach 3 min), Start 50 Punkte.
+// Preise: Einkommen ~2/s am Start (steigt auf ~5/s nach 2 min, ~8/s nach 3 min), Start 10 Punkte.
 // Preis ~ Gefahr x Lebensdauer: billig = langsam/kurz, teuer = schnell, schlau oder gross.
 // Preise (Simulation, alle Baelle 10 s): Reg 8, Dsh 20, Tel 16, Zig 12, Bul 22, Cha 28, Spl 18, Gia 30
 const MN_TYPES = [
-  { key:"1", id:"reg", name:"Regular",  cost: 8,  w:4 },   // langsam, 25 s
-  { key:"2", id:"dsh", name:"Dasher",   cost: 20,  w:3 },   // schleicht, bleibt kurz stehen (blinkt), schiesst dann auf dich
-  { key:"3", id:"tel", name:"Teleporter", cost: 16, w:3 },  // springt alle 2,5 s in deine Naehe (0,5 s Vorwarnung)
-  { key:"4", id:"bul", name:"Bullet",   cost: 22, w:3 },   // gezielt auf dich
-  { key:"5", id:"zig", name:"Zickzack", cost: 12, w:3 },   // schlaengelt sich
-  { key:"6", id:"cha", name:"Chaser",   cost: 28, w:3 },   // verfolgt dich
-  { key:"7", id:"spl", name:"Splitter", cost: 18, w:2 },   // teilt sich in 3
-  { key:"8", id:"gia", name:"Giant",    cost: 30, w:2 }    // riesig, 20 s
+  { key:"1", id:"reg", name:"Regular",    cost: 10, w:4 },   // slow, 25 s
+  { key:"2", id:"zig", name:"Zigzag",     cost: 12, w:3 },   // wiggles around
+  { key:"3", id:"tel", name:"Teleporter", cost: 16, w:3 },   // jumps near you every 2.5 s (0.5 s warning)
+  { key:"4", id:"spl", name:"Splitter",   cost: 18, w:2 },   // splits into 3
+  { key:"5", id:"dsh", name:"Dasher",     cost: 20, w:3 },   // creeps, pauses (blinks), then dashes at you
+  { key:"6", id:"bul", name:"Bullet",     cost: 22, w:3 },   // aimed at you
+  { key:"7", id:"gia", name:"Giant",      cost: 26, w:2 },   // huge, 20 s
+  { key:"8", id:"cha", name:"Chaser",     cost: 28, w:3 }    // follows you
 ];
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
-const MN_CFG = { startPts:50, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
+const MN_CFG = { startPts:10, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
 function mnLocked() { return !_modIsAdminSafe(); }
 function openMinions() {
@@ -13199,6 +13201,7 @@ function startMinions() {
   document.body.classList.remove("mode-online","mode-tv");
   mode = "minions"; balls = []; players = []; eliminated = [];
   hideAllScreensForGame();
+  document.body.classList.add("mode-minions");
   MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0 };
   mnEndOverlay(null); mnMoveId = null;
   running = true; startTime = Date.now();
@@ -13428,12 +13431,12 @@ function minionsDraw() {
   ctx.globalAlpha = .35; ctx.fillStyle = pg; ctx.fillRect(MN_PX + 10, py, (MN_PWID - 220) * fr, 32); ctx.globalAlpha = 1; ctx.restore();
   ctx.textAlign = "left"; ctx.fillStyle = "#ffd700"; ctx.font = "bold 22px Arial"; ctx.fillText("💰 " + Math.floor(P.pts), MN_PX + 20, py + 24);
   ctx.textAlign = "right"; ctx.fillStyle = "#c9cdd6"; ctx.font = "13px Arial"; ctx.fillText("+" + mnIncome(M.tick).toFixed(1) + "/s", MN_PX + MN_PWID - 230, py + 21);
-  if (M.bonus && M.tick - M.bonus.t < 70) { const a = 1 - (M.tick - M.bonus.t) / 70; ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.fillStyle = "#6dff8a"; ctx.font = "bold 24px Arial"; ctx.fillText("+" + M.bonus.amt + " 💥 Treffer!", MN_PX + MN_PWID / 2, py - 14 - (1 - a) * 20); ctx.globalAlpha = 1; }
+  if (M.bonus && M.tick - M.bonus.t < 70) { const a = 1 - (M.tick - M.bonus.t) / 70; ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.fillStyle = "#6dff8a"; ctx.font = "bold 24px Arial"; ctx.fillText("+" + M.bonus.amt + " 💥 Hit!", MN_PX + MN_PWID / 2, py - 14 - (1 - a) * 20); ctx.globalAlpha = 1; }
   { const l = mnLeverRect(), on = M.perm[0];
     ctx.fillStyle = on ? "rgba(255,215,0,.18)" : "rgba(255,255,255,.06)"; mnRR(l.x, l.y, l.w, l.h, 17); ctx.fill();
     ctx.strokeStyle = on ? "#ffd700" : "rgba(255,255,255,.3)"; ctx.lineWidth = 2; mnRR(l.x, l.y, l.w, l.h, 17); ctx.stroke();
     ctx.fillStyle = on ? "#ffd700" : "rgba(255,255,255,.55)"; ctx.beginPath(); ctx.arc(on ? l.x + l.w - 17 : l.x + 17, l.y + 17, 12, 0, Math.PI * 2); ctx.fill();
-    ctx.textAlign = "center"; ctx.font = "bold 13px Arial"; ctx.fillStyle = on ? "#ffd700" : "#c9cdd6"; ctx.fillText(on ? "♾ Dauer-Bälle AN" : "♾ Dauer-Bälle [L]", l.x + l.w / 2 + (on ? -8 : 8), l.y + 22); }
+    ctx.textAlign = "center"; ctx.font = "bold 13px Arial"; ctx.fillStyle = on ? "#ffd700" : "#c9cdd6"; ctx.fillText(on ? "♾ Perma balls ON" : "♾ Perma balls [L]", l.x + l.w / 2 + (on ? -8 : 8), l.y + 22); }
   // Shop-Buttons
   for (let i = 0; i < MN_TYPES.length; i++) {
     const r = mnBtnRect(i), T = MN_TYPES[i], col = MN_COL[T.id] || "#fff";
@@ -13452,7 +13455,7 @@ function minionsDraw() {
     ctx.textAlign = "left"; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.font = "bold 13px Arial"; ctx.fillText(T.key, r.x + 8, r.y + 17);
     ctx.globalAlpha = 1;
   }
-  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Tasten 1–8 = Ball senden · L = Dauer-Bälle · Tippen zum Senden", MN_PX + MN_PWID / 2, H() - 6);
+  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Keys 1–8 = send ball · L = perma balls · Tap to send", MN_PX + MN_PWID / 2, H() - 6);
 }
 // --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
 let mnMoveId = null;
