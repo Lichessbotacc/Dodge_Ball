@@ -12908,9 +12908,9 @@ const MN_SC = MN_PWID / MN_AW;                  // Skalierung der Gegner-Arena
 const MN_RY = 40;                               // Gegner-Arena beginnt hier (y)
 const MN_TYPES = [
   { key:"1", id:"reg", name:"Regular", icon:"🔴", cost:5  },
-  { key:"2", id:"bul", name:"Bullet",  icon:"🔫", cost:8  },
+  { key:"2", id:"bul", name:"Bullet",  icon:"🔫", cost:13  },
   { key:"3", id:"cha", name:"Chaser",  icon:"🟠", cost:15 },
-  { key:"4", id:"gia", name:"Giant",   icon:"🪨", cost:25 }
+  { key:"4", id:"gia", name:"Giant",   icon:"🪨", cost:17 }
 ];
 const MN_CFG = { startPts:50, maxPts:500, hitBonus:20, permMul:4, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
@@ -12971,7 +12971,7 @@ function mnMakeBall(t, S) {
   const R = Math.random;
   let r, spd, life, col = "#ff4444", chase = false, turn = 0, aim = false;
   if (t === "reg")      { r = 15 + R() * 20; spd = (5 + R() * 6) * 0.5; life = 60 * 25; }
-  else if (t === "bul") { r = 9 + R() * 3;   spd = 10.5; life = 60 * 12; col = "#ffe14d"; aim = true; }
+  else if (t === "bul") { r = 9 + R() * 3;   spd = 7.6; life = 60 * 12; col = "#ffe14d"; aim = true; }
   else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 9;  col = "#ff9d00"; chase = true; turn = 0.03; }
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 20; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
@@ -13170,23 +13170,24 @@ function mnBuyAt(cx, cy) { const p = screenToVirtualClamped(cx, cy), bi = mnBtnA
   if (bi >= 0) { mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true; } return false; }
 function mnOk() { return mode === "minions" && MN && MN.phase === "play"; }
 function mnOnCanvas(e) { return e.target === canvas || e.target === gameWrap; }
-gameWrap.addEventListener("mousemove", e => { if (!mnOnCanvas(e) || !mnOk()) return; const p = screenToVirtualClamped(e.clientX, e.clientY); if (mnBtnAt(p.x, p.y) < 0) mnMoveTo(e.clientX, e.clientY); });
-gameWrap.addEventListener("mousedown", e => { if (!mnOnCanvas(e) || !mnOk()) return; if (!mnBuyAt(e.clientX, e.clientY)) mnMoveTo(e.clientX, e.clientY); });
-gameWrap.addEventListener("touchstart", e => {
+const mnTouchBlock = e => { if (mnOnCanvas(e) && mnOk()) e.preventDefault(); };
+gameWrap.addEventListener("touchstart", mnTouchBlock, { passive: false });
+gameWrap.addEventListener("touchmove", mnTouchBlock, { passive: false });
+gameWrap.addEventListener("pointerdown", e => {
   if (!mnOnCanvas(e) || !mnOk()) return;
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    if (mnBuyAt(t.clientX, t.clientY)) continue;
-    if (mnMoveId === null) { mnMoveId = t.identifier; mnMoveTo(t.clientX, t.clientY); }
+  if (mnBuyAt(e.clientX, e.clientY)) return;          // Tippen = kaufen (Finger/Stift/Maus)
+  if (mnMoveId === null || e.pointerType === "mouse") { mnMoveId = e.pointerId; mnMoveTo(e.clientX, e.clientY); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
+});
+gameWrap.addEventListener("pointermove", e => {
+  if (!mnOnCanvas(e) && e.pointerId !== mnMoveId) return;
+  if (!mnOk()) return;
+  if (e.pointerId === mnMoveId || (mnMoveId === null && (e.pointerType === "mouse" || e.pointerType === "pen"))) {
+    const p = screenToVirtualClamped(e.clientX, e.clientY);
+    if (mnBtnAt(p.x, p.y) < 0) mnMoveTo(e.clientX, e.clientY);
   }
-}, { passive: false });
-gameWrap.addEventListener("touchmove", e => {
-  if (!mnOnCanvas(e) || !mnOk()) return;
-  e.preventDefault();
-  for (const t of e.changedTouches) if (t.identifier === mnMoveId) mnMoveTo(t.clientX, t.clientY);
-}, { passive: false });
-const mnTouchEnd = e => { for (const t of e.changedTouches) if (t.identifier === mnMoveId) mnMoveId = null; };
-window.addEventListener("touchend", mnTouchEnd); window.addEventListener("touchcancel", mnTouchEnd);
+});
+const mnPtrEnd = e => { if (e.pointerId === mnMoveId) mnMoveId = null; };
+window.addEventListener("pointerup", mnPtrEnd); window.addEventListener("pointercancel", mnPtrEnd);
 document.addEventListener("keydown", e => {
   if (!mnOk()) return;
   const i = ["1","2","3","4"].indexOf(e.key); if (e.key === "5" || e.key === "l" || e.key === "L") MN.perm[0] = !MN.perm[0]; if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
