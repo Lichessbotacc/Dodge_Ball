@@ -7503,7 +7503,7 @@ function tvPipePushEnt(k, s, x, y, alive) {
   const a = performance.now(); if (s == null) s = a;
   const buf = P.ent[k] || (P.ent[k] = []);
   let last = buf[buf.length - 1];
-  if (last && s <= last.s) { if (s < last.s - 400) { buf.length = 0; P.off = null; last = null; } else return; }
+  if (last && s <= last.s) { if (s < last.s - 400) { buf.length = 0; P.off = null; last = null; } else { if (s === last.s) { last.x = x; last.y = y; last.alive = alive; } return; } }
   tvPipeClock(s, a);
   if (last) P.ivE += (Math.max(10, Math.min(1000, s - last.s)) - P.ivE) * 0.1;
   buf.push({ s, x, y, alive }); if (buf.length > 40) buf.shift();
@@ -10583,6 +10583,7 @@ async function startOnlineTV(targetUid) {
       const suid = survId.slice(5);
       const isSk = survD.k === "streak", isDl = survD.k === "daily";
       let skRd = -1;
+      const _dlyHud = (fn) => { const w = tvPipe ? Math.round(tvPipe.D) : 0; if (w > 20) setTimeout(() => { if (survId === onlineTvCurrentMatchId) fn(); }, w); else fn(); };
       const sp = createPlayer(isSk ? W() * 0.25 : W() / 2, H() / 2, survD.c || "#00ff88", survD.name);
       const spBot = isSk ? createPlayer(W() * 0.75, H() / 2, "#ff88aa", "Bot") : null;
       if (isSk) { sp.label = dn(survD.name); spBot.label = "Online Bot"; }
@@ -10607,13 +10608,22 @@ async function startOnlineTV(targetUid) {
         if (!d) { badMatches.set(survId, Date.now() + 10000); stopInner(); return; }
         if (d.done) {
           if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-          tvFreezeBalls = true; if (tvPipe) tvPipe.frozen = true;
-          showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
+          // Abschluss-Paket (Tod/letzter Stand) noch in die Wiedergabe einspielen, damit der Treffer zu sehen ist
+          try {
+            if (isSk) { const su = Number(d.u) || null; tvPipePushEnt(0, su, d.x, d.y, d.ma !== false); tvPipePushEnt(1, su, d.bx, d.by, d.ba !== false); if (d.b) tvPipePushBalls(su, tvParseBalls("streak", JSON.parse(d.b)), 0, d.ph !== "play"); }
+            else { tvPipePushEnt(0, (d.t || 0) * TV_TICK_MS, d.x, d.y, false); if (d.b) tvPipePushBalls((d.t || 0) * TV_TICK_MS, tvParseBalls(isDl ? "daily" : "surv", JSON.parse(d.b)), d.t || 0, false); }
+          } catch (e) {}
+          const finWait = tvPipe ? Math.round(tvPipe.D + 200) : 0;   // Bild liegt D hinter den Daten: Overlay/Freeze erst danach
+          setTimeout(() => {
+            if (survId !== onlineTvCurrentMatchId) return;
+            tvFreezeBalls = true; if (tvPipe) tvPipe.frozen = true;
+            showWinner(dn(d.name), "", isSk ? "🔥 " + (Number(d.w) || 0) + " wins" : survFmt(Number(d.time) || (d.t || 0) / 60));
+            specText.innerHTML = (isSk ? "Streaks" : isDl ? "Daily run" : "Survival run") + " finished. Searching for next game...";
+          }, finWait);
           badMatches.set(survId, Date.now() + 15000);
-          specText.innerHTML = (isSk ? "Streaks" : isDl ? "Daily run" : "Survival run") + " finished. Searching for next game...";
-          holdUntil = Date.now() + 6000;
+          holdUntil = Date.now() + 6000 + finWait;
           clearTimeout(holdTimer);
-          holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000);
+          holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, 6000 + finWait);
           return;
         }
         lastPacketSeen = Date.now(); gotPacket = true;
@@ -10624,13 +10634,12 @@ async function startOnlineTV(targetUid) {
           }
           tvFreezeBalls = d.ph !== "play";   // Intro/Rundensieg: die Baelle stehen auch beim Spieler still
           { const su = Number(d.u) || null; tvPipePushEnt(0, su, d.x, d.y, d.ma !== false); tvPipePushEnt(1, su, d.bx, d.by, d.ba !== false); }
-          setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (d.L || 1));
-          skUi(d);
+          _dlyHud(() => { setT("onlineScoreHUD", "🔥 " + (d.w || 0)); setT("onlineStatusHUD", "📺 Live Streaks · " + tr("Round") + " " + (d.L || 1)); skUi(d); });
           if (d.b) { try { tvPipePushBalls(Number(d.u) || null, tvParseBalls("streak", JSON.parse(d.b)), 0, d.ph !== "play"); } catch(e) {} }
           return;
         }
         tvPipePushEnt(0, (d.t || 0) * TV_TICK_MS, d.x, d.y, true);
-        setT("onlineScoreHUD", survFmt((d.t || 0) / 60));
+        _dlyHud(() => setT("onlineScoreHUD", survFmt((d.t || 0) / 60)));
         if (isDl) {
           if (!tvDaily) {
             const key = d.dk || dailyKeyNow(), ci = Number.isInteger(d.ci) ? d.ci : dailyIdxFor(key);
@@ -10698,7 +10707,7 @@ async function startOnlineTV(targetUid) {
       if (!data || data.status === "done" || data.status === "abandoned") {
         // Gewinner anzeigen (Spielfeld bleibt ein paar Sekunden eingefroren), dann nächstes Match suchen
         if (onlineTvInnerUnsubscribe) { try { onlineTvInnerUnsubscribe(); } catch(e) {} onlineTvInnerUnsubscribe = null; }
-        if (tvPipe) tvPipe.frozen = true;
+        const _fw = tvPipe ? Math.round(tvPipe.D + 200) : 0;
         const winner = data && data.status === "done" && data.winner ? data.winner : null;
         const sc = data && Number.isFinite(data.p1Score) && Number.isFinite(data.p2Score) ? data.p1Score + " - " + data.p2Score : "";
         let eloRows = null;
@@ -10717,13 +10726,13 @@ async function startOnlineTV(targetUid) {
             ];
           }
         } catch (e) {}
-        showWinner(winner, sc, null, eloRows);
+        setTimeout(() => { if (myId !== onlineTvCurrentMatchId) return; if (tvPipe) tvPipe.frozen = true; showWinner(winner, sc, null, eloRows); }, _fw);
         if (winner && curMeta && curMeta.p1uid && curMeta.p2uid) {
           const m0 = curMeta, hh = document.getElementById("onlineScoreHUD");
           getHeadToHeadScore(m0.p1uid, m0.p2uid).then(r => { if (hh) hh.textContent = (r[m0.p1uid] || 0) + " - " + (r[m0.p2uid] || 0); }).catch(() => {});
         }
         specText.innerHTML = "Match finished. Searching for next game...";
-        const holdMs = eloRows ? 9000 : 6000;   // mit Elo-Animation etwas laenger zeigen
+        const holdMs = (eloRows ? 9000 : 6000) + _fw;   // mit Elo-Animation etwas laenger zeigen
         holdUntil = Date.now() + holdMs;
         clearTimeout(holdTimer);
         holdTimer = setTimeout(() => { hideWinner(); holdUntil = 0; stopInner(); pickMatch(); }, holdMs);
