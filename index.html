@@ -12948,7 +12948,7 @@ function startMinions() {
   mode = "minions"; balls = []; players = []; eliminated = [];
   hideAllScreensForGame();
   MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0 };
-  mnEndOverlay(null);
+  mnEndOverlay(null); mnMoveId = null;
   running = true; startTime = Date.now();
 }
 function mnEndOverlay(txt) {
@@ -13166,28 +13166,44 @@ function minionsDraw() {
 // --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
 let mnMoveId = null;
 function mnMoveTo(cx, cy) { const p = screenToVirtualClamped(cx, cy); const P = MN.sides[0]; P.tx = Math.min(p.x, MN_AW); P.ty = p.y; }
-function mnBuyAt(cx, cy) { const p = screenToVirtualClamped(cx, cy), bi = mnBtnAt(p.x, p.y); if (bi === 4) { MN.perm[0] = !MN.perm[0]; return true; }
-  if (bi >= 0) { mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true; } return false; }
+let mnLastBuy = { i: -1, t: 0 };
+function mnBuyAt(cx, cy) {
+  const p = screenToVirtualClamped(cx, cy), bi = mnBtnAt(p.x, p.y);
+  if (bi < 0) return false;
+  const now = performance.now();
+  if (mnLastBuy.i === bi && now - mnLastBuy.t < 80) return true;   // Pointer- und Touch-Event derselben Beruehrung nicht doppelt zaehlen
+  mnLastBuy = { i: bi, t: now };
+  if (bi === 4) { MN.perm[0] = !MN.perm[0]; return true; }
+  mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true;
+}
 function mnOk() { return mode === "minions" && MN && MN.phase === "play"; }
-function mnOnCanvas(e) { return e.target === canvas || e.target === gameWrap; }
-const mnTouchBlock = e => { if (mnOnCanvas(e) && mnOk()) e.preventDefault(); };
-gameWrap.addEventListener("touchstart", mnTouchBlock, { passive: false });
-gameWrap.addEventListener("touchmove", mnTouchBlock, { passive: false });
-gameWrap.addEventListener("pointerdown", e => {
-  if (!mnOnCanvas(e) || !mnOk()) return;
-  if (mnBuyAt(e.clientX, e.clientY)) return;          // Tippen = kaufen (Finger/Stift/Maus)
-  if (mnMoveId === null || e.pointerType === "mouse") { mnMoveId = e.pointerId; mnMoveTo(e.clientX, e.clientY); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
-});
-gameWrap.addEventListener("pointermove", e => {
-  if (!mnOnCanvas(e) && e.pointerId !== mnMoveId) return;
+function mnInCanvas(e, x, y) {
+  if (e.target && e.target.closest && e.target.closest("button,a,input,textarea,select,#mnEnd")) return false;
+  const r = canvas.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+function mnDown(id, x, y, isMouse) {
+  if (mnBuyAt(x, y)) return;
+  if (mnMoveId === null || isMouse) { mnMoveId = id; mnMoveTo(x, y); }
+}
+function mnMove(id, x, y, hover) {
+  if (id === mnMoveId || (mnMoveId === null && hover)) { const p = screenToVirtualClamped(x, y); if (mnBtnAt(p.x, p.y) < 0) mnMoveTo(x, y); }
+}
+const CAP = { capture: true };
+window.addEventListener("pointerdown", e => { if (!mnOk() || !mnInCanvas(e, e.clientX, e.clientY)) return; mnDown("p" + e.pointerId, e.clientX, e.clientY, e.pointerType === "mouse"); }, CAP);
+window.addEventListener("pointermove", e => { if (!mnOk()) return; if (e.pointerType === "touch" || mnInCanvas(e, e.clientX, e.clientY)) mnMove("p" + e.pointerId, e.clientX, e.clientY, e.pointerType !== "touch"); }, CAP);
+const mnPtrEnd = e => { if (mnMoveId === "p" + e.pointerId) mnMoveId = null; };
+window.addEventListener("pointerup", mnPtrEnd, CAP); window.addEventListener("pointercancel", mnPtrEnd, CAP);
+// Touch-Fallback (Safari/iPad): jeder Finger/Stift einzeln per identifier
+window.addEventListener("touchstart", e => {
   if (!mnOk()) return;
-  if (e.pointerId === mnMoveId || (mnMoveId === null && (e.pointerType === "mouse" || e.pointerType === "pen"))) {
-    const p = screenToVirtualClamped(e.clientX, e.clientY);
-    if (mnBtnAt(p.x, p.y) < 0) mnMoveTo(e.clientX, e.clientY);
-  }
-});
-const mnPtrEnd = e => { if (e.pointerId === mnMoveId) mnMoveId = null; };
-window.addEventListener("pointerup", mnPtrEnd); window.addEventListener("pointercancel", mnPtrEnd);
+  for (const t of e.changedTouches) if (mnInCanvas(e, t.clientX, t.clientY)) { e.preventDefault(); mnDown("t" + t.identifier, t.clientX, t.clientY, false); }
+}, { passive: false, capture: true });
+window.addEventListener("touchmove", e => {
+  if (!mnOk()) return;
+  for (const t of e.changedTouches) if (mnMoveId === "t" + t.identifier) { e.preventDefault(); mnMove(mnMoveId, t.clientX, t.clientY, false); }
+}, { passive: false, capture: true });
+const mnTouchEnd = e => { for (const t of e.changedTouches) if (mnMoveId === "t" + t.identifier) mnMoveId = null; };
+window.addEventListener("touchend", mnTouchEnd, CAP); window.addEventListener("touchcancel", mnTouchEnd, CAP);
 document.addEventListener("keydown", e => {
   if (!mnOk()) return;
   const i = ["1","2","3","4"].indexOf(e.key); if (e.key === "5" || e.key === "l" || e.key === "L") MN.perm[0] = !MN.perm[0]; if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
