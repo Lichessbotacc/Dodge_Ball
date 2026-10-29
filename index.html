@@ -1034,6 +1034,8 @@ body.mode-tv #homeBtn:hover{transform:none;}
       <h2>⚙️ Settings</h2>
       <p style="opacity:.6;font-size:13px;margin:-6px 0 18px;">General – applies to all modes</p>
 
+      <label>🔊 Sound Volume</label>
+      <input type="range" id="sfxVol" min="0" max="100" value="50" oninput="sfxSetVol(this.value)" style="width:80%;max-width:300px;">
       <label>Your Ball Color</label>
       <div id="ballPreviewWrap">
         <canvas id="ballPreviewCanvas" width="90" height="90"></canvas>
@@ -1111,6 +1113,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
+        <button id="lbTabFriends" onclick="lbShowTab('friends')" style="margin:0;padding:8px 18px;font-size:14px;">👥 Friends</button>
         <button id="lbTabArena" onclick="lbShowTab('arena')" style="margin:0;padding:8px 18px;font-size:14px;">🏟 Arena</button>
         <button id="lbTabActivity" onclick="lbShowTab('activity')" style="margin:0;padding:8px 18px;font-size:14px;">📊 Activity</button>
       </div>
@@ -4356,11 +4359,12 @@ function lbShowTab(tab) {
   if (k) k.style.borderColor = tab === "streak" ? "#00ff88" : "";
   const dd = document.getElementById("lbTabDaily"), dw = document.getElementById("lbTabDailyWins");
   if (dd) dd.style.borderColor = tab === "daily" ? "#00ff88" : ""; if (dw) dw.style.borderColor = tab === "dwins" ? "#00ff88" : "";
+  const _lf = document.getElementById("lbTabFriends"); if (_lf) _lf.style.borderColor = tab === "friends" ? "#00ff88" : "";
   const _lm = document.getElementById("lbTabMinions"); if (_lm) _lm.style.borderColor = tab === "minions" ? "#00ff88" : "";
   const _li = document.getElementById("lbTabIdle"); if (_li) _li.style.borderColor = tab === "idle" ? "#00ff88" : "";
   const _la = document.getElementById("lbTabActivity"); if (_la) _la.style.borderColor = tab === "activity" ? "#00ff88" : "";
   const _lar = document.getElementById("lbTabArena"); if (_lar) _lar.style.borderColor = tab === "arena" ? "#00ff88" : "";
-  if (tab === "arena") loadArenaBoard(); else if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "minions") loadMinionsBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
+  if (tab === "arena") loadArenaBoard(); else if (tab === "activity") loadActivityBoard(); else if (tab === "idle") loadIdleBoard(); else if (tab === "surv") loadSurvivalBoard(); else if (tab === "streak") loadStreakBoard(); else if (tab === "friends") loadFriendsBoard(); else if (tab === "minions") loadMinionsBoard(); else if (tab === "daily") loadDailyBoard(); else if (tab === "dwins") loadDailyWinsBoard(); else loadLeaderboard();
 }
 // Falls das Leaderboard schon offen war, als die Verbindung hergestellt wurde: einmal automatisch neu laden
 window.addEventListener("dobAuthReady", () => {
@@ -13115,6 +13119,59 @@ async function arenaRestoreTick() {
 setInterval(arenaRestoreTick, 2500);
 setInterval(arenaBtnUpd, 10000); setTimeout(arenaBtnUpd, 600); setTimeout(arenaBtnUpd, 3000);
 window.openArena = openArena;
+</script>
+<script id="extras">
+// ── Sound ──
+let _sfxVol = Number(localStorage.getItem("sfxVol") ?? 50), _sfxCtx = null;
+function sfxSetVol(v) { _sfxVol = Number(v) || 0; try { localStorage.setItem("sfxVol", _sfxVol); } catch (e) {} }
+function sfx(f, d) {
+  if (!_sfxVol) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    _sfxCtx = _sfxCtx || new AC(); if (_sfxCtx.state === "suspended") _sfxCtx.resume();
+    const o = _sfxCtx.createOscillator(), g = _sfxCtx.createGain();
+    o.frequency.value = f; g.gain.value = _sfxVol / 100 * 0.15;
+    g.gain.exponentialRampToValueAtTime(0.0001, _sfxCtx.currentTime + d);
+    o.connect(g); g.connect(_sfxCtx.destination); o.start(); o.stop(_sfxCtx.currentTime + d);
+  } catch (e) {}
+}
+window.sfx = sfx;
+document.addEventListener("click", e => { if (e.target.closest("button")) sfx(520, 0.08); }, true);
+document.addEventListener("DOMContentLoaded", () => { const r = document.getElementById("sfxVol"); if (r) r.value = _sfxVol; });
+// ── Friends (lokal gespeichert, nach Name) ──
+function frGet() { try { return JSON.parse(localStorage.getItem("friends") || "[]"); } catch (e) { return []; } }
+function frSet(a) { try { localStorage.setItem("friends", JSON.stringify(a)); } catch (e) {} }
+function frAdd() {
+  const i = document.getElementById("frInput"), n = (i && i.value || "").trim(); if (!n) return;
+  const a = frGet(); if (!a.some(x => x.toLowerCase() === n.toLowerCase())) { a.push(n); frSet(a); }
+  loadFriendsBoard();
+}
+function frDel(n) { frSet(frGet().filter(x => x !== n)); loadFriendsBoard(); }
+async function loadFriendsBoard() {
+  const t = document.getElementById("lbTable");
+  const head = '<div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>';
+  const bar = '<div style="display:flex;gap:6px;margin:8px 0;"><input id="frInput" placeholder="Add friend by name" style="flex:1;"><button onclick="frAdd()" style="margin:0;">＋</button></div>';
+  const fr = frGet();
+  t.innerHTML = bar + head + '<div class="lb-row"><span style="margin:0 auto;">Loading…</span></div>';
+  let data = null; try { data = await _dbGetT("players"); } catch (e) {}
+  const low = fr.map(x => x.toLowerCase());
+  const rows = Object.entries(data || {}).map(([uid, p]) => ({ uid, ...p })).filter(p => low.includes(String(p.name || "").toLowerCase())).sort((a, b) => (b.elo || 1500) - (a.elo || 1500));
+  const names = rows.map(p => String(p.name).toLowerCase());
+  let h = bar + head + rows.map((p, i) => `<div class="lb-row" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(p.uid)}')"><span>#${i + 1}</span><span>${escapeHtml(dn(p.name))} <b onclick="event.stopPropagation();frDel('${escapeHtml(p.name)}')" style="opacity:.6;">✖</b></span><span>${Math.round(p.elo || 1500)}</span><span>${p.wins || 0}/${p.losses || 0}</span></div>`).join("");
+  fr.filter(x => !names.includes(x.toLowerCase())).forEach(x => { h += `<div class="lb-row"><span>–</span><span>${escapeHtml(x)} <b onclick="frDel('${escapeHtml(x)}')" style="opacity:.6;">✖</b></span><span>not found</span><span></span></div>`; });
+  if (!fr.length) h += '<div class="lb-row"><span style="margin:0 auto;">No friends yet</span></div>';
+  t.innerHTML = h;
+}
+window.frAdd = frAdd; window.frDel = frDel;
+// ── Tutorial (nur beim ersten Besuch) ──
+window.addEventListener("load", () => {
+  try { if (localStorage.getItem("tutDone")) return; } catch (e) { return; }
+  const o = document.createElement("div");
+  o.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;";
+  o.innerHTML = '<div style="background:#12121a;border:2px solid #00ff88;border-radius:14px;padding:22px;max-width:380px;color:#fff;text-align:center;font-size:15px;line-height:1.5;"><h2 style="margin:0 0 10px;">👋 Welcome!</h2>Move your ball and avoid the others.<br>⚔️ <b>Minions</b>: send balls at your opponent (keys 1–8 or tap) – the last one alive wins.<br>🏆 Win games to climb the Elo ranking.<br><button style="margin-top:14px;">Got it</button></div>';
+  o.querySelector("button").onclick = () => { try { localStorage.setItem("tutDone", "1"); } catch (e) {} o.remove(); };
+  document.body.appendChild(o);
+});
 </script>
 <script id="minionsMode">
 // ═══════════════════════════════════════════════
