@@ -6130,6 +6130,7 @@ function statsRecordStreak(wins) {
 }
 function _fmtDur(sec) { sec = Math.max(0, Math.round(Number(sec) || 0)); if (sec < 60) return sec + "s"; if (sec < 3600) return Math.floor(sec / 60) + "m " + (sec % 60) + "s"; return Math.floor(sec / 3600) + "h " + Math.floor((sec % 3600) / 60) + "m"; }
 function profileStatsHtml(p, R, G, B, svRec) {
+  return "";
   const st = (p && p.st && typeof p.st === "object") ? p.st : {};
   const n = (x) => Number(x) || 0, dash = "–";
   const w = n(p.wins), l = n(p.losses), g = w + l;
@@ -6238,7 +6239,7 @@ async function openOnlineProfile(uid) {
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
-        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + B("Lowest Elo", Math.round(mnRec.lowestElo ?? mnRec.elo ?? 1500)) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0) + R("Balls sent", Number(mnRec.ballsSent) || 0) + G("Total Elo Won", "+" + fmtElo(Number(mnRec.eloGained) || 0)) + B("Total Elo Lost", "-" + fmtElo(Number(mnRec.eloLost) || 0)); })()}</div>
+        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0); })()}</div>
         ${profileStatsHtml(p, R, G, B, svRec)}
         </div>
       </div>`;
@@ -13348,7 +13349,6 @@ function mnEndOverlay(txt) {
     }
   }
   mk("🔍 New Opponent", () => { o.style.display = "none"; mnPostLeave(); openMinions(); });
-  mk("🏠 Home", () => { o.style.display = "none"; mnPostLeave(); exitToMenu(); });
   o.style.display = "flex";
 }
 
@@ -13598,6 +13598,8 @@ function mnIncome(tick) { const s = tick / 60; return 2 + s / 20 + s * s / 6000;
 function minionsUpdate() {
   const M = MN; if (!M || M.phase !== "play") return;
   const NT = M.net; if (NT && !NT.go) return;   // Online: warten bis beide bereit sind
+  if (!M.cdEnd) M.cdEnd = Date.now() + 3000;
+  if (Date.now() < M.cdEnd) return;   // 3-2-1 Countdown
   M.tick++;
   const rate = mnIncome(M.tick) / 60;   // Punkte pro Tick, steigt langsam
   const [P, B] = M.sides;
@@ -13731,6 +13733,7 @@ function minionsDraw() {
     ctx.globalAlpha = 1;
   }
   ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Keys 1–8 = send ball · L = perma balls · Tap to send", MN_PX + MN_PWID / 2, H() - 6);
+  if (MN && MN.cdEnd && Date.now() < MN.cdEnd) { ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(0, 0, MN_PX, H()); ctx.fillStyle = "#ffd700"; ctx.font = "bold 120px Arial"; ctx.textAlign = "center"; ctx.fillText(Math.ceil((MN.cdEnd - Date.now()) / 1000), MN_PX / 2, H() / 2 + 40); }
 }
 // --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
 let mnMoveId = null;
