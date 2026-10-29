@@ -985,10 +985,10 @@ body.mode-tv #homeBtn:hover{transform:none;}
         </div>
         <div id="menuOnline" class="menuPage">
           <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
-          <button onclick="startSurvival()">🏝 Survival</button>
+          <button id="minionsBtn" onclick="openMinions()">⚔️ Minions</button>
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
-          <button id="minionsBtn" onclick="openMinions()">⚔️ Minions</button>
+          <button onclick="startSurvival()">🏝 Survival</button>
           <button id="idleBtn" onclick="openIdle()">🧱 Idle Brick Breaker</button>
           <button id="arenaBtn" onclick="openArena()">🏟 Hourly Arena</button>
           <button onclick="startOnlineTV()">📺 Best Online TV</button>
@@ -13419,7 +13419,7 @@ function mnMakeBall(t, S) {
   else if (t === "bul") { r = 9 + R() * 3;   spd = 7.6; life = 60 * 10; col = "#ffe14d"; aim = true; }
   else if (t === "zig") { r = 13 + R() * 4;  spd = 4.2; life = 60 * 10; col = "#ff6ad5"; zig = true; }
   else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 10;  col = "#ff9d00"; chase = true; turn = 0.03; }
-  else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 10; col = "#35d6a6"; split = 60 * 4; }
+  else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 25; col = "#35d6a6"; split = 60 * 20; }
   else if (t === "frg") { r = 9 + R() * 2;   spd = 4.6; life = 60 * 6;  col = "#35d6a6"; }
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 10; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
@@ -13789,7 +13789,7 @@ function minionsDraw() {
     ctx.textAlign = "left"; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.font = "bold 13px Arial"; ctx.fillText(T.key, r.x + 8, r.y + 17);
     ctx.globalAlpha = 1;
   }
-  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Keys 1–8 = send ball · L = perma balls · Tap to send", MN_PX + MN_PWID / 2, H() - 6);
+  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "12px Arial"; ctx.fillText("Keys 1–8 = send ball · 9 or Space = perma balls · Tap to send", MN_PX + MN_PWID / 2, H() - 6);
   if (MN && MN.cdEnd && Date.now() < MN.cdEnd) { ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(0, 0, MN_PX, H()); ctx.fillStyle = "#ffd700"; ctx.font = "bold 120px Arial"; ctx.textAlign = "center"; ctx.fillText(Math.ceil((MN.cdEnd - Date.now()) / 1000), MN_PX / 2, H() / 2 + 40); }
 }
 // --- Eingabe: Multi-Touch (eine Hand bewegt, die andere kauft) ---
@@ -13836,7 +13836,7 @@ window.addEventListener("touchend", mnTouchEnd, CAP); window.addEventListener("t
 document.addEventListener("keydown", e => {
   if (!mnOk()) return;
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key === "9" || e.key === "l" || e.key === "L") { MN.perm[0] = !MN.perm[0]; return; }
+  if (e.key === "9" || e.key === "l" || e.key === "L" || e.code === "Space") { e.preventDefault(); MN.perm[0] = !MN.perm[0]; return; }
   const i = MN_TYPES.findIndex(T => T.key === e.key); if (i >= 0) { mnBuy(0, i); MN.flash = { i, t: MN.tick }; }
 });
 </script>
