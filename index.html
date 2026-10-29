@@ -1686,7 +1686,7 @@ async function rpcSetMinionsBoard(d) {
   const uid = requireUid();
   const n = (v, hi) => Math.max(0, Math.min(hi, Math.floor(Number(v) || 0)));
   return set(ref(db, "minionsBoard/" + uid), {
-    name: String(d.name).slice(0, 20), elo: n(d.elo, 5000), highestElo: n(d.highestElo, 5000), lowestElo: n(d.lowestElo, 5000),
+    name: String(d.name).slice(0, 20), elo: Math.round(Math.max(0, Math.min(5000, Number(d.elo) || 0)) * 10) / 10, highestElo: Math.round(Math.max(0, Math.min(5000, Number(d.highestElo) || 0)) * 10) / 10, lowestElo: Math.round(Math.max(0, Math.min(5000, Number(d.lowestElo) || 0)) * 10) / 10,
     wins: n(d.wins, 1e6), losses: n(d.losses, 1e6), draws: n(d.draws, 1e6), curStreak: n(d.curStreak, 1e6), bestStreak: n(d.bestStreak, 1e6),
     ballsSent: n(d.ballsSent, 1e9), eloGained: n(d.eloGained, 1e9), eloLost: n(d.eloLost, 1e9), ts: serverTimestamp()
   });
@@ -13291,8 +13291,8 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
     const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
     const g = k => Number(cur[k]) || 0;
     const e0 = cur.elo != null ? Number(cur.elo) : 1500;
-    const score = res === 0 ? 1 : res === 1 ? 0 : 0.5, exp = 1 / (1 + Math.pow(10, ((M.oppElo != null ? M.oppElo : MN_BOT_ELO) - e0) / 400));
-    const d = Math.round(MN_K * (score - exp)), e1 = Math.max(0, e0 + d);
+    const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Online 1v1, erste 10 Spiele doppelt
+    const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
     const st = res === 0 ? g("curStreak") + 1 : 0;
     await RPC.setMinionsBoard({
       name: onlineAccount.name, elo: e1, highestElo: Math.max(cur.highestElo != null ? g("highestElo") : e0, e1), lowestElo: Math.min(cur.lowestElo != null ? g("lowestElo") : e0, e1),
