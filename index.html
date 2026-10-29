@@ -8383,6 +8383,7 @@ function handlePostMatch(d) {
 function sendPostChat() {
   const inp = document.getElementById("postChatInput");
   if (onlineArenaId && arenaSess) { arenaChatSendFrom(inp, arenaSess.id); return; }   // Arena: Nachricht geht in den Turnier-Chat
+  if (window._mnPost && !onlineVsBot) { mnPostSend(inp); return; }
   const text = inp.value.trim();
   if (onlineVsBot) {
     if (!text || Date.now() - lastPostChat < 600) return;
@@ -10272,7 +10273,7 @@ function tvEloPanel(host, rows, mount) {   // host: Overlay (Konfetti), mount: Z
 // getrennt durch eine Zeile "⋮ N players".
 function tvBuildBoard(rows) {
   try {
-    const pd = window._lastPlayersData; if (!pd || !rows || rows.length < 1) { console.warn("TV board: no player data", !!pd, rows && rows.length); return null; }
+    const pd = window._tvBoardOverride || window._lastPlayersData; if (!pd || !rows || rows.length < 1) { console.warn("TV board: no player data", !!pd, rows && rows.length); return null; }
     const ov = {}; rows.forEach(r => { if (r.uid) ov[r.uid] = r; });
     const byName = new Map();
     Object.entries(pd).forEach(([uid, pl]) => {
@@ -13149,24 +13150,37 @@ let _mnSrch = null, _mnNet = null;
 function mnSearchCancel() {
   if (_mnSrch) { clearInterval(_mnSrch); _mnSrch = null; }
   if (_mnNet) { const N = _mnNet; _mnNet = null; N.dead = true; N.unsubs.forEach(u => { try { u(); } catch (e) {} }); if (!N.found) { try { RPC.removeOwnQueueEntry().catch(() => {}); } catch (e) {} } }
-  const el = document.getElementById("mnSearch"); if (el) el.style.display = "none";
+  mnSearchRestore();
 }
+function mnSearchRestore() {
+  const w = document.getElementById("onlineWait"); if (!w || !w._mn) return; w._mn = false;
+  const h = w.querySelector("h2"); if (h) h.textContent = "🌐 Online 1v1";
+  const pb = document.getElementById("playBotBtn"); if (pb) pb.setAttribute("onclick", "playWithBotNow()");
+  if (w.lastElementChild) w.lastElementChild.setAttribute("onclick", "cancelOnline()");
+}
+function mnSearchAbort() { mnSearchCancel(); try { showScreen("menu"); } catch (e) {} }
+window.mnSearchAbort = mnSearchAbort;
 function mnSearchGo() { mnSearchCancel(); startMinions(); }
 window.mnSearchCancel = mnSearchCancel; window.mnSearchGo = mnSearchGo;
 async function openMinions() {
   if (mnLocked()) { try { leagueToast("🔒 Minions unlocks on Friday · " + mnLeftText(), "#ffcc66"); } catch (e) {} return; }
   mnSearchCancel();
-  let el = document.getElementById("mnSearch");
-  if (!el) { el = document.createElement("div"); el.id = "mnSearch"; el.style.cssText = "position:fixed;inset:0;z-index:900;background:rgba(5,6,12,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;font-family:var(--font-display,sans-serif);text-align:center;padding:20px"; document.body.appendChild(el); }
-  let myElo = "–";
-  try { if (myUid && RPC) { const r = await RPC.get("minionsBoard/" + myUid); myElo = r && r.elo != null ? Math.round(r.elo) : 1500; } } catch (e) {}
-  const mnOnl = !!(fbReady && RPC && myUid && onlineAccount && !window.__dobBanned), mnLim = mnOnl ? 30 : 10, mnHint = mnOnl ? "Matchmaking like Online 1v1: if nobody is found within 30 seconds you play against the Online Bot." : "After 10 seconds you play against the Online Bot.";
-  el.innerHTML = '<h2 style="margin:0">⚔️ Minions</h2><div id="mnAnim" style="font-size:40px">⏳</div><div style="opacity:.85">Searching for an opponent…</div><div style="width:min(300px,80vw);height:8px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden"><i id="mnBar" style="display:block;height:100%;width:0;background:#00ff88;transition:width ' + mnLim + 's linear"></i></div><div style="font-size:12px;opacity:.65;max-width:300px;line-height:1.5">Your Minions ELO: <b>' + myElo + '</b><br>' + mnHint + '</div><button id="mnBotBtn" style="display:none" onclick="mnSearchGo()">🤖 Play with Online Bot now</button><button onclick="mnSearchCancel()">Cancel</button>';
-  el.style.display = "flex";
-  let t = 0; setTimeout(() => { const b = document.getElementById("mnBar"); if (b) b.style.width = "100%"; }, 30);
+  const mnOnl = !!(fbReady && RPC && myUid && onlineAccount && !window.__dobBanned), mnLim = mnOnl ? 30 : 10;
+  let myElo = 1500;
+  try { if (myUid && RPC) { const r = await RPC.get("minionsBoard/" + myUid); if (r && r.elo != null) myElo = Math.round(r.elo); } } catch (e) {}
+  showScreen("onlineWait");
+  const w = document.getElementById("onlineWait"); w._mn = true;
+  w.querySelector("h2").textContent = "⚔️ Minions";
+  document.getElementById("onlineStatus").textContent = "Looking for an opponent…";
+  const bo0 = document.getElementById("botOffer"), bh0 = document.getElementById("botHint"), sl0 = document.getElementById("searchLeague");
+  if (bo0) bo0.style.display = "none"; if (bh0) bh0.style.display = ""; if (sl0) { sl0.style.display = "none"; sl0.innerHTML = ""; }
+  document.getElementById("playBotBtn").setAttribute("onclick", "mnSearchGo()");
+  w.lastElementChild.setAttribute("onclick", "mnSearchAbort()");
+  try { loadSearchLeague(); } catch (e) {}
+  let t = 0;
   _mnSrch = setInterval(() => {
-    t++; const a = document.getElementById("mnAnim"); if (a) a.textContent = t % 2 ? "⌛" : "⏳";
-    if (t === 10) { const bb = document.getElementById("mnBotBtn"); if (bb) bb.style.display = ""; }
+    t++; const a = document.getElementById("onlineSearchAnim"); if (a) a.textContent = t % 2 ? "⌛" : "⏳";
+    if (t === 10) { const bb = document.getElementById("botOffer"), bhh = document.getElementById("botHint"); if (bb) bb.style.display = "flex"; if (bhh) bhh.style.display = "none"; }
     if (t >= mnLim) mnSearchGo();
   }, 1000);
   if (mnOnl) mnNetSearch(Number(myElo) || 1500);
@@ -13193,6 +13207,7 @@ function mnSide(side) {
 }
 function startMinions(net) {
   if (mnLocked()) return;
+  try { mnPostClear(); } catch (e) {}
   clearAllTimers();
   waitingQueue = []; matches = []; playerMatchMap.clear();
   spectateModeActive = false; spectateMatchId = null; followMode = "none"; targetName = null; humanRemovedFromQueue = false;
@@ -13228,7 +13243,10 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d)
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
-    setE((left ? "🚪 Left match · " : "") + (d >= 0 ? "+" : "") + d + " ELO  →  " + e1, d > 0 ? "#6dff8a" : d < 0 ? "#ff6b6b" : "#fff");
+    if (res === 0) leagueRecordWin().catch(e => console.warn("league win failed", e));
+    const _oe = M.oppElo != null ? Math.round(M.oppElo) : MN_BOT_ELO;
+    mnEloPanel([{ uid: myUid, name: dn(onlineAccount.name), delta: d, from: Math.round(e0), to: Math.round(e1) }, { uid: M.net ? M.net.opp.uid : null, name: dn(M.oppName || "Online Bot"), delta: -d, from: _oe, to: Math.max(0, _oe - d) }]);
+    if (left) setE("🚪 Left match", "#ffcc66");
   } catch (e) { console.warn("minions elo save failed", e); setE("ELO could not be saved", "#ffcc66"); }
 }
 function mnLeave() {   // Match mitten im Spiel verlassen = Niederlage
@@ -13238,19 +13256,100 @@ function mnLeave() {   // Match mitten im Spiel verlassen = Niederlage
   if (M.net) mnNetStop(M, true);
   return mnReport(1, true);
 }
-function mnEndOverlay(txt) {
-  let o = document.getElementById("mnEnd");
-  if (!txt) { if (o) o.style.display = "none"; return; }
-  if (!o) {
-    o = document.createElement("div"); o.id = "mnEnd";
-    o.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.65);z-index:60;color:#fff;font-family:Arial,sans-serif";
-    o.innerHTML = '<div id="mnEndT" style="font-size:44px;font-weight:bold"></div><div id="mnEndS" style="opacity:.8"></div><div id="mnEndE" style="font-size:22px;font-weight:bold;min-height:28px"></div><div style="display:flex;gap:12px"><button id="mnRetry" style="padding:12px 22px;font-size:18px;cursor:pointer">🔁 Retry</button><button id="mnHome" style="padding:12px 22px;font-size:18px;cursor:pointer">🏠 Menu</button></div>';
-    document.body.appendChild(o);
-    o.querySelector("#mnRetry").onclick = () => openMinions();
-    o.querySelector("#mnHome").onclick = () => exitToMenu();
+async function mnEloPanel(rows) {
+  let bd = null; try { bd = await RPC.get("minionsBoard"); } catch (e) {}
+  const o = document.getElementById("winnerOverlay"), r = document.getElementById("winnerRight");
+  if (!o || !r || o.style.display === "none") return;
+  const ex = document.getElementById("winnerEloPanel"); if (ex) ex.remove();
+  const pn = document.createElement("div"); pn.id = "winnerEloPanel"; pn.style.cssText = "width:min(420px,92vw);text-align:center;";
+  r.prepend(pn);
+  window._tvBoardOverride = bd;
+  try { tvEloPanel(o, rows, pn); } catch (e) { console.warn(e); }
+  window._tvBoardOverride = null;
+}
+function mnPostClear() {
+  const c = window._mnPost; window._mnPost = null;
+  if (c) { try { c.unsub && c.unsub(); } catch (e) {} }
+  onlineVsBot = false; botChatToken++;
+  const pc = document.getElementById("postChat"); if (pc) pc.style.display = "none";
+}
+function mnPostLeave() {
+  const c = window._mnPost;
+  if (c && c.id) { try { RPC.setMatchPath(c.id, "mnGone_" + c.role, true).catch(() => {}); } catch (e) {} }
+  mnPostClear();
+}
+function mnPostSend(inp) {
+  const c = window._mnPost, text = inp.value.trim();
+  if (!c || !text || !fbReady || Date.now() - lastPostChat < 600) return;
+  lastPostChat = Date.now(); inp.value = "";
+  const pf = chatFilterEx(text.slice(0, 200)); if (pf.hit) chatFilterNotice();
+  RPC.setMatchPath(c.id, "postChat/" + Date.now() + "_" + c.role, { name: onlineAccount.name, text: pf.text, ts: Date.now() }).catch(() => {});
+}
+function mnRematchReq() {
+  const c = window._mnPost; if (!c || c.sent) return;
+  c.sent = true;
+  RPC.setMatchPath(c.id, "mnRematch_" + c.role, true).catch(() => {});
+  const rb = document.getElementById("rematchBtn"); if (rb) rb.textContent = "⏳ Waiting for opponent…";
+}
+function mnPostRx(d) {
+  const c = window._mnPost; if (!c || !d) return;
+  const box = document.getElementById("postChatMsgs");
+  box.innerHTML = "";
+  const list = d.postChat ? Object.values(d.postChat).sort((x, y) => (x.ts || 0) - (y.ts || 0)) : [];
+  for (const m of list) {
+    const row = document.createElement("div"), nm = document.createElement("b"), tx = document.createElement("span");
+    nm.setAttribute("translate", "no"); nm.textContent = dn(m.name) + ": "; nm.style.color = (m.name === onlineAccount.name) ? "#00ff88" : "#ff8844";
+    tx.setAttribute("translate", "no"); tx.textContent = chatFilter(m.text); tx.style.cssText = "color:#eaf2fb;word-break:break-word;";
+    row.append(nm, tx); box.appendChild(row);
   }
+  box.scrollTop = box.scrollHeight;
+  const rb = document.getElementById("rematchBtn");
+  const gone = d.status === "abandoned" || d["mnGone_" + c.orole] || d["mnLeft_" + c.orole];
+  if (rb) {
+    if (gone) { rb.textContent = "Opponent left"; rb.disabled = true; }
+    else if (d["mnRematch_" + c.role]) rb.textContent = "⏳ Waiting for opponent…";
+    else if (d["mnRematch_" + c.orole]) rb.textContent = "🔄 Accept Rematch";
+  }
+  if (gone) return;
+  if (c.role === "p1" && d.mnRematch_p1 && d.mnRematch_p2 && !c.resetting) {
+    c.resetting = true;
+    RPC.updateMatch(c.id, { mnRematch_p1: null, mnRematch_p2: null, mnReady_p1: null, mnReady_p2: null, mnS_p1: null, mnS_p2: null, mnE_p1: null, mnE_p2: null, mnLeft_p1: null, mnLeft_p2: null, mnGone_p1: null, mnGone_p2: null, postChat: null, mnRound: c.round + 1 }).catch(() => { c.resetting = false; });
+  }
+  if ((d.mnRound || 0) > c.round) {
+    const net = { matchId: c.id, opp: { uid: c.oppUid, name: c.oppName, elo: c.oppElo }, round: d.mnRound };
+    mnPostClear(); document.getElementById("winnerOverlay").style.display = "none";
+    (async () => { try { const r = await RPC.get("minionsBoard/" + net.opp.uid); if (r && r.elo != null) net.opp.elo = Math.round(r.elo); } catch (e) {} startMinions(net); })();
+  }
+}
+function mnEndOverlay(txt) {
+  const o = document.getElementById("winnerOverlay"); if (!o) return;
+  if (!txt) { o.style.display = "none"; return; }
+  mnPostClear();
+  document.getElementById("winnerText").textContent = txt[0];
+  document.getElementById("winnerEloChange").innerHTML = escapeHtml(txt[1]) + '<br><span id="mnEndE" style="font-size:22px"></span>';
+  const pn = document.getElementById("winnerEloPanel"); if (pn) pn.remove();
+  const lg = document.getElementById("winnerLeague"); if (lg) lg.textContent = "";
+  const btns = document.getElementById("winnerButtons"); btns.innerHTML = "";
+  const mk = (l, fn) => { const b = document.createElement("button"); b.textContent = l; b.onclick = () => { fn(); }; btns.appendChild(b); return b; };
+  const M = MN, NT = M && M.net, cancelled = /cancelled/.test(txt[1]);
+  const pc = document.getElementById("postChat"), msgs = document.getElementById("postChatMsgs");
+  msgs.innerHTML = "";
+  if (cancelled) { pc.style.display = "none"; o.classList.add("nochat"); }
+  else {
+    pc.style.display = "flex"; o.classList.remove("nochat");
+    if (NT) {
+      window._mnPost = { id: NT.id, role: NT.role, orole: NT.orole, round: NT.round | 0, oppUid: NT.opp && NT.opp.uid, oppName: NT.opp && NT.opp.name, oppElo: NT.opp && NT.opp.elo };
+      mk("🔄 Rematch", mnRematchReq).id = "rematchBtn";
+      try { window._mnPost.unsub = RPC.onMatch(NT.id, mnPostRx); } catch (e) {}
+    } else {
+      onlineVsBot = true; botChatToken++; window._botChatBotWon = M.winner === 1;
+      mk("🔄 Rematch", () => { o.style.display = "none"; startMinions(); });
+      try { botPostChatStart(M.winner === 1, M.tick / 60); } catch (e) {}
+    }
+  }
+  mk("🔍 New Opponent", () => { o.style.display = "none"; mnPostLeave(); openMinions(); });
+  mk("🏠 Home", () => { o.style.display = "none"; mnPostLeave(); exitToMenu(); });
   o.style.display = "flex";
-  o.querySelector("#mnEndT").textContent = txt[0]; o.querySelector("#mnEndS").textContent = txt[1]; o.querySelector("#mnEndE").textContent = "";
 }
 
 // Ball vom Typ t, der in der Arena des Spielers S erscheint
@@ -13438,7 +13537,7 @@ function mnFound(N, matchId, opp) {
 }
 function mnNetInit(net) {
   const M = MN, role = myUid < net.opp.uid ? "p1" : "p2", orole = role === "p1" ? "p2" : "p1";
-  const NT = M.net = { id: net.matchId, role, orole, go: false, oppReady: false, gotSnap: false, seen: new Set(), evLog: [], evSeq: 0, sn: 0, lastRx: Date.now(), lastN: -1, oppHits: 0, myHits: 0, t0: Date.now() };
+  const NT = M.net = { id: net.matchId, role, orole, round: net.round | 0, opp: net.opp, go: false, oppReady: false, gotSnap: false, seen: new Set(), evLog: [], evSeq: 0, sn: 0, lastRx: Date.now(), lastN: -1, oppHits: 0, myHits: 0, t0: Date.now() };
   M.oppName = String(net.opp.name || "Opponent"); M.oppElo = Number(net.opp.elo) || 1500;
   const sendReady = () => RPC.setMatchPath(NT.id, "mnReady_" + role, Date.now()).catch(() => {});
   sendReady();
