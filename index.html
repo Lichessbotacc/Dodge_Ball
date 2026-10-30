@@ -611,6 +611,7 @@ h2::after{
 #lbTable .lb-row.lb-r2 > span:nth-child(1){color:#d6dfec;}
 #lbTable .lb-row.lb-r3 > span:nth-child(1){color:#e8935a;}
 #lbTable .lb-me{position:sticky;bottom:0;background:#0d2a1e;border-top:1px solid var(--neon-green);}
+#lbTable .lb-row.lb-hide{display:none !important;}
 @media (max-width:480px){#lbTable .lb-row{grid-template-columns:44px minmax(0,1fr) auto minmax(48px,auto);gap:8px;padding:9px 10px;}}
 input[type=text],input[type=number],input[type=password],select{
   padding:12px 18px;font-size:18px;border-radius:10px;
@@ -1125,6 +1126,10 @@ body.mode-tv #homeBtn:hover{transform:none;}
         <button id="lbTabFriends" onclick="lbShowTab('friends')" style="margin:0;padding:8px 18px;font-size:14px;">👥 Friends</button>
         <button id="lbTabArena" onclick="lbShowTab('arena')" style="margin:0;padding:8px 18px;font-size:14px;">🏟 Arena</button>
         <button id="lbTabActivity" onclick="lbShowTab('activity')" style="margin:0;padding:8px 18px;font-size:14px;">📊 Activity</button>
+      </div>
+      <div style="width:min(640px,94vw);margin:0 auto 8px;">
+        <input id="lbSearch" type="search" autocomplete="off" placeholder="🔎 Search player…" oninput="lbApplyFilter(); searchPlayerProfiles(this.value)" style="width:100%;box-sizing:border-box;margin:0;padding:9px 12px;font-size:14px;">
+        <div id="playerProfileSearchResults"></div>
       </div>
       <div id="lbTable">
         <div class="lb-row"><span>Rank</span><span>Name</span><span>ELO</span><span>W/L</span></div>
@@ -2710,6 +2715,22 @@ function _legacyOnline(p) {
   return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;   // clientVer fehlt/alt -> Alt-Version
 }
 let _playerSearchToken = 0;
+function lbApplyFilter() {
+  const inp = document.getElementById("lbSearch"), t = document.getElementById("lbTable");
+  if (!t) return;
+  const q = inp ? inp.value.trim().toLowerCase() : "";
+  t.querySelectorAll(".lb-row").forEach((row, i) => {
+    const kids = row.children;
+    const skip = i === 0 || row.classList.contains("lb-head") || row.classList.contains("lb-me") || kids.length < 2 ||
+      /display\s*:\s*block/.test(row.getAttribute("style") || "") || /^(Rank|Rang)$/i.test((kids[0].textContent || "").trim());
+    if (skip) { row.classList.remove("lb-hide"); return; }
+    row.classList.toggle("lb-hide", !!q && !(kids[1].textContent || "").toLowerCase().includes(q));
+  });
+}
+(function () {
+  function init() { const t = document.getElementById("lbTable"); if (t) new MutationObserver(lbApplyFilter).observe(t, { childList: true, subtree: true }); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
 function searchPlayerProfiles(raw) {
   const q = String(raw || "").trim().toLowerCase();
   const box = document.getElementById("playerProfileSearchResults");
@@ -2735,7 +2756,7 @@ function renderPresence(playersData) {
     if (!panel) return;
 
     if (!playersData && !(myUid && onlineAccount)) {
-      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div><br><span style='color:#888; font-size:12px;'>No active players</span>";
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
       return;
     }
 
@@ -2770,12 +2791,11 @@ function renderPresence(playersData) {
     const activeList = [..._seen.values()].sort(_ecmp);
 
     if (activeList.length === 0) {
-      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div><br><span style='color:#888; font-size:12px;'>No other players online</span>";
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
       return;
     }
 
     let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span>" +
-      "<div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div>" +
       "<div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
