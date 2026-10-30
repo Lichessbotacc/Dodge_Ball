@@ -791,6 +791,14 @@ body.mode-tv #homeBtn:hover{transform:none;}
 #challengeBox .ch-no{border-color:#ff4455;color:#ff4455;} #challengeBox .ch-no:hover{background:rgba(255,68,85,.2);}
 #challengeBox .ch-bar{height:3px;margin-top:10px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;}
 #challengeBox .ch-bar i{display:block;height:100%;background:#ffd700;width:100%;}
+#challengeModePicker{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.72);}
+#challengeModePicker .cmp-card{width:min(360px,94vw);padding:22px;border:1px solid rgba(255,215,0,.65);border-radius:18px;background:#10131d;color:#fff;box-shadow:0 16px 50px rgba(0,0,0,.65);text-align:center;font-family:var(--font-display,sans-serif);}
+#challengeModePicker h3{margin:0 0 8px;color:#ffd700;font-size:18px;letter-spacing:1px;}
+#challengeModePicker p{margin:0 0 18px;color:#bfc5d4;font-size:13px;}
+#challengeModePicker .cmp-actions{display:flex;flex-direction:column;gap:10px;}
+#challengeModePicker button{width:100%;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,215,0,.5);background:rgba(255,215,0,.12);color:#fff;font-weight:700;font-size:15px;cursor:pointer;}
+#challengeModePicker button.cmp-cancel{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#aeb5c5;}
+#challengeBox .ch-mode{font-size:12px;color:#ffd700;margin-top:3px;font-weight:700;letter-spacing:.7px;}
 .menuPage{display:flex;flex-direction:column;align-items:center;}
 #accountBtn{position:absolute;top:14px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
 #newsBtn{position:absolute;top:62px;right:16px;margin:0;padding:8px 16px;font-size:14px;z-index:5;}
@@ -1689,7 +1697,11 @@ async function rpcSetMinionsBoard(d) {
   return set(ref(db, "minionsBoard/" + uid), {
     name: String(d.name).slice(0, 20), elo: Math.round(Math.max(0, Math.min(5000, Number(d.elo) || 0)) * 10) / 10, highestElo: Math.round(Math.max(0, Math.min(5000, Number(d.highestElo) || 0)) * 10) / 10, lowestElo: Math.round(Math.max(0, Math.min(5000, Number(d.lowestElo) || 0)) * 10) / 10,
     wins: n(d.wins, 1e6), losses: n(d.losses, 1e6), draws: n(d.draws, 1e6), curStreak: n(d.curStreak, 1e6), bestStreak: n(d.bestStreak, 1e6),
-    ballsSent: n(d.ballsSent, 1e9), eloGained: n(d.eloGained, 1e9), eloLost: n(d.eloLost, 1e9), ts: serverTimestamp()
+    ballsSent: n(d.ballsSent, 1e9), eloGained: n(d.eloGained, 1e9), eloLost: n(d.eloLost, 1e9),
+    bestWinChange: Math.max(0, Math.min(5000, Number(d.bestWinChange) || 0)), bestWinOpp: String(d.bestWinOpp || "").slice(0, 40),
+    worstLossChange: Math.max(0, Math.min(5000, Number(d.worstLossChange) || 0)), worstLossOpp: String(d.worstLossOpp || "").slice(0, 40),
+    eloHistory: Array.isArray(d.eloHistory) ? d.eloHistory.slice(-100).map(x => ({ ts: Math.max(0, Number(x && x.ts) || 0), elo: Math.max(0, Math.min(5000, Number(x && x.elo) || 0)) })) : [],
+    ts: serverTimestamp()
   });
 }
 
@@ -2746,7 +2758,7 @@ function renderPresence(playersData) {
       const _chBtn = (!isMe && onlineAccount && fbReady)
         ? (_pend
             ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge('${escapeHtml(p.uid)}')" title="Cancel challenge">⏳</button>`
-            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); challengePlayer('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Challenge to a 1v1')}">⚔</button>`)
+            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); openChallengeModePicker('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Choose game mode to challenge')}">＋</button>`)
         : "";
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
@@ -2804,10 +2816,27 @@ function challengePrepareForMatch() {
 }
 function challengeToast(txt, color) { try { leagueToast(tr(txt), color); } catch (e) {} }
 
+// ── Spielmodus vor dem Herausfordern auswählen ──
+function closeChallengeModePicker() { const el = document.getElementById("challengeModePicker"); if (el) el.remove(); }
+function openChallengeModePicker(targetUid) {
+  if (!fbReady || !myUid || !onlineAccount || !targetUid || targetUid === myUid) return;
+  if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  if (challengeOut.size > 0) { challengeToast("You already have an open challenge", "#ff8844"); return; }
+  closeChallengeModePicker();
+  const overlay = document.createElement("div"); overlay.id = "challengeModePicker";
+  overlay.innerHTML = '<div class="cmp-card"><h3>CHOOSE GAME MODE</h3><p>Which game do you want to challenge this player to?</p><div class="cmp-actions"><button data-game="online1v1">⚔ ONLINE 1v1</button><button data-game="minions">👾 MINIONS</button><button class="cmp-cancel">CANCEL</button></div></div>';
+  overlay.addEventListener("click", e => { if (e.target === overlay) closeChallengeModePicker(); });
+  overlay.querySelectorAll("button[data-game]").forEach(btn => btn.addEventListener("click", () => { const game = btn.dataset.game; closeChallengeModePicker(); challengePlayer(targetUid, game); }));
+  overlay.querySelector(".cmp-cancel").addEventListener("click", closeChallengeModePicker);
+  document.body.appendChild(overlay);
+}
+
 // ── Senden ──
-async function challengePlayer(targetUid) {
+async function challengePlayer(targetUid, game) {
   if (!fbReady || !myUid || !onlineAccount) { challengeToast("Log in to challenge players", "#ff8844"); return; }
   if (!targetUid || targetUid === myUid) return;
+  game = game === "minions" ? "minions" : "online1v1";
+  if (game === "minions" && mnLocked()) { challengeToast("Minions is still locked", "#ffcc66"); return; }
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
   if (challengeOut.size > 0) { challengeToast("You already have an open challenge", "#ff8844"); return; }
   const now = Date.now();
@@ -2823,7 +2852,7 @@ async function challengePlayer(targetUid) {
   challengeOut.set(targetUid, entry);
   challengeRefreshList();
   try {
-    await RPC.sendChallenge(targetUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: now, status: "pending", aspect: screenAspect() });
+    await RPC.sendChallenge(targetUid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: now, status: "pending", aspect: screenAspect(), game });
   } catch (e) {
     console.warn("challenge send failed", e);
     challengeOut.delete(targetUid); challengeRefreshList();
@@ -2840,7 +2869,7 @@ async function challengePlayer(targetUid) {
       try {
         const md = await RPC.getMatch(d.matchId);
         if (!md) return;
-        if (d.game === "minions") {
+        if ((d.game || game) === "minions") {
           let oe = 1500; try { const r = await RPC.get("minionsBoard/" + targetUid); if (r && r.elo != null) oe = Math.round(r.elo); } catch (e) {}
           startMinions({ matchId: d.matchId, opp: { uid: targetUid, name: d.name || tname, elo: oe } });
           return;
@@ -2902,14 +2931,15 @@ function renderChallengeBox() {
     const rank = challengeRankOf(pick.k, name);
     box = document.createElement("div");
     box.id = "challengeBox";
-    box.innerHTML = '<div class="ch-title"></div><div class="ch-row"><div class="ch-info"><div class="ch-name"></div><div class="ch-elo"><b></b><i></i></div></div>' +
-      '<button class="ch-yes" title="Normal 1v1">✓</button><button class="ch-mn" title="Minions">⚔️</button><button class="ch-no" title="Decline">✗</button></div><div class="ch-bar"><i></i></div>';
-    box.querySelector(".ch-title").textContent = "⚔ " + tr("1v1 CHALLENGE");
+    const incomingGame = pick.c.game === "minions" ? "minions" : "online1v1";
+    box.innerHTML = '<div class="ch-title"></div><div class="ch-row"><div class="ch-info"><div class="ch-name"></div><div class="ch-mode"></div><div class="ch-elo"><b></b><i></i></div></div>' +
+      '<button class="ch-yes" title="Accept challenge">✓</button><button class="ch-no" title="Decline challenge">✗</button></div><div class="ch-bar"><i></i></div>';
+    box.querySelector(".ch-title").textContent = "⚔ " + tr("CHALLENGE RECEIVED");
     box.querySelector(".ch-name").textContent = dn(name);
+    box.querySelector(".ch-mode").textContent = incomingGame === "minions" ? "GAME MODE: MINIONS" : "GAME MODE: ONLINE 1v1";
     box.querySelector(".ch-elo b").textContent = "ELO " + elo;
     box.querySelector(".ch-elo i").textContent = rank ? "#" + rank : "";
     box.querySelector(".ch-yes").addEventListener("click", () => acceptChallenge(pick.k));
-    box.querySelector(".ch-mn").addEventListener("click", () => acceptChallenge(pick.k, "minions"));
     box.querySelector(".ch-no").addEventListener("click", () => declineChallenge(pick.k));
     document.body.appendChild(box);
     challengeShown = pick.k + ":" + pick.c.ts;
@@ -2929,6 +2959,7 @@ async function declineChallenge(fromUid) {
 
 async function acceptChallenge(fromUid, game) {
   const c = challengeIn.get(fromUid);
+  game = game || (c && c.game === "minions" ? "minions" : "online1v1");
   if (!c || !myUid || !onlineAccount) return;
   if (inMatchOrSurvival() || onlineMatchId && !onlineResultHandled) { challengeToast("You are in a match right now", "#ff8844"); return; }
   if (game === "minions" && mnLocked()) { challengeToast("🔒 Minions is still locked", "#ffcc66"); return; }
@@ -6234,6 +6265,16 @@ function profileStatsHtml(p, R, G, B, svRec) {
     .map(([k, a, b]) => R(escapeHtml(k), '<span style="color:#00ff88">' + a + "W</span> – <span style=\"color:#ff4444\">" + b + "L</span>")).join("") || '<div style="opacity:.6;font-size:12px;">No rivals yet.</div>';
   return "<div><h4>MATCH STATS</h4>" + m + "</div><div><h4>SURVIVAL, DAILY &amp; STREAKS</h4>" + srv + "</div><div><h4>RECENT MATCHES</h4>" + rec + "</div><div><h4>RIVALS (most played)</h4>" + riv + "</div>";
 }
+function minionsEloGraphHtml(rec) {
+  try {
+    const h = rec && Array.isArray(rec.eloHistory) ? rec.eloHistory.filter(x => x && Number.isFinite(Number(x.elo))).slice(-100) : [];
+    if (h.length < 2) return '<div style="font-size:11px;opacity:.6;margin-top:6px;">Minions ELO graph appears after your next match.</div>';
+    const vals = h.map(x => Math.round(Number(x.elo))), lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(1, hi - lo);
+    const W = 300, H = 90, P = 6;
+    const pts = vals.map((v, i) => (P + i * (W - 2 * P) / (vals.length - 1)).toFixed(1) + ',' + (H - P - (v - lo) * (H - 2 * P) / span).toFixed(1)).join(' ');
+    return '<div style="margin-top:8px;"><svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:320px;height:auto;display:block;" role="img" aria-label="Minions ELO history"><polyline fill="none" stroke="#b66cff" stroke-width="2" stroke-linejoin="round" points="' + pts + '"/></svg><div style="display:flex;justify-content:space-between;font-size:11px;opacity:.7;max-width:320px;"><span>' + lo + '</span><span>Minions ELO history</span><span>' + hi + '</span></div></div>';
+  } catch (e) { return ''; }
+}
 async function openOnlineProfile(uid) {
   if (!fbReady) return;
   try {
@@ -6293,7 +6334,7 @@ async function openOnlineProfile(uid) {
           <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `${p.bestWinChange ?? 0} ELO vs ${escapeHtml(p.bestWinOpp || "-")}`)}${B("Worst Loss", `${p.worstLossChange ?? 0} ELO vs ${escapeHtml(p.worstLossOpp || "-")}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
-        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0); })()}</div>
+        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + R("Lowest Elo", Math.round(mnRec.lowestElo ?? mnRec.elo ?? 1500)) + G("Best Win", `+${Number(mnRec.bestWinChange) || 0} ELO vs ${escapeHtml(mnRec.bestWinOpp || "-")}`) + B("Worst Loss", `-${Number(mnRec.worstLossChange) || 0} ELO vs ${escapeHtml(mnRec.worstLossOpp || "-")}`) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0) + '<div style="margin-top:8px;"><h4 style="margin-bottom:4px;">MINIONS ELO GRAPH</h4>' + minionsEloGraphHtml(mnRec) + '</div>'; })()}</div>
         ${profileStatsHtml(p, R, G, B, svRec)}
         </div>
       </div>`;
@@ -13338,7 +13379,7 @@ function startMinions(net) {
   running = true; startTime = Date.now();
 }
 // ── ELO / Stats (minionsBoard/{uid}) ──
-const MN_BOT_ELO = 1500, MN_K = 24;
+const MN_BOT_ELO = 1500, MN_K = 24, MN_BOT_ELO_VERSION = 1;
 async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Unentschieden
   const setE = (t, c) => { const e = document.getElementById("mnEndE"); if (e) { e.textContent = t; e.style.color = c || "#fff"; } };
   const M = MN; if (!M || M.reported) return; M.reported = true;
@@ -13348,16 +13389,46 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
     const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
     const g = k => Number(cur[k]) || 0;
     let _botP = null;
-    if (!M.net) { try { _botP = await dbGet("players/" + ONLINE_BOT_UID); M.oppElo = (_botP && _botP.minionsElo != null) ? Number(_botP.minionsElo) : MN_BOT_ELO; } catch (e) { M.oppElo = MN_BOT_ELO; } }
+    if (!M.net) {
+      try {
+        _botP = await dbGet("players/" + ONLINE_BOT_UID);
+        // Einmalige Migration: alte/falsch uebernommene Minions-Bot-ELO
+        // auf den korrekten Startwert setzen. Danach bleibt die Minions-ELO eigenstaendig.
+        if (!_botP || Number(_botP.minionsEloVersion) !== MN_BOT_ELO_VERSION) {
+          M.oppElo = MN_BOT_ELO;
+          const initialized = await dbSetBotPlayer({
+            uid: ONLINE_BOT_UID, name: "Online Bot",
+            minionsElo: MN_BOT_ELO, minionsEloVersion: MN_BOT_ELO_VERSION,
+            updatedAt: Date.now()
+          });
+          if (!initialized) console.warn("Minions bot ELO could not be initialized; using 1500 for this match.");
+        } else {
+          M.oppElo = (_botP.minionsElo != null && Number.isFinite(Number(_botP.minionsElo)))
+            ? Number(_botP.minionsElo) : MN_BOT_ELO;
+        }
+      } catch (e) {
+        M.oppElo = MN_BOT_ELO;
+        console.warn("Minions bot ELO initialization", e);
+      }
+    }
     const e0 = cur.elo != null ? Number(cur.elo) : 1500;
     const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Online 1v1, erste 10 Spiele doppelt
     const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
     const st = res === 0 ? g("curStreak") + 1 : 0;
+    const _mnOppName = dn(M.oppName || "Online Bot");
+    const _mnHist = Array.isArray(cur.eloHistory) ? cur.eloHistory.slice(-99) : [];
+    if (!_mnHist.length) _mnHist.push({ ts: Date.now() - 1, elo: e0 });
+    _mnHist.push({ ts: Date.now(), elo: e1 });
+    const _mnBestWin = res === 0 && d > 0 && d > (Number(cur.bestWinChange) || 0) ? d : (Number(cur.bestWinChange) || 0);
+    const _mnBestWinOpp = res === 0 && d > 0 && d > (Number(cur.bestWinChange) || 0) ? _mnOppName : String(cur.bestWinOpp || "");
+    const _mnWorstLoss = res === 1 && -d > 0 && -d > (Number(cur.worstLossChange) || 0) ? -d : (Number(cur.worstLossChange) || 0);
+    const _mnWorstLossOpp = res === 1 && -d > 0 && -d > (Number(cur.worstLossChange) || 0) ? _mnOppName : String(cur.worstLossOpp || "");
     await RPC.setMinionsBoard({
       name: onlineAccount.name, elo: e1, highestElo: Math.max(cur.highestElo != null ? g("highestElo") : e0, e1), lowestElo: Math.min(cur.lowestElo != null ? g("lowestElo") : e0, e1),
       wins: g("wins") + (res === 0 ? 1 : 0), losses: g("losses") + (res === 1 ? 1 : 0), draws: g("draws") + (res === -1 ? 1 : 0),
       curStreak: st, bestStreak: Math.max(g("bestStreak"), st), ballsSent: g("ballsSent") + (M.sent || 0),
-      eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d)
+      eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d),
+      bestWinChange: _mnBestWin, bestWinOpp: _mnBestWinOpp, worstLossChange: _mnWorstLoss, worstLossOpp: _mnWorstLossOpp, eloHistory: _mnHist
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
     if (!M.net && res !== -1) { try { const bd = Math.max(-10, Math.min(10, -d)); const botMinionsElo = Math.max(100, r1(Number(M.oppElo != null ? M.oppElo : MN_BOT_ELO) + bd)); await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", minionsElo: botMinionsElo, updatedAt: Date.now() }); } catch (e) { console.warn("minions bot elo", e); } }
