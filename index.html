@@ -1088,7 +1088,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
           <option value="glass">Glass (bright)</option>
           <option value="soft">Soft (round)</option>
         </select>
-        <input type="range" id="sfxVol" min="0" max="100" value="60" oninput="SFX.setVol(this.value)" onchange="SFX.previewVol()" aria-label="Volume">
+        <label for="sfxVol" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:#cfd6e4;">Volume <input type="range" id="sfxVol" min="0" max="100" value="60" oninput="SFX.setVol(this.value); document.getElementById('sfxVolValue').textContent=this.value+'%'" onchange="SFX.previewVol()" aria-label="Volume"><b id="sfxVolValue" style="min-width:34px;text-align:right;">60%</b></label>
       </div>
 
       <label>Language / Sprache 🌍</label><br>
@@ -1316,6 +1316,7 @@ window.SFX = (function () {
     syncUI: function () {
       var a = document.getElementById("sfxToggle"), b = document.getElementById("sfxPack"), c = document.getElementById("sfxVol");
       if (a) a.checked = st.on; if (b) b.value = st.pack; if (c) c.value = Math.round(st.vol * 100);
+      var v = document.getElementById("sfxVolValue"); if (v) v.textContent = Math.round(st.vol * 100) + "%";
     },
     previewVol: function () { play("click"); }
   };
@@ -2708,6 +2709,24 @@ function _legacyOnline(p) {
   if (Number(_clientVerData[p.uid]) >= 2) return false;  // aktuelle Version: normale lastActive-Pruefung
   return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;   // clientVer fehlt/alt -> Alt-Version
 }
+let _playerSearchToken = 0;
+function searchPlayerProfiles(raw) {
+  const q = String(raw || "").trim().toLowerCase();
+  const box = document.getElementById("playerProfileSearchResults");
+  if (!box) return;
+  const token = ++_playerSearchToken;
+  if (q.length < 2) { box.innerHTML = ""; return; }
+  const data = window._lastPlayersData || {};
+  const matches = Object.entries(data)
+    .map(([uid, p]) => ({ uid, name: String(p && p.name || ""), elo: Number(p && p.elo) || 1500 }))
+    .filter(p => p.name.toLowerCase().includes(q))
+    .sort((a, b) => (a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q)) || a.name.localeCompare(b.name))
+    .slice(0, 8);
+  if (token !== _playerSearchToken) return;
+  if (!matches.length) { box.innerHTML = '<div style="font-size:11px;color:#8b93a6;padding:5px 2px;">No players found.</div>'; return; }
+  box.innerHTML = matches.map(p => '<div onclick="openOnlineProfile(\'' + escapeHtml(p.uid) + '\')" style="display:flex;justify-content:space-between;gap:8px;padding:5px 7px;margin-top:3px;background:rgba(255,255,255,.05);border-radius:5px;cursor:pointer;font-size:12px;"><span>' + escapeHtml(dn(p.name)) + '</span><span style="color:#ffd700;">' + Math.round(p.elo) + ' ELO</span></div>').join("");
+}
+
 function renderPresence(playersData) {
   _startLiveTrack();
   _startClientVerTrack();
@@ -2715,17 +2734,28 @@ function renderPresence(playersData) {
     const panel = document.getElementById("onlinePlayersPanel");
     if (!panel) return;
 
-    if (!playersData) {
-      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No active players</span>";
+    if (!playersData && !(myUid && onlineAccount)) {
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div><br><span style='color:#888; font-size:12px;'>No active players</span>";
       return;
+    }
+
+    // Eigener Eintrag wird lokal aus der aktuellen Sitzung ergänzt/aktualisiert.
+    // Dadurch verschwindet man nicht selbst aus der Liste, wenn der Listener einen
+    // älteren Snapshot liefert oder der eigene Presence-Write kurz verzögert ist.
+    const _presenceSource = Object.assign({}, playersData || {});
+    if (myUid && onlineAccount) {
+      let _ownDevice = ""; try { _ownDevice = detectDeviceType(); } catch (e) {}
+      _presenceSource[myUid] = Object.assign({}, _presenceSource[myUid] || {}, {
+        name: onlineAccount.name, status: currentPresenceStatus(), lastActive: Date.now(), device: _ownDevice
+      });
     }
 
     // Dedupe: gleicher Name = ein Eintrag (eigene UID hat Vorrang, sonst der aktuellste)
     const _seen = new Map();
-    Object.entries(playersData)
+    Object.entries(_presenceSource)
       .map(([uid, p]) => ({ uid, ...p }))
       .filter(p =>
-        p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000 || _legacyOnline(p))
+        (p.uid === myUid && !!onlineAccount) || (p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000 || _legacyOnline(p)))
       )
       .forEach(p => {
         if (p.uid !== myUid && Date.now() - (p.lastActive || 0) >= 120000) { p.status = "Online"; p._ghost = true; }   // kein Lebenszeichen mehr (alte Version / Tab abgewuergt): echter Status unbekannt -> nichts Falsches anzeigen
@@ -2740,11 +2770,13 @@ function renderPresence(playersData) {
     const activeList = [..._seen.values()].sort(_ecmp);
 
     if (activeList.length === 0) {
-      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><br><span style='color:#888; font-size:12px;'>No other players online</span>";
+      panel._lastHtml = null; panel.innerHTML = "<b>🟢 Active Players:</b><div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div><br><span style='color:#888; font-size:12px;'>No other players online</span>";
       return;
     }
 
-    let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span><div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
+    let html = "<b>🟢 Active Players:</b><span style='float:right;font-size:12px;color:#00ff88;'><span>Total: </span><b>" + activeList.length + "</b></span>" +
+      "<div style='margin-top:7px;'><input id='playerProfileSearch' type='search' autocomplete='off' placeholder='🔎 Search players / profiles…' oninput='searchPlayerProfiles(this.value)' style='width:100%;box-sizing:border-box;margin:0;padding:7px 9px;font-size:12px;'><div id='playerProfileSearchResults'></div></div>" +
+      "<div style='margin-top: 8px; display:flex; flex-direction:column; gap:6px;'>";
     activeList.forEach(p => {
       const isMe = myUid && p.uid === myUid;
       const _dv = isMe ? (p.device || detectDeviceType()) : (p.device || "");   // nur ein wirklich gespeichertes Geraet zeigen, nichts raten
@@ -2758,7 +2790,7 @@ function renderPresence(playersData) {
       const _chBtn = (!isMe && onlineAccount && fbReady)
         ? (_pend
             ? `<button class="ch-btn" onclick="event.stopPropagation(); cancelChallenge('${escapeHtml(p.uid)}')" title="Cancel challenge">⏳</button>`
-            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); openChallengeModePicker('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Choose game mode to challenge')}">＋</button>`)
+            : `<button class="ch-btn${(_busy || _other) ? ' ch-busy' : ''}" ${(_busy || _other) ? 'disabled' : ''} onclick="event.stopPropagation(); openChallengeModePicker('${escapeHtml(p.uid)}')" title="${_other ? 'You already have an open challenge' : (_busy ? 'Currently in a match' : 'Choose game mode to challenge')}">⚔</button>`)
         : "";
       html += `
         <div style="font-size: 13px; display: flex; justify-content: space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; cursor:pointer;"
@@ -2788,7 +2820,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st === "Playing Minions" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -2897,6 +2929,12 @@ function startChallengeListener() {
     if (data) Object.entries(data).forEach(([uid, c]) => {
       if (!c || c.status !== "pending") return;
       if (!c.ts || Math.abs(now - c.ts) > 120000) { RPC.removeChallenge(myUid, uid).catch(() => {}); return; }   // alt/verwaist
+      // Keine Herausforderungen waehrend eines laufenden Spiels annehmen, einschliesslich Minions.
+      if (inMatchOrSurvival() || (onlineMatchId && !onlineResultHandled)) {
+        RPC.respondChallenge(uid, { name: onlineAccount.name, elo: onlineAccount.elo, ts: Date.now(), status: "declined" }).catch(() => {});
+        RPC.removeChallenge(myUid, uid).catch(() => {});
+        return;
+      }
       seen.add(uid);
       const prev = challengeIn.get(uid);
       if (!prev || prev.ts !== c.ts) challengeIn.set(uid, { ...c, recv: now });
@@ -3433,7 +3471,8 @@ async function sendChat() {
   if (!text) return;
   if (!onlineAccount) { updateChatLock(); return; }
   if (typeof _modChatBlock === "function" && _modChatBlock()) { _modChatLock(); return; }
-  if (!fbReady || Date.now() - lastChatSent < 1000) return;
+  if (!fbReady || !RPC || typeof RPC.sendChat !== "function") { inp.placeholder = "Chat is reconnecting… try again"; return; }
+  if (Date.now() - lastChatSent < 1000) return;
   const now = Date.now();
   chatSentTimes = chatSentTimes.filter(t => now - t < 10000);
   if (chatSentTimes.length >= 5) { inp.placeholder = "Slow down…"; return; }        // max. 5 Nachrichten / 10 s
@@ -3441,10 +3480,24 @@ async function sendChat() {
   if (!clean.trim()) return;
   if (clean === lastChatText && now - lastChatSent < 15000) return;                // gleiche Nachricht nicht wiederholen
   { const _f = chatFilterEx(clean); clean = _f.text; if (_f.hit) chatFilterNotice(); }
+  const previousPlaceholder = inp.placeholder;
   lastChatText = clean; chatSentTimes.push(now);
   lastChatSent = now;
   inp.value = "";
-  try { await RPC.sendChat(onlineAccount.name, clean); } catch(e) { console.warn("chat failed", e); if (/permission/i.test(String(e && (e.code || e.message || e)))) { inp.placeholder = "New accounts can chat after 2 hours"; } }
+  try {
+    await RPC.sendChat(onlineAccount.name, clean);
+    inp.placeholder = "Message…";
+  } catch(e) {
+    console.warn("chat failed", e);
+    // Restore the message so a temporary disconnect/rules error never eats it.
+    if (!inp.value) inp.value = clean;
+    lastChatSent = 0; lastChatText = "";
+    chatSentTimes = chatSentTimes.filter(t => t !== now);
+    const errText = String(e && (e.code || e.message) || e || "");
+    inp.placeholder = /permission/i.test(errText) ? "Chat locked: account must be 2 hours old" : "Send failed – message kept, try again";
+    inp.title = errText.slice(0, 180);
+    try { inp.focus(); } catch (x) {}
+  }
 }
 document.getElementById("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
 
@@ -4014,9 +4067,11 @@ function pendAdd(e) {
   a.push(e); _pendWrite(a);
 }
 function _saveErrText(e) {
-  let c = String((e && (e.code || e.message)) || e || "");
-  try { if (onlineAccount && window._dobAuth && !window._dobAuth.isPasswordAccount() && deviceHasAccount()) c = "session expired - log in again"; } catch (x) {}
-  return c.slice(0, 60);
+  // Preserve the actual Firebase/network error. A device account is not
+  // automatically an expired session; the old heuristic hid permission and
+  // connectivity errors behind a misleading "log in again" message.
+  const c = String((e && (e.code || e.message)) || e || "unknown save error");
+  return c.slice(0, 90);
 }
 async function _saveReady() {
   if (!onlineAccount) throw new Error("no account");
@@ -4281,7 +4336,10 @@ async function _endDaily(t, camped, rec) {
       }
     } else if (t > best) { isRecord = true; best = t; }
   } catch (e) {
-    saved = false; isRecord = false; window._lastSaveErr = _saveErrText(e); console.warn("daily save failed", e);
+    saved = false; window._lastSaveErr = _saveErrText(e); console.warn("daily save failed", e);
+    // The run itself is valid even if the network write failed. Keep the
+    // achieved time as the visible/local best and queue the cloud write.
+    if (t > best && t >= 1) { isRecord = true; best = t; }
     if (onlineAccount && t >= 1) { pendAdd({ type: "daily", name: onlineAccount.name, key, t, ch: _dailyRunIdx }); queuedD = true; }
   }
   try { if (isRecord) localStorage.setItem("dobDaily", JSON.stringify({ k: key, b: best })); } catch (e) {}
@@ -6291,6 +6349,12 @@ async function openOnlineProfile(uid) {
     }
     let svRec = 0, skRec = 0, mnRec = null;
     try { mnRec = await dbGet("minionsBoard/" + uid); } catch (e) {}
+    // The synthetic Online Bot keeps its Minions record inside players/{bot}
+    // because ordinary clients are only allowed to write their own minionsBoard row.
+    if (uid === ONLINE_BOT_UID && (!mnRec || !((Number(mnRec.wins)||0) + (Number(mnRec.losses)||0) + (Number(mnRec.draws)||0)))) {
+      mnRec = p.minionsStats || mnRec;
+      if (mnRec && mnRec.elo == null && p.minionsElo != null) mnRec.elo = Number(p.minionsElo);
+    }
     try {
       const [sv, sk] = await Promise.all([dbGet("survival/" + uid).catch(() => null), dbGet("streakBoard/" + uid).catch(() => null)]);
       svRec = (sv && Number(sv.time)) || 0; skRec = (sk && Number(sk.level)) || 0;
@@ -8344,7 +8408,13 @@ function botPostChatReply(userText) {
     botSay(r.text, 700);
     setTimeout(() => {
       const wo = document.getElementById("winnerOverlay");
-      if (tk === botChatToken && onlineVsBot && wo && wo.style.display !== "none") requestRematch();
+      if (tk !== botChatToken || !onlineVsBot || !wo || wo.style.display === "none") return;
+      if (mode === "minions" || (window.MN && typeof window.MN === "object")) {
+        // Minions has its own rematch flow; never route its chat shortcut
+        // into requestRematch(), which starts a regular DarkOnBalls match.
+        wo.style.display = "none";
+        try { startMinions(); } catch (e) { console.warn("Minions rematch failed", e); }
+      } else requestRematch();
     }, 1800);
   } else if (BOT_AI_URL && r.fallback) {
     // KI-Antwort (Proxy hält den API-Key); bei Fehler/Timeout -> normaler Spruch
@@ -13377,6 +13447,7 @@ function startMinions(net) {
   mnEndOverlay(null); mnMoveId = null;
   if (net) mnNetInit(net);
   running = true; startTime = Date.now();
+  try { syncPresence(true); } catch (e) {}
 }
 // ── ELO / Stats (minionsBoard/{uid}) ──
 const MN_BOT_ELO = 1500, MN_K = 24, MN_BOT_ELO_VERSION = 1;
@@ -13431,7 +13502,44 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       bestWinChange: _mnBestWin, bestWinOpp: _mnBestWinOpp, worstLossChange: _mnWorstLoss, worstLossOpp: _mnWorstLossOpp, eloHistory: _mnHist
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
-    if (!M.net && res !== -1) { try { const bd = Math.max(-10, Math.min(10, -d)); const botMinionsElo = Math.max(100, r1(Number(M.oppElo != null ? M.oppElo : MN_BOT_ELO) + bd)); await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", minionsElo: botMinionsElo, updatedAt: Date.now() }); } catch (e) { console.warn("minions bot elo", e); } }
+    if (!M.net) {
+      try {
+        // Mirror the result from the bot's point of view so its public profile
+        // has real Minions games, records and an independent ELO graph.
+        const botCur = (_botP && _botP.minionsStats) || {};
+        const botNum = k => Number(botCur[k]) || 0;
+        const botRes = res === 0 ? 1 : res === 1 ? 0 : -1;
+        const botOldElo = Number(M.oppElo != null ? M.oppElo : MN_BOT_ELO);
+        const botDelta = res === -1 ? 0 : Math.max(-10, Math.min(10, -d));
+        const botNewElo = Math.max(100, r1(botOldElo + botDelta));
+        const botWins = botNum("wins") + (botRes === 0 ? 1 : 0);
+        const botLosses = botNum("losses") + (botRes === 1 ? 1 : 0);
+        const botDraws = botNum("draws") + (botRes === -1 ? 1 : 0);
+        const botStreak = botRes === 0 ? botNum("curStreak") + 1 : 0;
+        const botHistory = Array.isArray(botCur.eloHistory) ? botCur.eloHistory.slice(-99) : [];
+        if (!botHistory.length) botHistory.push({ ts: Date.now() - 1, elo: botOldElo });
+        botHistory.push({ ts: Date.now(), elo: botNewElo });
+        const botBestWin = botRes === 0 && botDelta > botNum("bestWinChange") ? botDelta : botNum("bestWinChange");
+        const botBestWinOpp = botRes === 0 && botDelta > botNum("bestWinChange") ? dn(onlineAccount.name) : String(botCur.bestWinOpp || "");
+        const botWorstLoss = botRes === 1 && -botDelta > botNum("worstLossChange") ? -botDelta : botNum("worstLossChange");
+        const botWorstLossOpp = botRes === 1 && -botDelta > botNum("worstLossChange") ? dn(onlineAccount.name) : String(botCur.worstLossOpp || "");
+        const minionsStats = {
+          name: "Online Bot", elo: botNewElo,
+          highestElo: Math.max(botCur.highestElo != null ? botNum("highestElo") : botOldElo, botNewElo),
+          lowestElo: Math.min(botCur.lowestElo != null ? botNum("lowestElo") : botOldElo, botNewElo),
+          wins: botWins, losses: botLosses, draws: botDraws,
+          curStreak: botStreak, bestStreak: Math.max(botNum("bestStreak"), botStreak),
+          ballsSent: botNum("ballsSent"),
+          eloGained: botNum("eloGained") + Math.max(0, botDelta),
+          eloLost: botNum("eloLost") + Math.max(0, -botDelta),
+          bestWinChange: botBestWin, bestWinOpp: botBestWinOpp,
+          worstLossChange: botWorstLoss, worstLossOpp: botWorstLossOpp,
+          eloHistory: botHistory
+        };
+        const botSaved = await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", minionsElo: botNewElo, minionsEloVersion: MN_BOT_ELO_VERSION, minionsStats, updatedAt: Date.now() });
+        if (!botSaved) console.warn("Minions bot profile stats could not be saved.");
+      } catch (e) { console.warn("minions bot stats", e); }
+    }
     if (res === 0) leagueRecordWin().catch(e => console.warn("league win failed", e));
     const _oe = M.oppElo != null ? Math.round(M.oppElo) : MN_BOT_ELO;
     mnEloPanel([{ uid: myUid, name: dn(onlineAccount.name), delta: d, from: Math.round(e0), to: Math.round(e1) }, { uid: M.net ? M.net.opp.uid : null, name: dn(M.oppName || "Online Bot"), delta: -d, from: _oe, to: Math.max(0, _oe - d) }]);
