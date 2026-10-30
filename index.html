@@ -13348,7 +13348,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
     const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
     const g = k => Number(cur[k]) || 0;
     let _botP = null;
-    if (!M.net) { try { _botP = await dbGet("players/" + ONLINE_BOT_UID); if (_botP && _botP.elo != null) M.oppElo = Number(_botP.elo); } catch (e) {} }
+    if (!M.net) { try { _botP = await dbGet("players/" + ONLINE_BOT_UID); M.oppElo = (_botP && _botP.minionsElo != null) ? Number(_botP.minionsElo) : MN_BOT_ELO; } catch (e) { M.oppElo = MN_BOT_ELO; } }
     const e0 = cur.elo != null ? Number(cur.elo) : 1500;
     const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Online 1v1, erste 10 Spiele doppelt
     const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
@@ -13360,7 +13360,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d)
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
-    if (_botP && res !== -1) { try { const bd = Math.max(-10, Math.min(10, -d)); const be = Math.max(100, r1(Number(_botP.elo) - 0 + bd)); await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", elo: be, updatedAt: Date.now() }); onlineBotElo = be; localStorage.setItem("onlineBotElo", be); } catch (e) { console.warn("bot elo", e); } }
+    if (!M.net && res !== -1) { try { const bd = Math.max(-10, Math.min(10, -d)); const botMinionsElo = Math.max(100, r1(Number(M.oppElo != null ? M.oppElo : MN_BOT_ELO) + bd)); await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", minionsElo: botMinionsElo, updatedAt: Date.now() }); } catch (e) { console.warn("minions bot elo", e); } }
     if (res === 0) leagueRecordWin().catch(e => console.warn("league win failed", e));
     const _oe = M.oppElo != null ? Math.round(M.oppElo) : MN_BOT_ELO;
     mnEloPanel([{ uid: myUid, name: dn(onlineAccount.name), delta: d, from: Math.round(e0), to: Math.round(e1) }, { uid: M.net ? M.net.opp.uid : null, name: dn(M.oppName || "Online Bot"), delta: -d, from: _oe, to: Math.max(0, _oe - d) }]);
@@ -16267,24 +16267,6 @@ async function modDeleteChatMsg(key) {
     b.onclick = () => window.modBroadcastReload();
     bar.appendChild(b);
   }
-  function botResetBtn() {
-    const ex = document.getElementById("botResetBtn");
-    if (!isAdmin()) { if (ex) ex.remove(); return; }
-    if (ex || typeof _adminBar !== "function") return;
-    const bar = _adminBar(); if (!bar) return;
-    const b = document.createElement("button"); b.id = "botResetBtn"; b.textContent = "🤖 Bot-Spiele resetten";
-    b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
-    b.onclick = async () => {
-      const v = prompt("Spiele gegen den Online Bot zuruecksetzen.\nAb welchem Datum? (JJJJ-MM-TT, leer = ALLE)", "");
-      if (v === null) return;
-      let since = 0; if (v.trim()) { since = Date.parse(v.trim()); if (!isFinite(since)) { alert("Ungueltiges Datum"); return; } }
-      if (!confirm("Wirklich ALLE Bot-Spiele " + (since ? "ab " + v.trim() : "(komplett)") + " zuruecksetzen? Die ELO jedes Spielers wird entsprechend korrigiert.")) return;
-      try { const r = await window._dobRPC.modResetBotGames(since); alert("Fertig: " + r.players + " Spieler, " + r.games + " Spiele zurueckgesetzt."); }
-      catch (e) { alert("Fehlgeschlagen: " + (e && e.message)); }
-    };
-    bar.appendChild(b);
-  }
-  setInterval(botResetBtn, 3000);
   setInterval(adminBtn, 3000);
 })();
 </script>
