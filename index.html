@@ -764,7 +764,7 @@ body.mode-minions #ui{display:none !important;}
   h1{font-size:34px;margin-bottom:14px;}
 }
 body.ingame::before,body.ingame::after{display:none;}
-body.mode-online #homeBtn{display:none!important;}
+body.mode-online #homeBtn,body.mode-minions #homeBtn{display:none!important;}
 body.mode-tv #homeBtn{left:10px;top:calc(10px + env(safe-area-inset-top,0px));transform:none;padding:5px 12px;font-size:11px;}
 body.mode-tv #homeBtn:hover{transform:none;}
 #streakOverlay{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:900;text-align:center;pointer-events:none;font-family:var(--font-display,sans-serif);color:#fff;text-shadow:0 4px 24px rgba(0,0,0,.7);}
@@ -787,6 +787,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
 #challengeBox .ch-elo b{color:#ffd700;} #challengeBox .ch-elo i{font-style:normal;color:#00e0ff;margin-left:8px;}
 #challengeBox .ch-yes,#challengeBox .ch-no{width:48px;height:48px;border-radius:50%;border:2px solid;font-size:24px;line-height:1;cursor:pointer;background:transparent;flex:none;}
 #challengeBox .ch-yes{border-color:#00e676;color:#00e676;} #challengeBox .ch-yes:hover{background:rgba(0,230,118,.2);}
+#challengeBox .ch-mn{width:48px;height:48px;border-radius:50%;border:2px solid #ffd700;color:#ffd700;font-size:22px;line-height:1;cursor:pointer;background:rgba(0,0,0,.35);} #challengeBox .ch-mn:hover{background:rgba(255,215,0,.2);}
 #challengeBox .ch-no{border-color:#ff4455;color:#ff4455;} #challengeBox .ch-no:hover{background:rgba(255,68,85,.2);}
 #challengeBox .ch-bar{height:3px;margin-top:10px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;}
 #challengeBox .ch-bar i{display:block;height:100%;background:#ffd700;width:100%;}
@@ -2007,6 +2008,33 @@ async function rpcLogEloGame(key, data) {
 }
 // Ban: ELO aller Gegner des Gebannten korrigieren (Sieg gegen ihn -> ELO zurueck weg, Niederlage -> ELO zurueck) + Online-Bot
 // + Hinweis an jeden betroffenen Spieler (sanctions/{uid}/banRefunds). Idempotent: verarbeitete Eintraege werden geloescht.
+// Admin: ALLE protokollierten Spiele gegen den Online Bot zuruecksetzen (ELO-Aenderung jedes Spielers wird rueckgaengig gemacht). sinceTs = nur Spiele ab diesem Zeitpunkt (0 = alle). Idempotent (Log-Eintraege werden geloescht).
+async function rpcModResetBotGames(sinceTs) {
+  requireAdmin();
+  const BOT = "bot__online_bot", since = Number(sinceTs) || 0;
+  const snap = await get(query(ref(db, "eloGames"), orderByChild("b"), equalTo(BOT)));
+  const sum = {}, cnt = {}, del = {};
+  snap.forEach(ch => {
+    const g = ch.val() || {};
+    if (!g.a || g.a === BOT || (since && (Number(g.ts) || 0) < since)) return;
+    del["eloGames/" + ch.key] = null;
+    sum[g.a] = (sum[g.a] || 0) - (Number(g.d) || 0);
+    cnt[g.a] = (cnt[g.a] || 0) + 1;
+  });
+  const uids = Object.keys(sum), up = {};
+  const sn = await Promise.all(uids.map(async u => { try { return (await get(ref(db, "players/" + u))).val(); } catch (e) { return null; } }));
+  let changed = 0;
+  uids.forEach((u, i) => {
+    const pl = sn[i]; if (!pl || typeof pl.elo !== "number") return;
+    const ne = Math.max(100, Math.round((pl.elo + sum[u]) * 10) / 10);
+    up["players/" + u + "/elo"] = ne;
+    if (typeof pl.highestElo === "number" && ne > pl.highestElo) up["players/" + u + "/highestElo"] = ne;
+    if (typeof pl.lowestElo === "number" && ne < pl.lowestElo) up["players/" + u + "/lowestElo"] = ne;
+    changed++;
+  });
+  await update(ref(db), Object.assign(up, del));
+  return { players: changed, games: Object.keys(del).length };
+}
 async function rpcModBanEloRefund(bannedUid) {
   requireAdmin();
   bannedUid = String(bannedUid || "");
@@ -2378,7 +2406,7 @@ window._dobRPC = {
   setArenaEntry: rpcSetArenaEntry,
   modBroadcastReload: rpcModBroadcastReload,
   saveSurvival: rpcSaveSurvival, saveDaily: rpcSaveDaily, modDeleteAllDaily: rpcModDeleteAllDaily, modDeleteDailyRun: rpcModDeleteDailyRun, modSetDailyPick: rpcModSetDailyPick, claimDailyWin: rpcClaimDailyWin, saveDailyReplay: rpcSaveDailyReplay, removeDailyReplay: rpcRemoveDailyReplay, removeOwnDailyReplays: rpcRemoveOwnDailyReplays, removeOwnSurvivalReplay: rpcRemoveOwnSurvivalReplay, modShallowKeys: rpcModShallowKeys, modDeleteReplayPaths: rpcModDeleteReplayPaths, setTvViewing: rpcSetTvViewing, clearTvViewing: rpcClearTvViewing, setSurvivalLive: rpcSetSurvivalLive, setLiveBeat: rpcSetLiveBeat, armSurvivalLiveDisconnect: rpcArmSurvivalLiveDisconnect, removeSurvivalLive: rpcRemoveSurvivalLive, renameLeagueEntry: rpcRenameLeagueEntry, renameChatMessages: rpcRenameChatMessages,
-  modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modYoutubeLinkAccount: rpcModYoutubeLinkAccount, modYoutubeSetShown: rpcModYoutubeSetShown, modYoutubeUnlink: rpcModYoutubeUnlink, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
+  modResetBotGames: rpcModResetBotGames, modSetSanction: rpcModSetSanction, modClearSanction: rpcModClearSanction, modDeleteChat: rpcModDeleteChat, modDeleteIdleChat: rpcModDeleteIdleChat, modDeleteChatOf: rpcModDeleteChatOf, modSetChatBan: rpcModSetChatBan, modRename: rpcModRename, modPurgeUser: rpcModPurgeUser, modBanEloRefund: rpcModBanEloRefund, logEloGame: rpcLogEloGame, modApplyLeague: rpcModApplyLeague, modApplyDailyWins: rpcModApplyDailyWins, modSetDailyWin: rpcModSetDailyWin, modSetBonusWins: rpcModSetBonusWins, modSetPatron: rpcModSetPatron, modRemoveIdle: rpcModRemoveIdle, youtubeSubmit: rpcYoutubeSubmit, twitchSubmit: rpcTwitchSubmit, twitchRemoveOwn: rpcTwitchRemoveOwn, modTwitchApprove: rpcModTwitchApprove, modTwitchReject: rpcModTwitchReject, youtubeRemoveOwn: rpcYoutubeRemoveOwn, modYoutubeApprove: rpcModYoutubeApprove, modYoutubeReject: rpcModYoutubeReject, modYoutubeLinkAccount: rpcModYoutubeLinkAccount, modYoutubeSetShown: rpcModYoutubeSetShown, modYoutubeUnlink: rpcModYoutubeUnlink, modRemoveLive: rpcModRemoveLive, modSetIdle: rpcModSetIdle, modDeleteRecords: rpcModDeleteRecords, modRestoreUser: rpcModRestoreUser,
   newsPush: rpcNewsPush, newsRemove: rpcNewsRemove, newsReact: rpcNewsReact,
   bugReportSend: rpcBugReportSend, modBugReply: rpcModBugReply, modBugRemove: rpcModBugRemove,
   myUid, requireUid,
@@ -2812,6 +2840,11 @@ async function challengePlayer(targetUid) {
       try {
         const md = await RPC.getMatch(d.matchId);
         if (!md) return;
+        if (d.game === "minions") {
+          let oe = 1500; try { const r = await RPC.get("minionsBoard/" + targetUid); if (r && r.elo != null) oe = Math.round(r.elo); } catch (e) {}
+          startMinions({ matchId: d.matchId, opp: { uid: targetUid, name: d.name || tname, elo: oe } });
+          return;
+        }
         challengePrepareForMatch();
         joinMatch(d.matchId, { uid: targetUid, name: d.name || tname, elo: d.elo }, md);
       } catch (e) { console.warn("challenge join failed", e); }
@@ -2870,12 +2903,13 @@ function renderChallengeBox() {
     box = document.createElement("div");
     box.id = "challengeBox";
     box.innerHTML = '<div class="ch-title"></div><div class="ch-row"><div class="ch-info"><div class="ch-name"></div><div class="ch-elo"><b></b><i></i></div></div>' +
-      '<button class="ch-yes" title="Accept">✓</button><button class="ch-no" title="Decline">✗</button></div><div class="ch-bar"><i></i></div>';
+      '<button class="ch-yes" title="Normal 1v1">✓</button><button class="ch-mn" title="Minions">⚔️</button><button class="ch-no" title="Decline">✗</button></div><div class="ch-bar"><i></i></div>';
     box.querySelector(".ch-title").textContent = "⚔ " + tr("1v1 CHALLENGE");
     box.querySelector(".ch-name").textContent = dn(name);
     box.querySelector(".ch-elo b").textContent = "ELO " + elo;
     box.querySelector(".ch-elo i").textContent = rank ? "#" + rank : "";
     box.querySelector(".ch-yes").addEventListener("click", () => acceptChallenge(pick.k));
+    box.querySelector(".ch-mn").addEventListener("click", () => acceptChallenge(pick.k, "minions"));
     box.querySelector(".ch-no").addEventListener("click", () => declineChallenge(pick.k));
     document.body.appendChild(box);
     challengeShown = pick.k + ":" + pick.c.ts;
@@ -2893,11 +2927,27 @@ async function declineChallenge(fromUid) {
   setTimeout(() => RPC.removeChallenge(myUid, fromUid).catch(() => {}), 8000);
 }
 
-async function acceptChallenge(fromUid) {
+async function acceptChallenge(fromUid, game) {
   const c = challengeIn.get(fromUid);
   if (!c || !myUid || !onlineAccount) return;
   if (inMatchOrSurvival() || onlineMatchId && !onlineResultHandled) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  if (game === "minions" && mnLocked()) { challengeToast("🔒 Minions is still locked", "#ffcc66"); return; }
   challengeIn.delete(fromUid); hideChallengeBox();
+  if (game === "minions") {
+    try {
+      const matchId = [myUid, fromUid].sort().join("__MN__");
+      const isP1 = myUid < fromUid;
+      const live = (window._lastPlayersData || {})[fromUid] || {};
+      const oppName = live.name || c.name;
+      const bg = async u => { try { const r = await RPC.get("minionsBoard/" + u); return r && r.elo != null ? Math.round(r.elo) : 1500; } catch (e) { return 1500; } };
+      const [myE, oppE] = await Promise.all([bg(myUid), bg(fromUid)]);
+      await RPC.createMatch(matchId, { p1uid: isP1 ? myUid : fromUid, p2uid: isP1 ? fromUid : myUid, p1: isP1 ? onlineAccount.name : oppName, p2: isP1 ? oppName : onlineAccount.name, status: "mn", game: "minions", createdAt: Date.now() });
+      await RPC.respondChallenge(fromUid, { name: onlineAccount.name, elo: myE, ts: Date.now(), status: "accepted", matchId, game: "minions" });
+      setTimeout(() => RPC.removeChallenge(myUid, fromUid).catch(() => {}), 20000);
+      startMinions({ matchId, opp: { uid: fromUid, name: oppName, elo: oppE } });
+    } catch (e) { console.warn("accept minions challenge failed", e); challengeToast("Could not start the match", "#ff4444"); }
+    return;
+  }
   try {
     const matchId = [myUid, fromUid].sort().join("__VS__");
     const existing = await RPC.getMatch(matchId);
@@ -7928,6 +7978,11 @@ async function handleOnlineResult(winnerName, change) {
     onlineOpponent.elo = r1(won ? Math.max(100, onlineOpponent.elo - oppEloChange) : onlineOpponent.elo + oppEloChange);
   }
   logEloGame(oppUid, r1(onlineAccount.elo - myOldExact), onlineVsBot);
+  if (onlineVsBot && onlineOpponent && fbReady) {   // Bot-Elo SOFORT schreiben (vor allen anderen awaits), damit Reload/Schliessen sie nicht verhindert -> kein Bot-Farmen
+    const _be = r1(won ? Math.max(100, Number(onlineOpponent.elo) - oppEloChange) : Number(onlineOpponent.elo) + oppEloChange);
+    onlineBotElo = _be; try { localStorage.setItem("onlineBotElo", _be); } catch (e) {}
+    for (let _t = 0; _t < 3; _t++) { try { if (await dbSetBotPlayer({ name: "Online Bot", elo: _be, updatedAt: Date.now() })) break; await new Promise(r => setTimeout(r, 800)); } catch (e) { console.warn("bot elo write failed", e && (e.code || e.message)); await new Promise(r => setTimeout(r, 800)); } }
+  }
   if (onlineArenaId) { arenaRecordResult(onlineArenaId, won, oppOriginalElo, oppUid); if (onlineVsBot) arenaRecordBot(onlineArenaId, !won, myOriginalElo, myUid); }
   saveAccountLocal();
   updateAccountBtn();
@@ -8049,8 +8104,10 @@ async function dbSetBotPlayer(data) {
     const { getDatabase } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
     const db = getDatabase(dbInst);
     await update(ref(db, "players/" + ONLINE_BOT_UID), data);   // update statt set: Survival-/Daily-/Streak-Stats, Zaehler und Lease des Bots bleiben erhalten
+    return true;
   } catch(e) {
     console.warn("Bot stat write failed (expected if Rules restrict it):", e);
+    return false;
   }
 }
 
@@ -13290,6 +13347,8 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
   try {
     const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
     const g = k => Number(cur[k]) || 0;
+    let _botP = null;
+    if (!M.net) { try { _botP = await dbGet("players/" + ONLINE_BOT_UID); if (_botP && _botP.elo != null) M.oppElo = Number(_botP.elo); } catch (e) {} }
     const e0 = cur.elo != null ? Number(cur.elo) : 1500;
     const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Online 1v1, erste 10 Spiele doppelt
     const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
@@ -13301,6 +13360,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       eloGained: g("eloGained") + Math.max(0, d), eloLost: g("eloLost") + Math.max(0, -d)
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
+    if (_botP && res !== -1) { try { const bd = Math.max(-10, Math.min(10, -d)); const be = Math.max(100, r1(Number(_botP.elo) - 0 + bd)); await dbSetBotPlayer({ uid: ONLINE_BOT_UID, name: "Online Bot", elo: be, updatedAt: Date.now() }); onlineBotElo = be; localStorage.setItem("onlineBotElo", be); } catch (e) { console.warn("bot elo", e); } }
     if (res === 0) leagueRecordWin().catch(e => console.warn("league win failed", e));
     const _oe = M.oppElo != null ? Math.round(M.oppElo) : MN_BOT_ELO;
     mnEloPanel([{ uid: myUid, name: dn(onlineAccount.name), delta: d, from: Math.round(e0), to: Math.round(e1) }, { uid: M.net ? M.net.opp.uid : null, name: dn(M.oppName || "Online Bot"), delta: -d, from: _oe, to: Math.max(0, _oe - d) }]);
@@ -13406,6 +13466,7 @@ function mnEndOverlay(txt) {
     }
   }
   mk("🔍 New Opponent", () => { o.style.display = "none"; mnPostLeave(); openMinions(); });
+  mk("🏠 Home", () => { o.style.display = "none"; mnPostLeave(); exitToMenu(); });
   o.style.display = "flex";
 }
 
@@ -16206,6 +16267,24 @@ async function modDeleteChatMsg(key) {
     b.onclick = () => window.modBroadcastReload();
     bar.appendChild(b);
   }
+  function botResetBtn() {
+    const ex = document.getElementById("botResetBtn");
+    if (!isAdmin()) { if (ex) ex.remove(); return; }
+    if (ex || typeof _adminBar !== "function") return;
+    const bar = _adminBar(); if (!bar) return;
+    const b = document.createElement("button"); b.id = "botResetBtn"; b.textContent = "🤖 Bot-Spiele resetten";
+    b.style.cssText = "position:static;margin:0;padding:8px 16px;font-size:14px;white-space:nowrap;";
+    b.onclick = async () => {
+      const v = prompt("Spiele gegen den Online Bot zuruecksetzen.\nAb welchem Datum? (JJJJ-MM-TT, leer = ALLE)", "");
+      if (v === null) return;
+      let since = 0; if (v.trim()) { since = Date.parse(v.trim()); if (!isFinite(since)) { alert("Ungueltiges Datum"); return; } }
+      if (!confirm("Wirklich ALLE Bot-Spiele " + (since ? "ab " + v.trim() : "(komplett)") + " zuruecksetzen? Die ELO jedes Spielers wird entsprechend korrigiert.")) return;
+      try { const r = await window._dobRPC.modResetBotGames(since); alert("Fertig: " + r.players + " Spieler, " + r.games + " Spiele zurueckgesetzt."); }
+      catch (e) { alert("Fehlgeschlagen: " + (e && e.message)); }
+    };
+    bar.appendChild(b);
+  }
+  setInterval(botResetBtn, 3000);
   setInterval(adminBtn, 3000);
 })();
 </script>
