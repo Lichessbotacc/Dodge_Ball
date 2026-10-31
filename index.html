@@ -994,8 +994,8 @@ body.mode-tv #homeBtn:hover{transform:none;}
           </div>
         </div>
         <div id="menuOnline" class="menuPage">
-          <button onclick="showScreen('onlineFlow')">⚔️ Online 1v1</button>
-          <button id="minionsBtn" onclick="openMinions()">⚔️ Minions</button>
+          <button id="onlineBtn" onclick="showScreen('onlineFlow')">⚔️ Survival 1vs1</button>
+          <button id="minionsBtn" onclick="openMinions()">⚔️ Minions 1vs1</button>
           <button id="dailyBtn" onclick="startDaily()">📅 Daily Challenge</button>
           <button onclick="startStreak()">🔥 Streaks</button>
           <button onclick="startSurvival()">🏝 Survival</button>
@@ -1116,10 +1116,10 @@ body.mode-tv #homeBtn:hover{transform:none;}
     <div id="leaderboardScreen">
       <h2>🏆 Online Leaderboard</h2>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">ELO</button>
+        <button id="lbTabElo" onclick="lbShowTab('elo')" style="margin:0;padding:8px 18px;font-size:14px;">🎮 Survival 1vs1</button>
         <button id="lbTabSurv" onclick="lbShowTab('surv')" style="margin:0;padding:8px 18px;font-size:14px;">🏝 Survival</button>
         <button id="lbTabStreak" onclick="lbShowTab('streak')" style="margin:0;padding:8px 18px;font-size:14px;">🔥 Streaks</button>
-        <button id="lbTabMinions" onclick="lbShowTab('minions')" style="margin:0;padding:8px 18px;font-size:14px;">⚔️ Minions</button>
+        <button id="lbTabMinions" onclick="lbShowTab('minions')" style="margin:0;padding:8px 18px;font-size:14px;">⚔️ Minions 1vs1</button>
         <button id="lbTabIdle" onclick="lbShowTab('idle')" style="margin:0;padding:8px 18px;font-size:14px;">💰 Idle</button>
         <button id="lbTabDaily" onclick="lbShowTab('daily')" style="margin:0;padding:8px 18px;font-size:14px;">📅 Daily</button>
         <button id="lbTabDailyWins" onclick="lbShowTab('dwins')" style="margin:0;padding:8px 18px;font-size:14px;">👑 Daily Wins</button>
@@ -1138,7 +1138,7 @@ body.mode-tv #homeBtn:hover{transform:none;}
     </div>
 
     <div id="onlineWait">
-      <h2>🌐 Online 1v1</h2>
+      <h2>🌐 Survival 1vs1</h2>
       <div id="onlineStatus">Looking for an opponent…</div>
       <div id="onlineSearchAnim" style="font-size:40px;margin:10px 0;">⏳</div>
       <div id="botHint" style="font-size:12px;opacity:0.65;max-width:300px;text-align:center;line-height:1.5;margin-bottom:8px;">After 10 seconds you can choose to play against the Online Bot.</div>
@@ -2855,7 +2855,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st.indexOf("Playing Minions") === 0 || st.indexOf("Playing 1vs1") === 0 || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st.indexOf("Playing Minions") === 0 || st.indexOf("Playing Survival 1vs1") === 0 || st.indexOf("Playing 1vs1") === 0 || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -2891,7 +2891,7 @@ function openChallengeModePicker(targetUid) {
   if (challengeOut.size > 0) { challengeToast("You already have an open challenge", "#ff8844"); return; }
   closeChallengeModePicker();
   const overlay = document.createElement("div"); overlay.id = "challengeModePicker";
-  overlay.innerHTML = '<div class="cmp-card"><h3>CHOOSE GAME MODE</h3><p>Which game do you want to challenge this player to?</p><div class="cmp-actions"><button data-game="online1v1">⚔ ONLINE 1v1</button><button data-game="minions">👾 MINIONS</button><button class="cmp-cancel">CANCEL</button></div></div>';
+  overlay.innerHTML = '<div class="cmp-card"><h3>CHOOSE GAME MODE</h3><p>Which game do you want to challenge this player to?</p><div class="cmp-actions"><button data-game="online1v1">⚔ SURVIVAL 1vs1</button><button data-game="minions">👾 MINIONS 1vs1</button><button class="cmp-cancel">CANCEL</button></div></div>';
   overlay.addEventListener("click", e => { if (e.target === overlay) closeChallengeModePicker(); });
   overlay.querySelectorAll("button[data-game]").forEach(btn => btn.addEventListener("click", () => { const game = btn.dataset.game; closeChallengeModePicker(); challengePlayer(targetUid, game); }));
   overlay.querySelector(".cmp-cancel").addEventListener("click", closeChallengeModePicker);
@@ -2903,7 +2903,7 @@ async function challengePlayer(targetUid, game) {
   if (!fbReady || !myUid || !onlineAccount) { challengeToast("Log in to challenge players", "#ff8844"); return; }
   if (!targetUid || targetUid === myUid) return;
   game = game === "minions" ? "minions" : "online1v1";
-  if (game === "minions" && mnLocked()) { challengeToast("Minions is still locked", "#ffcc66"); return; }
+  if (game === "minions" && mnLocked()) { challengeToast("Minions 1vs1 is still locked", "#ffcc66"); return; }
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
   if (challengeOut.size > 0) { challengeToast("You already have an open challenge", "#ff8844"); return; }
   const now = Date.now();
@@ -3009,7 +3009,7 @@ function renderChallengeBox() {
       '<button class="ch-yes" title="Accept challenge">✓</button><button class="ch-no" title="Decline challenge">✗</button></div><div class="ch-bar"><i></i></div>';
     box.querySelector(".ch-title").textContent = "⚔ " + tr("CHALLENGE RECEIVED");
     box.querySelector(".ch-name").textContent = dn(name);
-    box.querySelector(".ch-mode").textContent = incomingGame === "minions" ? "GAME MODE: MINIONS" : "GAME MODE: ONLINE 1v1";
+    box.querySelector(".ch-mode").textContent = incomingGame === "minions" ? "GAME MODE: MINIONS 1vs1" : "GAME MODE: SURVIVAL 1vs1";
     box.querySelector(".ch-elo b").textContent = "ELO " + elo;
     box.querySelector(".ch-elo i").textContent = rank ? "#" + rank : "";
     box.querySelector(".ch-yes").addEventListener("click", () => acceptChallenge(pick.k));
@@ -3035,7 +3035,7 @@ async function acceptChallenge(fromUid, game) {
   game = game || (c && c.game === "minions" ? "minions" : "online1v1");
   if (!c || !myUid || !onlineAccount) return;
   if (inMatchOrSurvival() || onlineMatchId && !onlineResultHandled) { challengeToast("You are in a match right now", "#ff8844"); return; }
-  if (game === "minions" && mnLocked()) { challengeToast("🔒 Minions is still locked", "#ffcc66"); return; }
+  if (game === "minions" && mnLocked()) { challengeToast("🔒 Minions 1vs1 is still locked", "#ffcc66"); return; }
   challengeIn.delete(fromUid); hideChallengeBox();
   if (game === "minions") {
     try {
@@ -3560,7 +3560,7 @@ function escapeHtml(v) {
 // Presence: der Status wird bei JEDER Änderung (Menü, Suche, Match, TV, Offline-Modus) sofort geschrieben
 // (Prüfung alle 2s) und zusätzlich alle 30s als Heartbeat, damit der Eintrag nicht nach 2 Min verschwindet.
 function currentPresenceStatus() {
-  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks", minions: "Minions" };
+  const modeNames = { single: "Singleplayer", multi: "Local Multiplayer", ai: "AI Spectate", tournament: "Tournament", coin: "Coin Hunt", streak: "Streaks", minions: "Minions 1vs1" };
   try {
     if (window.__idleOpen) return "Idle Brick Breaker";
     if (document.hidden && (survivalActive || (mode === "streak" && document.body.classList.contains("ingame")))) return "Idle in Menu";
@@ -3570,18 +3570,18 @@ function currentPresenceStatus() {
     if (_m && _m.style.display === "flex") return "Idle in Menu";
     if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streaks";
     if (mode === "minions" && (running || (typeof MN !== "undefined" && MN && MN.phase === "play"))) {
-      return "Playing Minions vs " + ((typeof MN !== "undefined" && MN && MN.oppName) || "Online Bot");
+      return "Playing Minions 1vs1 vs " + ((typeof MN !== "undefined" && MN && MN.oppName) || "Online Bot");
     }
     if (running && !(mode === "online" && onlineResultHandled)) {
       if (mode === "online") {
-        if (onlineVsBot) return "Playing 1vs1 vs Online Bot";
-        return onlineOpponent && onlineOpponent.name ? "Playing 1vs1 vs " + onlineOpponent.name : "Playing 1vs1";
+        if (onlineVsBot) return "Playing Survival 1vs1 vs Online Bot";
+        return onlineOpponent && onlineOpponent.name ? "Playing Survival 1vs1 vs " + onlineOpponent.name : "Playing Survival 1vs1";
       }
       if (mode === "online_tv") return "Watching Online TV";
       return "Playing " + (modeNames[mode] || mode);
     }
     // VS-Screen vor dem Start zaehlt noch als Match; nach dem Ergebnis (onlineResultHandled) nicht mehr
-    if (onlineMatchId && !onlineResultHandled) return onlineVsBot ? "Playing 1vs1 vs Online Bot" : (onlineOpponent && onlineOpponent.name ? "Playing 1vs1 vs " + onlineOpponent.name : "Playing 1vs1");
+    if (onlineMatchId && !onlineResultHandled) return onlineVsBot ? "Playing Survival 1vs1 vs Online Bot" : (onlineOpponent && onlineOpponent.name ? "Playing Survival 1vs1 vs " + onlineOpponent.name : "Playing Survival 1vs1");
     if (onlineSearchInterval) return "Searching for match";
   } catch (e) {}
   return "Idle in Menu";
@@ -4593,7 +4593,7 @@ async function loadMinionsBoard() {
       .filter(r => r.w + r.l + r.d > 0)
       .sort((a, b) => b.elo - a.elo || b.w - a.w || a.ts - b.ts)
       .slice(0, 100);
-    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No Minions games yet</span></div>'; return; }
+    if (!rows.length) { t.innerHTML += '<div class="lb-row"><span style="grid-column: span 4; text-align: center;">No Minions 1vs1 games yet</span></div>'; return; }
     t.innerHTML += rows.map((r, i) => `<div class="lb-row${myUid && r.uid === myUid ? " lb-me" : ""}" style="cursor:pointer;" onclick="openOnlineProfile('${escapeHtml(r.uid)}')">
       <span>#${i + 1}</span><span>${escapeHtml(dn(r.name))}</span><span>${r.elo}</span><span>${r.w}W/${r.l}L</span></div>`).join("");
   } catch (e) { if (my === _lbToken) _lbErr(t, head); }
@@ -6366,7 +6366,7 @@ function minionsEloGraphHtml(rec) {
     const vals = (rec && Array.isArray(rec.eloHistory) ? rec.eloHistory : []).filter(x => x && Number.isFinite(Number(x.elo))).map(x => Math.round(Number(x.elo)));
     const cur = rec && rec.elo != null ? Math.round(Number(rec.elo)) : NaN;
     if (vals.length && Number.isFinite(cur) && vals[vals.length - 1] !== cur) vals.push(cur);   // Graph endet immer bei der aktuellen ELO
-    if (vals.length < 2) return '<div style="font-size:11px;opacity:.6;margin-top:6px;">Minions ELO graph appears after your next match.</div>';
+    if (vals.length < 2) return '<div style="font-size:11px;opacity:.6;margin-top:6px;">Minions 1vs1 ELO graph appears after your next match.</div>';
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const rh = Math.round(Number(rec.highestElo)), rl = Math.round(Number(rec.lowestElo));
     if (Number.isFinite(rh) && rh > 0) hi = Math.max(hi, rh);   // Skala passt zu Highest / Lowest Elo oben
@@ -6376,7 +6376,7 @@ function minionsEloGraphHtml(rec) {
     const y = v => (H - PY - (v - lo) * (H - 2 * PY) / span);
     const pts = vals.map((v, i) => (PX + i * (W - 2 * PX) / (vals.length - 1)).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
     const guide = (v, dy) => '<line x1="0" x2="' + W + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '" stroke="currentColor" stroke-opacity=".18" stroke-dasharray="3 3"/><text x="' + (W - 2) + '" y="' + (y(v) + dy).toFixed(1) + '" text-anchor="end" font-size="9" fill="currentColor" fill-opacity=".65">' + v + '</text>';
-    return '<div style="margin-top:8px;"><svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:320px;height:auto;display:block;" role="img" aria-label="Minions ELO history, all time">' + guide(hi, -3) + guide(lo, 10) +
+    return '<div style="margin-top:8px;"><svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:320px;height:auto;display:block;" role="img" aria-label="Minions 1vs1 ELO history, all time">' + guide(hi, -3) + guide(lo, 10) +
       '<polyline fill="none" stroke="#b66cff" stroke-width="2" stroke-linejoin="round" points="' + pts + '"/></svg>' +
       '<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.7;max-width:320px;"><span>Start ' + vals[0] + '</span><span>All time' + (games ? ' · ' + games + ' games' : '') + '</span><span>Now ' + vals[vals.length - 1] + '</span></div></div>';
   } catch (e) { return ''; }
@@ -6443,10 +6443,10 @@ async function openOnlineProfile(uid) {
         </div>
         <div class="pr">
           <div><h4>GAMES</h4>${R("Total Games", totalGames)}${G("Wins", wins)}${B("Losses", losses)}${R("Winrate", winrate + "%")}${R("Joined", p.createdAt && isFinite(Number(p.createdAt)) ? new Date(Number(p.createdAt)).toLocaleDateString() : "–")}</div>
-          <div><h4>ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
+          <div><h4>SURVIVAL 1vs1 ELO</h4>${G("Highest Elo", Math.round(p.highestElo ?? p.elo))}${B("Lowest Elo", Math.round(p.lowestElo ?? p.elo))}${G("Total Elo Won", "+" + fmtElo(p.totalEloGained ?? 0))}${B("Total Elo Lost", "-" + fmtElo(p.totalEloLost ?? 0))}${uid === myUid ? eloGraphHtml() : ""}</div>
           <div><h4>STREAKS &amp; RECORDS</h4>${R("Longest Winstreaks", p.bestStreak ?? 0)}${R("Current Winstreaks", p.currentStreak ?? 0)}${G("Best Win", `vs ${_oppEloText(p.bestWinChange, p.bestWinOpp)}`)}${B("Worst Loss", `vs ${_oppEloText(p.worstLossChange, p.worstLossOpp)}`)}</div>
           <div><h4>MODES</h4>${G("Elo", Math.round(p.elo) + rk.elo)}${G("🏝 Survival Record", svRec > 0 ? survFmt(svRec) + rk.surv : "–")}${R("🏝 Survival Runs", Math.max(p.survPlayed ?? 0, svRec > 0 ? 1 : 0))}${R("Daily Runs", p.dailyPlayed ?? 0)}${G("🔥 Streaks Record", skRec > 0 ? skRec + rk.streak : "–")}${R("🔥 Streaks Runs", Math.max(p.streakPlayed ?? 0, skRec > 0 ? 1 : 0))}${R("👑 Daily Challenge Wins", dailyWinsN + (dailyWinsN > 0 ? rk.dw : ""))}${G("🧱 Idle", rk.idleTotal > 0 ? "$" + idleFmt(rk.idleTotal) + rk.idle : "–")}</div>
-        <div><h4>⚔️ MINIONS</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + R("Lowest Elo", Math.round(mnRec.lowestElo ?? mnRec.elo ?? 1500)) + G("Best Win", `vs ${_oppEloText(mnRec.bestWinChange, mnRec.bestWinOpp)}`) + B("Worst Loss", `vs ${_oppEloText(mnRec.worstLossChange, mnRec.worstLossOpp)}`) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0) + '<div style="margin-top:8px;"><h4 style="margin-bottom:4px;">MINIONS ELO GRAPH</h4>' + minionsEloGraphHtml(mnRec) + '</div>'; })()}</div>
+        <div><h4>⚔️ MINIONS 1vs1</h4>${(() => { if (!mnRec || !((Number(mnRec.wins) || 0) + (Number(mnRec.losses) || 0) + (Number(mnRec.draws) || 0))) return R("Minions 1vs1", "No games yet"); const w = Number(mnRec.wins) || 0, l = Number(mnRec.losses) || 0, d = Number(mnRec.draws) || 0, g = w + l + d; return G("Minions 1vs1 Elo", Math.round(mnRec.elo ?? 1500)) + R("Games", g) + G("Wins", w) + B("Losses", l) + R("Winrate", Math.round(w / g * 100) + "%") + G("Highest Elo", Math.round(mnRec.highestElo ?? mnRec.elo ?? 1500)) + R("Lowest Elo", Math.round(mnRec.lowestElo ?? mnRec.elo ?? 1500)) + G("Best Win", `vs ${_oppEloText(mnRec.bestWinChange, mnRec.bestWinOpp)}`) + B("Worst Loss", `vs ${_oppEloText(mnRec.worstLossChange, mnRec.worstLossOpp)}`) + R("Longest Winstreak", Number(mnRec.bestStreak) || 0) + R("Current Winstreak", Number(mnRec.curStreak) || 0) + '<div style="margin-top:8px;"><h4 style="margin-bottom:4px;">MINIONS 1vs1 ELO GRAPH</h4>' + minionsEloGraphHtml(mnRec) + '</div>'; })()}</div>
         ${profileStatsHtml(p, R, G, B, svRec)}
         </div>
       </div>`;
@@ -7421,7 +7421,7 @@ function startOnlineGame(matchData) {
   if (onlineShared) ensureSrvOffset();
   onlineBallSpawnTimer = Date.now();
 
-  document.getElementById("mode").textContent = onlineVsBot ? "Online 1v1 (Bot)" : "Online 1v1";
+  document.getElementById("mode").textContent = onlineVsBot ? "Survival 1vs1 (Bot)" : "Survival 1vs1";
 
   const myColor  = myBallColor;
   const oppColor = myBallColor.toLowerCase() === "#ff8844" ? "#00c8ff" : "#ff8844";
@@ -13382,7 +13382,7 @@ window.addEventListener("load", () => {
   try { if (localStorage.getItem("tutDone")) return; } catch (e) { return; }
   const o = document.createElement("div");
   o.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;";
-  o.innerHTML = '<div style="background:#12121a;border:2px solid #00ff88;border-radius:14px;padding:22px;max-width:380px;color:#fff;text-align:center;font-size:15px;line-height:1.5;"><h2 style="margin:0 0 10px;">👋 Welcome!</h2>Move your ball and avoid the others.<br>⚔️ <b>Minions</b>: send balls at your opponent (keys 1–8 or tap) – the last one alive wins.<br>🏆 Win games to climb the Elo ranking.<br><button style="margin-top:14px;">Got it</button></div>';
+  o.innerHTML = '<div style="background:#12121a;border:2px solid #00ff88;border-radius:14px;padding:22px;max-width:380px;color:#fff;text-align:center;font-size:15px;line-height:1.5;"><h2 style="margin:0 0 10px;">👋 Welcome!</h2>Move your ball and avoid the others.<br>⚔️ <b>Minions 1vs1</b>: send balls at your opponent (keys 1–8 or tap) – the last one alive wins.<br>🏆 Win games to climb the Elo ranking.<br><button style="margin-top:14px;">Got it</button></div>';
   o.querySelector("button").onclick = () => { try { localStorage.setItem("tutDone", "1"); } catch (e) {} o.remove(); };
   document.body.appendChild(o);
 });
@@ -13426,7 +13426,7 @@ function mnSearchCancel() {
 }
 function mnSearchRestore() {
   const w = document.getElementById("onlineWait"); if (!w || !w._mn) return; w._mn = false;
-  const h = w.querySelector("h2"); if (h) h.textContent = "🌐 Online 1v1";
+  const h = w.querySelector("h2"); if (h) h.textContent = "🌐 Survival 1vs1";
   const pb = document.getElementById("playBotBtn"); if (pb) pb.setAttribute("onclick", "playWithBotNow()");
   if (w.lastElementChild) w.lastElementChild.setAttribute("onclick", "cancelOnline()");
 }
@@ -13435,14 +13435,14 @@ window.mnSearchAbort = mnSearchAbort;
 function mnSearchGo() { mnSearchCancel(); startMinions(); }
 window.mnSearchCancel = mnSearchCancel; window.mnSearchGo = mnSearchGo;
 async function openMinions() {
-  if (mnLocked()) { try { leagueToast("🔒 Minions unlocks on Friday · " + mnLeftText(), "#ffcc66"); } catch (e) {} return; }
+  if (mnLocked()) { try { leagueToast("🔒 Minions 1vs1 unlocks on Friday · " + mnLeftText(), "#ffcc66"); } catch (e) {} return; }
   mnSearchCancel();
   const mnOnl = !!(fbReady && RPC && myUid && onlineAccount && !window.__dobBanned), mnLim = mnOnl ? 30 : 10;
   let myElo = 1500;
   try { if (myUid && RPC) { const r = await RPC.get("minionsBoard/" + myUid); if (r && r.elo != null) myElo = Math.round(r.elo); } } catch (e) {}
   showScreen("onlineWait");
   const w = document.getElementById("onlineWait"); w._mn = true;
-  w.querySelector("h2").textContent = "⚔️ Minions";
+  w.querySelector("h2").textContent = "⚔️ Minions 1vs1";
   document.getElementById("onlineStatus").textContent = "Looking for an opponent…";
   const bo0 = document.getElementById("botOffer"), bh0 = document.getElementById("botHint"), sl0 = document.getElementById("searchLeague");
   if (bo0) bo0.style.display = "none"; if (bh0) bh0.style.display = ""; if (sl0) { sl0.style.display = "none"; sl0.innerHTML = ""; }
@@ -13458,16 +13458,64 @@ async function openMinions() {
   if (mnOnl) mnNetSearch(Number(myElo) || 1500);
 }
 window.openMinions = openMinions;
+// Minions: eigene/gegnerische ELO + Rang (wie im Survival 1vs1) fuers HUD; Menue-ELO
+async function mnLoadRanks(M) {
+  try {
+    if (!(fbReady && RPC && myUid && onlineAccount)) return;
+    let mb = null;
+    try { mb = await _dbGetT("minionsBoard"); } catch (e) { mb = await RPC.get("minionsBoard"); }
+    const rows = Object.entries(mb || {}).map(([uid, r]) => ({ uid, elo: Number(r && r.elo) || 0, g: (Number(r && r.wins) || 0) + (Number(r && r.losses) || 0) + (Number(r && r.draws) || 0) })).filter(r => r.g > 0);
+    const rankOf = (uid, elo) => rows.filter(r => r.uid !== uid && r.elo > elo).length + 1;
+    const me = rows.find(r => r.uid === myUid);
+    let oppElo = Number(M.oppElo), oppRow = null;
+    if (M.net && M.net.opp) { oppRow = rows.find(r => r.uid === M.net.opp.uid) || null; if (oppRow) oppElo = oppRow.elo; }
+    else {
+      oppElo = MN_BOT_ELO;
+      try { const bp = await RPC.get("players/" + ONLINE_BOT_UID); if (bp && bp.minionsElo != null && Number.isFinite(Number(bp.minionsElo))) oppElo = Number(bp.minionsElo); } catch (e) {}
+    }
+    if (MN !== M) return;
+    M.rk = {
+      meElo: me ? Math.round(me.elo) : null, meRank: me ? rankOf(myUid, me.elo) : null,
+      oppElo: Number.isFinite(oppElo) ? Math.round(oppElo) : null,
+      oppRank: Number.isFinite(oppElo) && (oppRow || !M.net) ? rankOf(M.net ? M.net.opp.uid : ONLINE_BOT_UID, oppElo) : null
+    };
+  } catch (e) {}
+}
+function mnDrawRk(elo, rank, x, y) {
+  if (elo == null) return;
+  ctx.save(); ctx.textAlign = "left"; ctx.fillStyle = "#c9cdd6"; ctx.font = "12px Arial";
+  ctx.fillText(elo + " ELO" + (rank ? " \u00b7 #" + rank : ""), x, y); ctx.restore();
+}
+window._mnMyElo = null;
+async function mnRefreshMyElo() {
+  try {
+    if (!(fbReady && RPC && myUid && onlineAccount)) { window._mnMyElo = null; return; }
+    const r = await RPC.get("minionsBoard/" + myUid);
+    window._mnMyElo = r && r.elo != null ? Math.round(Number(r.elo)) : 1500;
+  } catch (e) {}
+}
+setInterval(mnRefreshMyElo, 60000); setTimeout(mnRefreshMyElo, 2000); setTimeout(mnRefreshMyElo, 6000);
+function updOnlineBtn() {
+  const b = document.getElementById("onlineBtn"); if (!b) return;
+  if (!b.dataset.base) b.dataset.base = (b.firstChild && b.firstChild.textContent || b.textContent).trim();
+  const e = onlineAccount && Number.isFinite(Number(onlineAccount.elo)) ? Math.round(Number(onlineAccount.elo)) + " ELO" : "";
+  if (b.dataset.k === e && b.dataset.k !== undefined) return;
+  b.dataset.k = e; b.textContent = b.dataset.base;
+  if (e) { const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8"; sm.textContent = e; b.appendChild(sm); }
+}
+setInterval(updOnlineBtn, 3000); setTimeout(updOnlineBtn, 500); setTimeout(updOnlineBtn, 2500);
 function updMinionsBtn() {
   const b = document.getElementById("minionsBtn"); if (!b) return;
   const locked = mnLocked(), pre = !mnUnlocked();
-  const sub = locked ? "🔒 Opens Friday · " + mnLeftText() : pre ? "🛡 Admin test (no ELO) · online matchmaking" : "ELO · online matchmaking";
+  const sub = locked ? "🔒 Opens Friday · " + mnLeftText() : (!pre && window._mnMyElo != null ? window._mnMyElo + " ELO" : "");
   const key = sub;
   if (b.dataset.k !== key) {
-    b.dataset.k = key; b.textContent = "⚔️ Minions";
-    const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8";
-    sm.textContent = sub;
-    b.appendChild(sm);
+    b.dataset.k = key; b.textContent = "⚔️ Minions 1vs1";
+    if (sub) {
+      const sm = document.createElement("small"); sm.style.cssText = "display:block;font-size:11px;opacity:.8";
+      sm.textContent = sub;
+      b.appendChild(sm);
+    }
   }
   b.style.opacity = locked ? "0.6" : "";
 }
@@ -13490,7 +13538,7 @@ function startMinions(net) {
   hideAllScreensForGame();
   document.body.classList.add("mode-minions");
   MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0 };
-  mnEndOverlay(null); mnMoveId = null;
+  mnEndOverlay(null); mnMoveId = null; mnLoadRanks(MN);
   if (net) mnNetInit(net);
   running = true; startTime = Date.now();
   try { syncPresence(true); } catch (e) {}
@@ -13499,9 +13547,9 @@ function startMinions(net) {
 const MN_BOT_ELO = 1500, MN_K = 24, MN_BOT_ELO_VERSION = 1;
 async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Unentschieden
   const setE = (t, c) => { const e = document.getElementById("mnEndE"); if (e) { e.textContent = t; e.style.color = c || "#fff"; } };
-  const M = MN; if (!M || M.reported) return; M.reported = true; window._mnSaveUntil = Date.now() + 12000;
+  const M = MN; if (!M || M.reported) return; M.reported = true; window._mnSaveUntil = Date.now() + 12000; setTimeout(mnRefreshMyElo, 5000); setTimeout(mnRefreshMyElo, 13000);
   if (!mnUnlocked()) { setE("🛡 Admin test – no ELO saved", "#c9cdd6"); return; }
-  if (!(fbReady && RPC && myUid && onlineAccount)) { setE("Log in to an online account to earn Minions ELO", "#c9cdd6"); return; }
+  if (!(fbReady && RPC && myUid && onlineAccount)) { setE("Log in to an online account to earn Minions 1vs1 ELO", "#c9cdd6"); return; }
   try {
     const cur = (await RPC.get("minionsBoard/" + myUid)) || {};
     const g = k => Number(cur[k]) || 0;
@@ -13529,7 +13577,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       }
     }
     const e0 = cur.elo != null ? Number(cur.elo) : 1500;
-    const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Online 1v1, erste 10 Spiele doppelt
+    const d0 = res === -1 ? 0 : glickoResult({ elo: e0 }, { elo: M.oppElo != null ? M.oppElo : MN_BOT_ELO }, res === 0).delta * ((g("wins") + g("losses") + g("draws")) < 10 ? 2 : 1);   // wie Survival 1vs1, erste 10 Spiele doppelt
     const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
     const st = res === 0 ? g("curStreak") + 1 : 0;
     const _mnOppName = dn(M.oppName || "Online Bot");
@@ -13844,7 +13892,7 @@ function mnBotBuy(S) {
   if (opts.length && (S.pts >= 30 || Math.random() < 0.6)) mnBuy(1, opts[Math.floor(Math.random() * opts.length)]);
   S.think = MN.tick + 50 + Math.floor(Math.random() * 80);
 }
-// ═══ MINIONS ONLINE: Matchmaking wie Online 1v1 (queue/{uid} mit game:"minions", Match in onlineMatches mit status "mn") ═══
+// ═══ MINIONS ONLINE: Matchmaking wie Survival 1vs1 (queue/{uid} mit game:"minions", Match in onlineMatches mit status "mn") ═══
 // Jeder Client simuliert nur die EIGENE Arena (Spieler + gekaufte Baelle des Gegners). Gesendet werden: Snapshot der eigenen Arena (mnS_pX, ~10 Hz), Kauf-Events (mnE_pX), Bereit/Verlassen (mnReady_pX / mnLeft_pX).
 async function mnNetSearch(myEloN) {
   const N = _mnNet = { dead: false, found: false, unsubs: [], busy: false };
@@ -14040,10 +14088,10 @@ function minionsDraw() {
   mnHearts(18, 40, P.lives, "left");
   const sec = Math.floor(M.tick / 60);
   ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.fillText(Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"), 96, 38);
-  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "13px Arial"; ctx.textAlign = "left"; ctx.fillText("YOU", 20, 70);
+  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "13px Arial"; ctx.textAlign = "left"; ctx.fillText("YOU", 20, 70); mnDrawRk(MN.rk && MN.rk.meElo, MN.rk && MN.rk.meRank, 56, 70);
   // Gegner-Kopf
   ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.fillRect(MN_PX, 0, MN_PWID, MN_RY);
-  ctx.textAlign = "left"; ctx.fillStyle = "#ff9a5c"; ctx.font = "bold 16px Arial"; ctx.fillText(MN.net ? "👤 " + MN.oppName : "🤖 Online Bot", MN_PX + 14, 26);
+  ctx.textAlign = "left"; ctx.fillStyle = "#ff9a5c"; ctx.font = "bold 16px Arial"; { const _lb = MN.net ? "👤 " + MN.oppName : "🤖 Online Bot"; ctx.fillText(_lb, MN_PX + 14, 26); mnDrawRk(MN.rk && MN.rk.oppElo, MN.rk && MN.rk.oppRank, MN_PX + 14 + ctx.measureText(_lb).width + 10, 26); }
   mnHearts(MN_PX + MN_PWID - 12, 27, B.lives, "right");
   // Punkte-Leiste
   const py = 526;
@@ -14614,7 +14662,7 @@ function idleFmt(v) {
   const suf = i < _IDLE_SUF.length ? _IDLE_SUF[i] : String.fromCharCode(97 + Math.floor((i - _IDLE_SUF.length) / 26)) + String.fromCharCode(97 + (i - _IDLE_SUF.length) % 26);
   return s + suf;
 }
-const _ACT_MODES = [["games", "⚔️ Online 1vs1"], ["surv", "🏝 Survival"], ["streak", "🔥 Streaks"], ["daily", "📅 Daily"]];
+const _ACT_MODES = [["games", "⚔️ Survival 1vs1"], ["surv", "🏝 Survival"], ["streak", "🔥 Streaks"], ["daily", "📅 Daily"]];
 async function loadActivityBoard(sel) {   // Aktivitaet: 4 einzelne Ranglisten (gespielte Runden pro Modus), Auswahl wie im Daily-Tab
   if (!sel) sel = "games";
   const t = document.getElementById("lbTable");
@@ -14714,7 +14762,7 @@ const DICT = { de: {
   "👤 Log in / Sign up":"👤 Anmelden / Registrieren","💬 Global Chat":"💬 Globaler Chat","Connecting…":"Verbinde…",
   "🔒 Create an account to be able to write in the chat.":"🔒 Erstelle einen Account, um im Chat schreiben zu können.",
   "Create account":"Account erstellen","Send":"Senden","No messages yet.":"Noch keine Nachrichten.",
-  "Idle chat":"Idle-Chat","Total money":"Gesamtgeld","Chat":"Chat","Game":"Spiel","Ranking":"Rangliste","Write a message…":"Nachricht schreiben…","🌐 Online":"🌐 Online","🎮 Offline":"🎮 Offline","⚙️ Settings":"⚙️ Einstellungen","⚔️ Online 1v1":"⚔️ Online 1v1",
+  "Idle chat":"Idle-Chat","Total money":"Gesamtgeld","Chat":"Chat","Game":"Spiel","Ranking":"Rangliste","Write a message…":"Nachricht schreiben…","🌐 Online":"🌐 Online","🎮 Offline":"🎮 Offline","⚙️ Settings":"⚙️ Einstellungen","⚔️ Survival 1vs1":"⚔️ Survival 1vs1",
   "📺 Best Online TV":"📺 Bestes Online-TV","🏆 Leaderboard":"🏆 Rangliste","← Back":"← Zurück",
   "Singleplayer":"Einzelspieler","Multiplayer (local)":"Mehrspieler (lokal)","AI Spectate":"KI zuschauen",
   "1vs1 Tournament":"1vs1-Turnier","🪙 Coin Hunt":"🪙 Münzjagd","⚙️ Offline Settings":"⚙️ Offline-Einstellungen",
@@ -14737,7 +14785,7 @@ const DICT = { de: {
   "Password is too weak (min 6 characters).":"Passwort zu schwach (mind. 6 Zeichen).","Enter your username and password.":"Gib Benutzername und Passwort ein.",
   "Logging in…":"Melde an…","Incorrect username or password.":"Benutzername oder Passwort falsch.","You need to create an account first!":"Du musst zuerst einen Account erstellen!",
   "Profile not found.":"Profil nicht gefunden.","Error while loading profile.":"Fehler beim Laden des Profils.","Error while loading":"Fehler beim Laden","No players":"Keine Spieler","Firebase not connected":"Nicht verbunden",
-  "🌐 Online 1v1":"🌐 Online 1v1","Searching for opponent…":"Suche Gegner…","Looking for an opponent…":"Suche einen Gegner…","Taking a while? You can play against the Online Bot instead.":"Dauert es länger? Du kannst stattdessen gegen den Online-Bot spielen.",
+  "🌐 Survival 1vs1":"🌐 Survival 1vs1","Searching for opponent…":"Suche Gegner…","Looking for an opponent…":"Suche einen Gegner…","Taking a while? You can play against the Online Bot instead.":"Dauert es länger? Du kannst stattdessen gegen den Online-Bot spielen.",
   "Matchmaking may take up to 30 seconds. If no opponent is available, you'll automatically be paired with our Online Bot.":"Die Suche kann bis zu 30 Sekunden dauern. Ist kein Gegner verfügbar, wirst du automatisch mit unserem Online-Bot gepaart.",
   "Cancel":"Abbrechen","🤖 Play with Online Bot":"🤖 Mit Online-Bot spielen","Yes":"Ja","Return to main menu?":"Zurück zum Hauptmenü?","Firebase not connected. Cannot play online.":"Nicht verbunden. Online spielen nicht möglich.",
   "Firebase is not connected yet!":"Noch nicht verbunden!","Rank: Loading...":"Rang: Lädt…","Waiting for opponent…":"Warte auf Gegner…","⏳ Waiting for opponent…":"⏳ Warte auf Gegner…",
@@ -14765,8 +14813,8 @@ const RX = { de: [
   [/^Your ELO: (.+)$/, "Dein ELO: $1"],
   [/^Round (\d+)\/(\d+)$/, "Runde $1/$2"],
   [/^1v1 vs (.+)$/, "1v1 gegen $1"],
-  [/^Playing 1vs1 vs (.+)$/, "Spielt 1vs1 gegen $1"],
-  [/^Playing Minions vs (.+)$/, "Spielt Minions gegen $1"],
+  [/^Playing Survival 1vs1 vs (.+)$/, "Spielt Survival 1vs1 gegen $1"],
+  [/^Playing Minions 1vs1 vs (.+)$/, "Spielt Minions 1vs1 gegen $1"],
   [/^Playing (.+)$/, (m, g) => "Spielt " + (DICT.de[g] || g)],
   [/^📺 LIVE GAME TV \(Average: (\d+) ELO\)$/, "📺 LIVE-SPIEL-TV (Durchschnitt: $1 ELO)"],
   [/^Error: (.+)$/, "Fehler: $1"],
@@ -15466,7 +15514,7 @@ async function openStreamers() {
   } catch (e) { list.textContent = tr("Error."); }
 }
 // ═══ Regeln (Rules) – grosse, durchsuchbare Liste, EN/DE ═══
-const RULES_DATA = {"en": [["🤝 General / Fair play", ["Play fair. Win by skill, not by tricks.", "Be respectful to everyone – no insults, harassment, hate or threats.", "No discrimination of any kind (origin, religion, gender, sexuality, disability …).", "No spam, no advertising, no scams, no begging for items or money.", "Do not share personal information (yours or others') – no addresses, phone numbers, real names of others.", "Do not impersonate moderators, the developer or other players.", "Moderator decisions are final in the game. If you think one is wrong, use the appeal option.", "Rules can change. Not knowing a rule does not protect you from a sanction."]], ["👤 Accounts & names", ["One account per player and device. Creating extra accounts to dodge a ban or to farm rankings is forbidden.", "Names must be 3–20 characters long.", "Allowed characters: letters, numbers, _ and -. Names must start with a letter and end with a letter or number.", "No names made only of numbers or special characters, and no consecutive _ or - characters.", "No offensive, hateful, political-extremist or inappropriate names – also no names that imitate staff (e.g. the developer).", "Moderators may rename you at any time. Keep the new name or lose access to the affected feature.", "Never share your password. We will never ask you for it.", "Deleting your account removes your name, Elo, stats and league progress permanently."]], ["💬 Chat (Global, Idle, Arena)", ["New accounts can write in the chat only after a short waiting time (about 2 hours).", "Messages can be at most 200 characters long.", "Be on topic and friendly. English or German is fine – mixing is okay, spam is not.", "No flooding: repeating the same message or writing very fast is blocked.", "No insults, no hate speech, no sexual content, no threats.", "No links to other servers, shops, scams or malware.", "No begging, no trading real money or accounts.", "Do not use @mentions to harass someone.", "Mutes are temporary. While muted you can't write in any chat (Global and Idle chat share the same mute).", "A chat ban removes your right to write in chats completely. It is shown on your profile.", "Moderators may delete messages and all recent messages of a player."]], ["🚫 Cheating & bots", ["No cheats, hacks, scripts, auto-clickers, macros or modified clients.", "No exploiting bugs on purpose. Found a bug? Use the 🚩 Report button.", "No bots or automation for ranked modes or leaderboards.", "No win-trading, boosting or agreeing with others to throw matches.", "No leaving matches on purpose to avoid losing Elo (forfeits count as a loss).", "Suspicious behaviour is detected automatically. Accounts can be banned automatically, and their data removed.", "Banned devices cannot create new accounts. Ban evasion leads to permanent bans.", "Using old or modified versions of the game to submit records is not allowed."]], ["⚔️ Online 1v1 & Elo", ["Everyone starts with 1500 Elo.", "Elo changes after each ranked game. The change depends on the rating difference.", "Disconnecting or quitting during a match counts as a forfeit.", "Matches against the Online Bot count like normal games.", "Do not insult or provoke your opponent. Be a good sport.", "Rankings only list players with at least 1 played game."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Records are only valid when they come from a normal, unmodified run.", "Daily Challenge: one challenge per day. Only the daily mode counts for the daily leaderboard.", "Daily Challenge wins are awarded by moderators/automatically for the best time of the day.", "Replays can be checked by moderators. Suspicious records can be removed.", "Streaks: your level is only valid if it was earned in a real run – the game checks how fast levels can be gained."]], ["🏅 Weekly League", ["Leagues: Bronze, Silver, Gold, Platinum.", "Every week you play in a group of up to 20 players of your league.", "Your wins in ranked games count. Joining a group happens with your first counted win.", "Weeks run Monday to Monday, German time (Europe/Berlin).", "At the end of the week the best players of a group move up – but only with at least 3 wins that week.", "Groups with fewer than 5 players do not promote anyone.", "Promotion slots: Bronze up to the top 10 (at most half of the group), Silver and higher up to the top 5 (at most a third).", "Relegation: the bottom players move down – a quarter of the group, at most 5. Groups with fewer than 4 players have no relegation. Bronze can't be relegated.", "Platinum is the highest league. You can't move up from there.", "Tie-break: with the same number of wins, the player who reached these wins earlier ranks higher.", "Rank is final after the end of the week. Late wins of the old week are accepted for a few seconds only."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker is open every Monday and Thursday (00:00–24:00, German time). On other days it is closed – your progress stays saved.", "When the day ends while you play, the game closes automatically and saves your progress.", "The Idle leaderboard ranks your total money earned.", "Progress is saved on your device and in the cloud (for logged-in players).", "Old or modified versions of the game can't write to the Idle leaderboard.", "Cheated or impossible scores are removed. Moderators can remove a player from the board.", "The Idle chat has the same rules as the Global chat.", "A new season resets all progress. It is announced in advance."]], ["🎥 Streamers & links", ["You can link your YouTube and/or Twitch channel – but only if you really upload or stream DarkOnBalls content.", "Links are checked and approved by a moderator before they appear on your profile.", "Allowed formats: youtube.com/@name or youtube.com/channel/UC…, and twitch.tv/name.", "Linking someone else's channel is forbidden and leads to a sanction.", "You can change or remove your link at any time. Moderators can remove links that break the rules.", "Linked channels must follow the platform rules and must not contain illegal or hateful content."]], ["💎 Patrons", ["Patron tiers (Bronze, Silver, Gold, Diamond) are a thank-you for supporting the game.", "A tier is valid for one calendar month. It can be renewed.", "Patron status does not give gameplay advantages in ranked modes.", "Misusing, selling or sharing Patron perks is not allowed."]], ["⚠️ Sanctions & appeals", ["Moderators can warn, mute, chat-ban, rename or ban players.", "A warning can lock the game until you read and react to it.", "Bans can be permanent, especially for cheating and repeated breaking of the rules.", "A ban removes the ranking data of the account (profile, records, league).", "If you are banned or warned, you can send an appeal with a short explanation (once per week).", "Be honest in an appeal. False statements reduce your chances.", "Do not harass moderators."]], ["🛠 Technical & fair use", ["Reload the page when you see the update message, to be on the latest version.", "Do not overload the servers: no scripts that spam requests.", "Report bugs and cheaters with the 🚩 Report button instead of publicly accusing players.", "Screenshots and videos are welcome – respect other players' privacy.", "The game is provided as it is. We may reset or change features for balance and fairness."]]], "de": [["🤝 Allgemein / Fair Play", ["Spiele fair. Gewinne durch Können, nicht durch Tricks.", "Sei respektvoll zu allen – keine Beleidigungen, Belästigung, Hass oder Drohungen.", "Keine Diskriminierung jeder Art (Herkunft, Religion, Geschlecht, Sexualität, Behinderung …).", "Kein Spam, keine Werbung, keine Betrugsversuche, kein Betteln um Items oder Geld.", "Gib keine persönlichen Daten weiter (deine oder die anderer) – keine Adressen, Telefonnummern, echte Namen anderer.", "Gib dich nicht als Moderator, Entwickler oder anderer Spieler aus.", "Entscheidungen der Moderatoren gelten im Spiel. Wenn du eine für falsch hältst, nutze den Einspruch.", "Regeln können sich ändern. Unwissenheit schützt nicht vor einer Strafe."]], ["👤 Accounts & Namen", ["Ein Account pro Spieler und Gerät. Zusatz-Accounts, um einen Bann zu umgehen oder Ranglisten zu farmen, sind verboten.", "Namen müssen 3–20 Zeichen lang sein.", "Erlaubt sind Buchstaben, Zahlen, _ und -. Ein Name muss mit einem Buchstaben beginnen und mit Buchstabe oder Zahl enden.", "Keine Namen nur aus Zahlen oder Sonderzeichen und keine aufeinanderfolgenden _ oder -.", "Keine beleidigenden, hasserfüllten, extremistischen oder unpassenden Namen – auch keine Namen, die Mitarbeiter nachahmen (z. B. den Entwickler).", "Moderatoren dürfen dich jederzeit umbenennen. Behalte den neuen Namen, sonst verlierst du den Zugriff auf die betroffene Funktion.", "Gib niemals dein Passwort weiter. Wir fragen nie danach.", "Das Löschen deines Accounts entfernt Name, Elo, Statistiken und Liga-Fortschritt dauerhaft."]], ["💬 Chat (Global, Idle, Arena)", ["Neue Accounts dürfen erst nach einer kurzen Wartezeit (ca. 2 Stunden) im Chat schreiben.", "Nachrichten dürfen höchstens 200 Zeichen lang sein.", "Bleib beim Thema und freundlich. Deutsch oder Englisch ist okay – Spam nicht.", "Kein Flooding: Dieselbe Nachricht wiederholen oder extrem schnell schreiben wird blockiert.", "Keine Beleidigungen, keine Hassrede, keine sexuellen Inhalte, keine Drohungen.", "Keine Links zu anderen Servern, Shops, Betrug oder Malware.", "Kein Betteln, kein Handel mit echtem Geld oder Accounts.", "Nutze @Erwähnungen nicht, um jemanden zu belästigen.", "Mutes sind zeitlich begrenzt. Solange du gemutet bist, kannst du in keinem Chat schreiben (Global- und Idle-Chat teilen sich denselben Mute).", "Ein Chat-Bann entzieht dir das Schreiben in Chats komplett. Er wird auf deinem Profil angezeigt.", "Moderatoren dürfen Nachrichten und alle letzten Nachrichten eines Spielers löschen."]], ["🚫 Cheating & Bots", ["Keine Cheats, Hacks, Skripte, Autoclicker, Makros oder veränderten Clients.", "Keine absichtliche Ausnutzung von Bugs. Bug gefunden? Nutze den 🚩-Melden-Knopf.", "Keine Bots oder Automatisierung für Ranglisten-Modi.", "Kein Win-Trading, Boosting oder Absprachen, um Spiele absichtlich zu verlieren.", "Kein absichtliches Verlassen von Matches, um Elo-Verlust zu vermeiden (Aufgeben zählt als Niederlage).", "Verdächtiges Verhalten wird automatisch erkannt. Accounts können automatisch gebannt und ihre Daten entfernt werden.", "Gebannte Geräte können keine neuen Accounts erstellen. Bann-Umgehung führt zum dauerhaften Bann.", "Alte oder veränderte Versionen des Spiels zum Einreichen von Rekorden zu nutzen ist nicht erlaubt."]], ["⚔️ Online 1v1 & Elo", ["Alle starten mit 1500 Elo.", "Elo ändert sich nach jedem Ranglisten-Spiel. Die Änderung hängt vom Wertungsunterschied ab.", "Verbindungsabbruch oder Verlassen während eines Matches zählt als Aufgabe.", "Matches gegen den Online-Bot zählen wie normale Spiele.", "Beleidige oder provoziere deinen Gegner nicht. Sei ein guter Verlierer und Gewinner.", "In den Ranglisten stehen nur Spieler mit mindestens 1 gespielten Spiel."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Rekorde sind nur gültig, wenn sie aus einem normalen, unveränderten Durchlauf stammen.", "Daily Challenge: eine Challenge pro Tag. Nur der Daily-Modus zählt für die Daily-Rangliste.", "Daily-Challenge-Siege gibt es für die beste Zeit des Tages (durch Moderatoren/automatisch).", "Replays können von Moderatoren geprüft werden. Verdächtige Rekorde können entfernt werden.", "Streaks: Dein Level ist nur gültig, wenn du es in einem echten Durchlauf erreicht hast – das Spiel prüft, wie schnell Level möglich sind."]], ["🏅 Weekly League", ["Ligen: Bronze, Silber, Gold, Platin.", "Jede Woche spielst du in einer Gruppe mit bis zu 20 Spielern deiner Liga.", "Deine Siege in Ranglisten-Spielen zählen. Du trittst einer Gruppe mit deinem ersten gezählten Sieg bei.", "Wochen laufen von Montag bis Montag, deutsche Zeit (Europe/Berlin).", "Am Wochenende steigen die Besten einer Gruppe auf – aber nur mit mindestens 3 Siegen in dieser Woche.", "Gruppen mit weniger als 5 Spielern befördern niemanden.", "Aufstiegsplätze: Bronze bis zu den Top 10 (höchstens die Hälfte der Gruppe), Silber und höher bis zu den Top 5 (höchstens ein Drittel).", "Abstieg: Die letzten Spieler steigen ab – ein Viertel der Gruppe, höchstens 5. Gruppen mit weniger als 4 Spielern haben keinen Abstieg. Aus Bronze steigt man nicht ab.", "Platin ist die höchste Liga. Von dort gibt es keinen Aufstieg.", "Gleichstand: Bei gleich vielen Siegen steht der Spieler weiter oben, der diese Siege früher erreicht hat.", "Der Rang steht nach Wochenende fest. Späte Siege der alten Woche werden nur wenige Sekunden lang angenommen."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker ist jeden Montag und Donnerstag offen (0:00–24:00 Uhr deutscher Zeit). An anderen Tagen ist er geschlossen – dein Fortschritt bleibt gespeichert.", "Endet der Tag während du spielst, schließt das Spiel automatisch und speichert deinen Fortschritt.", "Die Idle-Rangliste zeigt dein insgesamt verdientes Geld.", "Der Fortschritt wird auf deinem Gerät und in der Cloud gespeichert (für eingeloggte Spieler).", "Alte oder veränderte Versionen des Spiels können nicht in die Idle-Rangliste schreiben.", "Gecheatete oder unmögliche Werte werden entfernt. Moderatoren können Spieler aus der Rangliste nehmen.", "Im Idle-Chat gelten dieselben Regeln wie im Global-Chat.", "Eine neue Season setzt den Fortschritt zurück. Sie wird vorher angekündigt."]], ["🎥 Streamer & Links", ["Du kannst deinen YouTube- und/oder Twitch-Kanal verlinken – aber nur, wenn du wirklich DarkOnBalls-Inhalte hochlädst oder streamst.", "Links werden vor der Anzeige auf deinem Profil von einem Moderator geprüft und freigegeben.", "Erlaubte Formate: youtube.com/@name oder youtube.com/channel/UC… sowie twitch.tv/name.", "Den Kanal einer anderen Person zu verlinken ist verboten und wird bestraft.", "Du kannst deinen Link jederzeit ändern oder entfernen. Moderatoren können Links entfernen, die gegen die Regeln verstoßen.", "Verlinkte Kanäle müssen die Regeln der Plattform einhalten und dürfen keine illegalen oder hasserfüllten Inhalte enthalten."]], ["💎 Patrons", ["Patron-Stufen (Bronze, Silber, Gold, Diamant) sind ein Dankeschön für die Unterstützung des Spiels.", "Eine Stufe gilt einen Kalendermonat und kann verlängert werden.", "Patron-Status gibt keine Spielvorteile in Ranglisten-Modi.", "Missbrauch, Verkauf oder Weitergabe von Patron-Vorteilen ist nicht erlaubt."]], ["⚠️ Strafen & Einspruch", ["Moderatoren können Spieler verwarnen, muten, im Chat bannen, umbenennen oder bannen.", "Eine Verwarnung kann das Spiel sperren, bis du sie gelesen und darauf reagiert hast.", "Banns können dauerhaft sein, besonders bei Cheating und wiederholten Regelverstößen.", "Ein Bann entfernt die Ranglisten-Daten des Accounts (Profil, Rekorde, Liga).", "Bist du gebannt oder verwarnt, kannst du einen Einspruch mit kurzer Erklärung senden (einmal pro Woche).", "Sei ehrlich im Einspruch. Falsche Angaben verringern deine Chancen.", "Belästige keine Moderatoren."]], ["🛠 Technik & fairer Umgang", ["Lade die Seite neu, wenn die Update-Meldung erscheint, damit du auf dem neuesten Stand bist.", "Überlaste die Server nicht: keine Skripte, die Anfragen spammen.", "Melde Bugs und Cheater über den 🚩-Melden-Knopf, statt Spieler öffentlich zu beschuldigen.", "Screenshots und Videos sind willkommen – respektiere die Privatsphäre anderer Spieler.", "Das Spiel wird so bereitgestellt, wie es ist. Wir dürfen Funktionen für Balance und Fairness zurücksetzen oder ändern."]]]};
+const RULES_DATA = {"en": [["🤝 General / Fair play", ["Play fair. Win by skill, not by tricks.", "Be respectful to everyone – no insults, harassment, hate or threats.", "No discrimination of any kind (origin, religion, gender, sexuality, disability …).", "No spam, no advertising, no scams, no begging for items or money.", "Do not share personal information (yours or others') – no addresses, phone numbers, real names of others.", "Do not impersonate moderators, the developer or other players.", "Moderator decisions are final in the game. If you think one is wrong, use the appeal option.", "Rules can change. Not knowing a rule does not protect you from a sanction."]], ["👤 Accounts & names", ["One account per player and device. Creating extra accounts to dodge a ban or to farm rankings is forbidden.", "Names must be 3–20 characters long.", "Allowed characters: letters, numbers, _ and -. Names must start with a letter and end with a letter or number.", "No names made only of numbers or special characters, and no consecutive _ or - characters.", "No offensive, hateful, political-extremist or inappropriate names – also no names that imitate staff (e.g. the developer).", "Moderators may rename you at any time. Keep the new name or lose access to the affected feature.", "Never share your password. We will never ask you for it.", "Deleting your account removes your name, Elo, stats and league progress permanently."]], ["💬 Chat (Global, Idle, Arena)", ["New accounts can write in the chat only after a short waiting time (about 2 hours).", "Messages can be at most 200 characters long.", "Be on topic and friendly. English or German is fine – mixing is okay, spam is not.", "No flooding: repeating the same message or writing very fast is blocked.", "No insults, no hate speech, no sexual content, no threats.", "No links to other servers, shops, scams or malware.", "No begging, no trading real money or accounts.", "Do not use @mentions to harass someone.", "Mutes are temporary. While muted you can't write in any chat (Global and Idle chat share the same mute).", "A chat ban removes your right to write in chats completely. It is shown on your profile.", "Moderators may delete messages and all recent messages of a player."]], ["🚫 Cheating & bots", ["No cheats, hacks, scripts, auto-clickers, macros or modified clients.", "No exploiting bugs on purpose. Found a bug? Use the 🚩 Report button.", "No bots or automation for ranked modes or leaderboards.", "No win-trading, boosting or agreeing with others to throw matches.", "No leaving matches on purpose to avoid losing Elo (forfeits count as a loss).", "Suspicious behaviour is detected automatically. Accounts can be banned automatically, and their data removed.", "Banned devices cannot create new accounts. Ban evasion leads to permanent bans.", "Using old or modified versions of the game to submit records is not allowed."]], ["⚔️ Survival 1vs1 & Elo", ["Everyone starts with 1500 Elo.", "Elo changes after each ranked game. The change depends on the rating difference.", "Disconnecting or quitting during a match counts as a forfeit.", "Matches against the Online Bot count like normal games.", "Do not insult or provoke your opponent. Be a good sport.", "Rankings only list players with at least 1 played game."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Records are only valid when they come from a normal, unmodified run.", "Daily Challenge: one challenge per day. Only the daily mode counts for the daily leaderboard.", "Daily Challenge wins are awarded by moderators/automatically for the best time of the day.", "Replays can be checked by moderators. Suspicious records can be removed.", "Streaks: your level is only valid if it was earned in a real run – the game checks how fast levels can be gained."]], ["🏅 Weekly League", ["Leagues: Bronze, Silver, Gold, Platinum.", "Every week you play in a group of up to 20 players of your league.", "Your wins in ranked games count. Joining a group happens with your first counted win.", "Weeks run Monday to Monday, German time (Europe/Berlin).", "At the end of the week the best players of a group move up – but only with at least 3 wins that week.", "Groups with fewer than 5 players do not promote anyone.", "Promotion slots: Bronze up to the top 10 (at most half of the group), Silver and higher up to the top 5 (at most a third).", "Relegation: the bottom players move down – a quarter of the group, at most 5. Groups with fewer than 4 players have no relegation. Bronze can't be relegated.", "Platinum is the highest league. You can't move up from there.", "Tie-break: with the same number of wins, the player who reached these wins earlier ranks higher.", "Rank is final after the end of the week. Late wins of the old week are accepted for a few seconds only."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker is open every Monday and Thursday (00:00–24:00, German time). On other days it is closed – your progress stays saved.", "When the day ends while you play, the game closes automatically and saves your progress.", "The Idle leaderboard ranks your total money earned.", "Progress is saved on your device and in the cloud (for logged-in players).", "Old or modified versions of the game can't write to the Idle leaderboard.", "Cheated or impossible scores are removed. Moderators can remove a player from the board.", "The Idle chat has the same rules as the Global chat.", "A new season resets all progress. It is announced in advance."]], ["🎥 Streamers & links", ["You can link your YouTube and/or Twitch channel – but only if you really upload or stream DarkOnBalls content.", "Links are checked and approved by a moderator before they appear on your profile.", "Allowed formats: youtube.com/@name or youtube.com/channel/UC…, and twitch.tv/name.", "Linking someone else's channel is forbidden and leads to a sanction.", "You can change or remove your link at any time. Moderators can remove links that break the rules.", "Linked channels must follow the platform rules and must not contain illegal or hateful content."]], ["💎 Patrons", ["Patron tiers (Bronze, Silver, Gold, Diamond) are a thank-you for supporting the game.", "A tier is valid for one calendar month. It can be renewed.", "Patron status does not give gameplay advantages in ranked modes.", "Misusing, selling or sharing Patron perks is not allowed."]], ["⚠️ Sanctions & appeals", ["Moderators can warn, mute, chat-ban, rename or ban players.", "A warning can lock the game until you read and react to it.", "Bans can be permanent, especially for cheating and repeated breaking of the rules.", "A ban removes the ranking data of the account (profile, records, league).", "If you are banned or warned, you can send an appeal with a short explanation (once per week).", "Be honest in an appeal. False statements reduce your chances.", "Do not harass moderators."]], ["🛠 Technical & fair use", ["Reload the page when you see the update message, to be on the latest version.", "Do not overload the servers: no scripts that spam requests.", "Report bugs and cheaters with the 🚩 Report button instead of publicly accusing players.", "Screenshots and videos are welcome – respect other players' privacy.", "The game is provided as it is. We may reset or change features for balance and fairness."]]], "de": [["🤝 Allgemein / Fair Play", ["Spiele fair. Gewinne durch Können, nicht durch Tricks.", "Sei respektvoll zu allen – keine Beleidigungen, Belästigung, Hass oder Drohungen.", "Keine Diskriminierung jeder Art (Herkunft, Religion, Geschlecht, Sexualität, Behinderung …).", "Kein Spam, keine Werbung, keine Betrugsversuche, kein Betteln um Items oder Geld.", "Gib keine persönlichen Daten weiter (deine oder die anderer) – keine Adressen, Telefonnummern, echte Namen anderer.", "Gib dich nicht als Moderator, Entwickler oder anderer Spieler aus.", "Entscheidungen der Moderatoren gelten im Spiel. Wenn du eine für falsch hältst, nutze den Einspruch.", "Regeln können sich ändern. Unwissenheit schützt nicht vor einer Strafe."]], ["👤 Accounts & Namen", ["Ein Account pro Spieler und Gerät. Zusatz-Accounts, um einen Bann zu umgehen oder Ranglisten zu farmen, sind verboten.", "Namen müssen 3–20 Zeichen lang sein.", "Erlaubt sind Buchstaben, Zahlen, _ und -. Ein Name muss mit einem Buchstaben beginnen und mit Buchstabe oder Zahl enden.", "Keine Namen nur aus Zahlen oder Sonderzeichen und keine aufeinanderfolgenden _ oder -.", "Keine beleidigenden, hasserfüllten, extremistischen oder unpassenden Namen – auch keine Namen, die Mitarbeiter nachahmen (z. B. den Entwickler).", "Moderatoren dürfen dich jederzeit umbenennen. Behalte den neuen Namen, sonst verlierst du den Zugriff auf die betroffene Funktion.", "Gib niemals dein Passwort weiter. Wir fragen nie danach.", "Das Löschen deines Accounts entfernt Name, Elo, Statistiken und Liga-Fortschritt dauerhaft."]], ["💬 Chat (Global, Idle, Arena)", ["Neue Accounts dürfen erst nach einer kurzen Wartezeit (ca. 2 Stunden) im Chat schreiben.", "Nachrichten dürfen höchstens 200 Zeichen lang sein.", "Bleib beim Thema und freundlich. Deutsch oder Englisch ist okay – Spam nicht.", "Kein Flooding: Dieselbe Nachricht wiederholen oder extrem schnell schreiben wird blockiert.", "Keine Beleidigungen, keine Hassrede, keine sexuellen Inhalte, keine Drohungen.", "Keine Links zu anderen Servern, Shops, Betrug oder Malware.", "Kein Betteln, kein Handel mit echtem Geld oder Accounts.", "Nutze @Erwähnungen nicht, um jemanden zu belästigen.", "Mutes sind zeitlich begrenzt. Solange du gemutet bist, kannst du in keinem Chat schreiben (Global- und Idle-Chat teilen sich denselben Mute).", "Ein Chat-Bann entzieht dir das Schreiben in Chats komplett. Er wird auf deinem Profil angezeigt.", "Moderatoren dürfen Nachrichten und alle letzten Nachrichten eines Spielers löschen."]], ["🚫 Cheating & Bots", ["Keine Cheats, Hacks, Skripte, Autoclicker, Makros oder veränderten Clients.", "Keine absichtliche Ausnutzung von Bugs. Bug gefunden? Nutze den 🚩-Melden-Knopf.", "Keine Bots oder Automatisierung für Ranglisten-Modi.", "Kein Win-Trading, Boosting oder Absprachen, um Spiele absichtlich zu verlieren.", "Kein absichtliches Verlassen von Matches, um Elo-Verlust zu vermeiden (Aufgeben zählt als Niederlage).", "Verdächtiges Verhalten wird automatisch erkannt. Accounts können automatisch gebannt und ihre Daten entfernt werden.", "Gebannte Geräte können keine neuen Accounts erstellen. Bann-Umgehung führt zum dauerhaften Bann.", "Alte oder veränderte Versionen des Spiels zum Einreichen von Rekorden zu nutzen ist nicht erlaubt."]], ["⚔️ Survival 1vs1 & Elo", ["Alle starten mit 1500 Elo.", "Elo ändert sich nach jedem Ranglisten-Spiel. Die Änderung hängt vom Wertungsunterschied ab.", "Verbindungsabbruch oder Verlassen während eines Matches zählt als Aufgabe.", "Matches gegen den Online-Bot zählen wie normale Spiele.", "Beleidige oder provoziere deinen Gegner nicht. Sei ein guter Verlierer und Gewinner.", "In den Ranglisten stehen nur Spieler mit mindestens 1 gespielten Spiel."]], ["🏝 Survival, 📅 Daily & 🔥 Streaks", ["Rekorde sind nur gültig, wenn sie aus einem normalen, unveränderten Durchlauf stammen.", "Daily Challenge: eine Challenge pro Tag. Nur der Daily-Modus zählt für die Daily-Rangliste.", "Daily-Challenge-Siege gibt es für die beste Zeit des Tages (durch Moderatoren/automatisch).", "Replays können von Moderatoren geprüft werden. Verdächtige Rekorde können entfernt werden.", "Streaks: Dein Level ist nur gültig, wenn du es in einem echten Durchlauf erreicht hast – das Spiel prüft, wie schnell Level möglich sind."]], ["🏅 Weekly League", ["Ligen: Bronze, Silber, Gold, Platin.", "Jede Woche spielst du in einer Gruppe mit bis zu 20 Spielern deiner Liga.", "Deine Siege in Ranglisten-Spielen zählen. Du trittst einer Gruppe mit deinem ersten gezählten Sieg bei.", "Wochen laufen von Montag bis Montag, deutsche Zeit (Europe/Berlin).", "Am Wochenende steigen die Besten einer Gruppe auf – aber nur mit mindestens 3 Siegen in dieser Woche.", "Gruppen mit weniger als 5 Spielern befördern niemanden.", "Aufstiegsplätze: Bronze bis zu den Top 10 (höchstens die Hälfte der Gruppe), Silber und höher bis zu den Top 5 (höchstens ein Drittel).", "Abstieg: Die letzten Spieler steigen ab – ein Viertel der Gruppe, höchstens 5. Gruppen mit weniger als 4 Spielern haben keinen Abstieg. Aus Bronze steigt man nicht ab.", "Platin ist die höchste Liga. Von dort gibt es keinen Aufstieg.", "Gleichstand: Bei gleich vielen Siegen steht der Spieler weiter oben, der diese Siege früher erreicht hat.", "Der Rang steht nach Wochenende fest. Späte Siege der alten Woche werden nur wenige Sekunden lang angenommen."]], ["🧱 Idle Brick Breaker", ["Idle Brick Breaker ist jeden Montag und Donnerstag offen (0:00–24:00 Uhr deutscher Zeit). An anderen Tagen ist er geschlossen – dein Fortschritt bleibt gespeichert.", "Endet der Tag während du spielst, schließt das Spiel automatisch und speichert deinen Fortschritt.", "Die Idle-Rangliste zeigt dein insgesamt verdientes Geld.", "Der Fortschritt wird auf deinem Gerät und in der Cloud gespeichert (für eingeloggte Spieler).", "Alte oder veränderte Versionen des Spiels können nicht in die Idle-Rangliste schreiben.", "Gecheatete oder unmögliche Werte werden entfernt. Moderatoren können Spieler aus der Rangliste nehmen.", "Im Idle-Chat gelten dieselben Regeln wie im Global-Chat.", "Eine neue Season setzt den Fortschritt zurück. Sie wird vorher angekündigt."]], ["🎥 Streamer & Links", ["Du kannst deinen YouTube- und/oder Twitch-Kanal verlinken – aber nur, wenn du wirklich DarkOnBalls-Inhalte hochlädst oder streamst.", "Links werden vor der Anzeige auf deinem Profil von einem Moderator geprüft und freigegeben.", "Erlaubte Formate: youtube.com/@name oder youtube.com/channel/UC… sowie twitch.tv/name.", "Den Kanal einer anderen Person zu verlinken ist verboten und wird bestraft.", "Du kannst deinen Link jederzeit ändern oder entfernen. Moderatoren können Links entfernen, die gegen die Regeln verstoßen.", "Verlinkte Kanäle müssen die Regeln der Plattform einhalten und dürfen keine illegalen oder hasserfüllten Inhalte enthalten."]], ["💎 Patrons", ["Patron-Stufen (Bronze, Silber, Gold, Diamant) sind ein Dankeschön für die Unterstützung des Spiels.", "Eine Stufe gilt einen Kalendermonat und kann verlängert werden.", "Patron-Status gibt keine Spielvorteile in Ranglisten-Modi.", "Missbrauch, Verkauf oder Weitergabe von Patron-Vorteilen ist nicht erlaubt."]], ["⚠️ Strafen & Einspruch", ["Moderatoren können Spieler verwarnen, muten, im Chat bannen, umbenennen oder bannen.", "Eine Verwarnung kann das Spiel sperren, bis du sie gelesen und darauf reagiert hast.", "Banns können dauerhaft sein, besonders bei Cheating und wiederholten Regelverstößen.", "Ein Bann entfernt die Ranglisten-Daten des Accounts (Profil, Rekorde, Liga).", "Bist du gebannt oder verwarnt, kannst du einen Einspruch mit kurzer Erklärung senden (einmal pro Woche).", "Sei ehrlich im Einspruch. Falsche Angaben verringern deine Chancen.", "Belästige keine Moderatoren."]], ["🛠 Technik & fairer Umgang", ["Lade die Seite neu, wenn die Update-Meldung erscheint, damit du auf dem neuesten Stand bist.", "Überlaste die Server nicht: keine Skripte, die Anfragen spammen.", "Melde Bugs und Cheater über den 🚩-Melden-Knopf, statt Spieler öffentlich zu beschuldigen.", "Screenshots und Videos sind willkommen – respektiere die Privatsphäre anderer Spieler.", "Das Spiel wird so bereitgestellt, wie es ist. Wir dürfen Funktionen für Balance und Fairness zurücksetzen oder ändern."]]]};
 function openRules() {
   let ov = document.getElementById("rulesOv");
   if (ov) ov.remove();
