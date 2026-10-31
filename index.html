@@ -2855,7 +2855,7 @@ let challengeUnsub = null, challengeShown = null;
 
 function statusInMatch(st) {
   st = String(st || "");
-  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st === "Playing Minions" || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
+  return st === "Survival" || st === "Daily" || st === "Playing Streaks" || st.indexOf("Playing Minions") === 0 || st.indexOf("Playing 1vs1") === 0 || st === "In 1v1 Match" || st.indexOf("1v1 vs") === 0;
 }
 function inMatchOrSurvival() {
   try { return statusInMatch(currentPresenceStatus()); } catch (e) { return false; }
@@ -3569,16 +3569,19 @@ function currentPresenceStatus() {
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
     if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streaks";
+    if (mode === "minions" && (running || (typeof MN !== "undefined" && MN && MN.phase === "play"))) {
+      return "Playing Minions vs " + ((typeof MN !== "undefined" && MN && MN.oppName) || "Online Bot");
+    }
     if (running && !(mode === "online" && onlineResultHandled)) {
       if (mode === "online") {
-        if (onlineVsBot) return "1v1 vs Bot";
-        return onlineOpponent && onlineOpponent.name ? "1v1 vs " + onlineOpponent.name : "In 1v1 Match";
+        if (onlineVsBot) return "Playing 1vs1 vs Online Bot";
+        return onlineOpponent && onlineOpponent.name ? "Playing 1vs1 vs " + onlineOpponent.name : "Playing 1vs1";
       }
       if (mode === "online_tv") return "Watching Online TV";
       return "Playing " + (modeNames[mode] || mode);
     }
     // VS-Screen vor dem Start zaehlt noch als Match; nach dem Ergebnis (onlineResultHandled) nicht mehr
-    if (onlineMatchId && !onlineResultHandled) return onlineVsBot ? "1v1 vs Bot" : "In 1v1 Match";
+    if (onlineMatchId && !onlineResultHandled) return onlineVsBot ? "Playing 1vs1 vs Online Bot" : (onlineOpponent && onlineOpponent.name ? "Playing 1vs1 vs " + onlineOpponent.name : "Playing 1vs1");
     if (onlineSearchInterval) return "Searching for match";
   } catch (e) {}
   return "Idle in Menu";
@@ -13496,7 +13499,7 @@ function startMinions(net) {
 const MN_BOT_ELO = 1500, MN_K = 24, MN_BOT_ELO_VERSION = 1;
 async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Unentschieden
   const setE = (t, c) => { const e = document.getElementById("mnEndE"); if (e) { e.textContent = t; e.style.color = c || "#fff"; } };
-  const M = MN; if (!M || M.reported) return; M.reported = true;
+  const M = MN; if (!M || M.reported) return; M.reported = true; window._mnSaveUntil = Date.now() + 12000;
   if (!mnUnlocked()) { setE("🛡 Admin test – no ELO saved", "#c9cdd6"); return; }
   if (!(fbReady && RPC && myUid && onlineAccount)) { setE("Log in to an online account to earn Minions ELO", "#c9cdd6"); return; }
   try {
@@ -14762,6 +14765,8 @@ const RX = { de: [
   [/^Your ELO: (.+)$/, "Dein ELO: $1"],
   [/^Round (\d+)\/(\d+)$/, "Runde $1/$2"],
   [/^1v1 vs (.+)$/, "1v1 gegen $1"],
+  [/^Playing 1vs1 vs (.+)$/, "Spielt 1vs1 gegen $1"],
+  [/^Playing Minions vs (.+)$/, "Spielt Minions gegen $1"],
   [/^Playing (.+)$/, (m, g) => "Spielt " + (DICT.de[g] || g)],
   [/^📺 LIVE GAME TV \(Average: (\d+) ELO\)$/, "📺 LIVE-SPIEL-TV (Durchschnitt: $1 ELO)"],
   [/^Error: (.+)$/, "Fehler: $1"],
@@ -16380,6 +16385,9 @@ async function modDeleteChatMsg(key) {
       if (running && mode === "online" && !survivalActive && !onlineResultHandled) return true;
       if (survivalActive) return true;
       if (mode === "streak" && document.body.classList.contains("ingame")) return true;
+      if (typeof MN !== "undefined" && MN && MN.phase === "play") return true;   // Minions laeuft (inkl. Countdown)
+      if (Date.now() < (window._mnSaveUntil || 0)) return true;                   // Minions-Ergebnis wird gerade gespeichert
+      if (running && mode !== "online_tv") return true;                           // jedes andere laufende Spiel (Single, Mirror, Coin, ...)
     } catch (e) {}
     return false;
   }
