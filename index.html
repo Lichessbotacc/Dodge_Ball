@@ -13439,16 +13439,17 @@ const MN_RY = 40;                               // Gegner-Arena beginnt hier (y)
 // Preise: Einkommen ~2/s am Start (steigt auf ~5/s nach 2 min, ~8/s nach 3 min), Start 10 Punkte.
 // Preis ~ Gefahr x Lebensdauer: billig = langsam/kurz, teuer = schnell, schlau oder gross.
 // Preise (Simulation, alle Baelle 10 s): Reg 8, Dsh 20, Tel 16, Zig 12, Bul 22, Cha 28, Spl 18, Gia 30
-const MN_TYPES = [
+const MN_TYPES = [   // nach Preis sortiert (Tasten 1-8 folgen der Reihenfolge)
   { key:"1", id:"reg", name:"Regular",    cost: 10, w:4 },   // slow, 25 s
   { key:"2", id:"zig", name:"Zigzag",     cost: 12, w:3 },   // wiggles around
   { key:"3", id:"tel", name:"Teleporter", cost: 16, w:3 },   // jumps near you every 2.5 s (0.5 s warning)
-  { key:"4", id:"spl", name:"Splitter",   cost: 18, w:2 },   // splits into 3
-  { key:"5", id:"dsh", name:"Dasher",     cost: 20, w:3 },   // creeps, pauses (blinks), then dashes at you
-  { key:"6", id:"bul", name:"Bullet",     cost: 22, w:3 },   // aimed at you
-  { key:"7", id:"gia", name:"Giant",      cost: 26, w:2 },   // huge, 20 s
-  { key:"8", id:"cha", name:"Chaser",     cost: 28, w:3 }    // follows you
+  { key:"4", id:"dsh", name:"Dasher",     cost: 20, w:3 },   // creeps, pauses (blinks), then dashes at you
+  { key:"5", id:"bul", name:"Bullet",     cost: 22, w:3 },   // aimed at you
+  { key:"6", id:"gia", name:"Giant",      cost: 26, w:2 },   // huge, 20 s
+  { key:"7", id:"cha", name:"Chaser",     cost: 28, w:3 },   // follows you
+  { key:"8", id:"spl", name:"Splitter",   cost: 30, w:2 }    // splits into 3 (slower fragments)
 ];
+const MN_LEGACY = ["reg","zig","tel","spl","dsh","bul","gia","cha"];   // alte Reihenfolge: Kauf-Events bleiben mit aelteren Versionen kompatibel
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
 const MN_CFG = { startPts:50, incBase:4, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
@@ -13804,7 +13805,7 @@ function mnMakeBall(t, S) {
   else if (t === "zig") { r = 13 + R() * 4;  spd = 4.2; life = 60 * 10; col = "#ff6ad5"; zig = true; }
   else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 10;  col = "#ff9d00"; chase = true; turn = 0.03; }
   else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 25; col = "#35d6a6"; split = 60 * 20; }
-  else if (t === "frg") { r = 9 + R() * 2;   spd = 4.6; life = 60 * 6;  col = "#35d6a6"; }
+  else if (t === "frg") { r = 9 + R() * 2;   spd = 3.8; life = 60 * 6;  col = "#35d6a6"; }
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 10; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
   while (!ok && n++ < 80) {
@@ -13823,7 +13824,7 @@ function mnBuy(buyer, ti) {
   if (B.pts < cost || V.balls.length + cnt > MN_CFG.maxBalls) return false;
   B.pts -= cost;
   if (MN.net && buyer === 0) {   // Online: Ball wird beim Gegner erzeugt (Event), nicht lokal
-    const NT = MN.net; NT.evLog.push({ id: ++NT.evSeq, i: ti, pm: perm ? 1 : 0 }); if (NT.evLog.length > 12) NT.evLog.shift();
+    const NT = MN.net; NT.evLog.push({ id: ++NT.evSeq, i: Math.max(0, MN_LEGACY.indexOf(T.id)), t: T.id, pm: perm ? 1 : 0 }); if (NT.evLog.length > 12) NT.evLog.shift();
     RPC.setMatchPath(NT.id, "mnE_" + NT.role, JSON.stringify(NT.evLog)).catch(() => {});
     MN.sent++; try { SFX.play("spawn"); } catch (e) {}
     return true;
@@ -14008,7 +14009,7 @@ function mnApplySnap(M, o) {
   B.balls = (o.b || []).map(a => ({ type: a[0], x: a[1], y: a[2], r: a[3], warm: a[4], chase: !!(a[5] & 1), perm: !!(a[5] & 2), life: (a[5] & 4) ? 60 : 9999, vx: a[6], vy: a[7], col: MN_COL[a[0]] || "#ff4444" }));
 }
 function mnRecvBuy(M, e) {
-  const T = MN_TYPES[e.i], P = M.sides[0]; if (!T || M.phase !== "play" || P.balls.length >= MN_CFG.maxBalls) return;
+  const T = (e.t && MN_TYPES.find(x => x.id === e.t)) || MN_TYPES.find(x => x.id === MN_LEGACY[e.i]), P = M.sides[0]; if (!T || M.phase !== "play" || P.balls.length >= MN_CFG.maxBalls) return;
   const nb = mnMakeBall(T.id, P); if (e.pm) { nb.life = Infinity; nb.perm = true; } P.balls.push(nb);
 }
 function mnNetSend(M) {
