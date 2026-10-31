@@ -13903,7 +13903,7 @@ function mnMakeBall(t, S) {
   else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 25; col = "#35d6a6"; split = 60 * 20; }
   else if (t === "frg") { r = 9 + R() * 2;   spd = 3.8; life = 60 * 6;  col = "#35d6a6"; }
   else if (t === "mni") { r = 9;             spd = 2.2; life = 60 * 5;  col = "#b7ff6a"; }   // Mini-Ball vom Spawner
-  else if (t === "spn") { r = 22;            spd = 0;   life = Infinity; col = "#8bff3d"; }   // Spawner (bleibt fuer immer)
+  else if (t === "spn") { r = 22;            spd = 0;   life = 60 * 14; col = "#8bff3d"; }   // Spawner (normal 14 s, Perma: fuer immer)
   else if (t === "las") { r = 8;             spd = 0;   life = 60 * 4;  col = "#ff355e"; }   // Laser
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 10; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
@@ -13950,7 +13950,7 @@ function mnStepBalls(S) {
   for (let i = S.balls.length - 1; i >= 0; i--) {
     const b = S.balls[i];
     if (b.warm > 0) { b.warm--; continue; }
-    if (--b.life <= 0) { S.balls.splice(i, 1); continue; }
+    if (--b.life <= 0) { if (b.type === "spn" && b.sid) for (const x of S.balls) if (x.own === b.sid) x.life = 0; S.balls.splice(i, 1); continue; }
     if (b.type === "las") { mnStepLaser(S, b, i); continue; }
     if (b.type === "spn") { mnStepSpawner(S, b); continue; }
     if (b.tele > 0 && --b.tele === 0) {
@@ -14009,11 +14009,13 @@ function mnStepLaser(S, b, i) {
   else if (b.lph === 2) { if (--b.pt <= 0) { if (b.perm) { b.lph = 3; b.pt = 150; } else S.balls.splice(i, 1); } }
   else if (--b.pt <= 0) { b.lph = 0; b.pt = 78; }
 }
+let MN_SID = 0;
 function mnStepSpawner(S, b) {
   if (--b.spt > 0) return;
   b.spt = b.perm ? 220 : 150;                        // alle 2,5 s (Perma: 3,7 s)
   if (S.balls.length >= MN_CFG.maxBalls - 1) return;
   const m = mnMakeBall("mni", S), a = Math.atan2(S.y - b.y, S.x - b.x) + (Math.random() - 0.5) * 0.7;
+  if (!b.sid) b.sid = ++MN_SID; m.own = b.sid; m.life = Infinity; if (b.perm) m.perm = true;   // Baelle bleiben, bis ihr Spawner despawnt
   m.x = b.x; m.y = b.y; m.vx = Math.cos(a) * m.spd; m.vy = Math.sin(a) * m.spd; m.warm = 30;
   S.balls.push(m);
 }
