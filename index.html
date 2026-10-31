@@ -2392,7 +2392,7 @@ async function rpcTournDelete(id) {
 }
 async function rpcClanWrite(path, v) {
   requireNotBanned(); requireUid();
-  if (!/^(clans\/[A-Za-z0-9]{1,40}(\/(desc|leader|pin|mode))?|clanReq\/[A-Za-z0-9]{1,40}\/[A-Za-z0-9_-]{6,128}|clanChat\/[A-Za-z0-9]{1,40}(\/[A-Za-z0-9_-]{8,40})?|clanMembers\/[A-Za-z0-9]{1,40}\/[A-Za-z0-9_-]{6,128}|clanOf\/[A-Za-z0-9_-]{6,128}|clanCreateAt\/[A-Za-z0-9_-]{6,128})$/.test(path)) throw new Error("Bad clan path.");
+  if (!/^(clans\/[A-Za-z0-9]{1,40}(\/(desc|leader|pin|mode))?|clanReq\/[A-Za-z0-9]{1,40}\/[A-Za-z0-9_-]{6,128}|clanChat\/[A-Za-z0-9]{1,40}(\/[A-Za-z0-9_-]{8,40})?|clanMembers\/[A-Za-z0-9]{1,40}\/[A-Za-z0-9_-]{6,128}|clanOf\/[A-Za-z0-9_-]{6,128}|clanCreateAt\/[A-Za-z0-9_-]{6,128}|clanHistM\/[0-9]{4}-[0-9]{2}\/[A-Za-z0-9]{1,40}\/[A-Za-z0-9_-]{6,128})$/.test(path)) throw new Error("Bad clan path.");
   if (path.indexOf("clanCreateAt/") === 0) { if (path !== "clanCreateAt/" + requireUid() || !v || !/^[A-Za-z0-9]{1,40}$/.test(String(v.cid))) throw new Error("Bad clan path."); return set(ref(db, path), { ts: serverTimestamp(), cid: String(v.cid) }); }
   return v === null ? remove(ref(db, path)) : set(ref(db, path), v);
 }
@@ -12485,7 +12485,7 @@ function renderView(cid, d, my) {
   overlay(`<button class="cl-b cl-back" onclick="clanUI.back()">← Back</button>
     <div class="cl-head">${badge(c.name, 1)}<div style="flex:1;min-width:0"><h2 style="margin:0">${esc(c.name)}</h2><p class="cl-sub" style="margin:4px 0 0">${esc(c.desc) || "—"}</p><p class="cl-sub" style="margin:4px 0 0">${MODE_T[modeOf(c)]}${lead ? " · 👑 " + esc(lead[1].name) : ""}</p></div></div>
     <div class="cl-stats"><div><small>Month points</small><b>🏆 ${x.pts}</b></div><div><small>Rank</small><b>#${pos}</b></div><div><small>Members</small><b>${x.n}/${MAXM}</b></div></div>
-    <p class="cl-reset">Points reset monthly · next reset ${resetLeft()}</p>
+    <p class="cl-reset">Points reset monthly · next reset ${resetLeft()}</p><p class="cl-reset"><button class="cl-b" onclick="clanCal.open()">📅 Monthly history</button></p>
     ${jb}${pin}<h3>Members</h3>${rows}`);
 }
 function renderMine(my, d) {
@@ -12502,7 +12502,7 @@ function renderMine(my, d) {
   }).join("");
   const head = `<div class="cl-head">${badge(my.clan.name, 1)}<div style="flex:1;min-width:0"><h2 style="margin:0">${esc(my.clan.name)}</h2><p class="cl-sub" style="margin:4px 0 0">${esc(my.clan.desc) || "—"}</p></div></div>
     <div class="cl-stats"><div><small>Month points</small><b>🏆 ${total(my.members)}</b></div><div><small>Rank</small><b>#${pos}</b></div><div><small>Members</small><b>${ms.length}/${MAXM}</b></div></div>
-    <p class="cl-reset">Points reset monthly · next reset ${resetLeft()}</p>`;
+    <p class="cl-reset">Points reset monthly · next reset ${resetLeft()}</p><p class="cl-reset"><button class="cl-b" onclick="clanCal.open()">📅 Monthly history</button></p>`;
   const reqIds = Object.keys(my.req || {});
   let body;
   if (t === "top") body = clanRows(all.slice(0, 50), false);
@@ -12651,11 +12651,67 @@ try {
   }
 } catch (e) {}
 if (inviteName || inviteCid) setTimeout(() => { try { if (typeof onlineAccount !== "undefined" && onlineAccount && !document.getElementById("clanOv")) openClans(false); } catch (e) {} }, 3000);
+// ── CLAN-ARCHIV: nur Monatsergebnisse, werden nie zurueckgesetzt (clanHistM/{YYYY-MM}/{clan}/{uid}) ──
+const pad2 = n => String(n).padStart(2, "0");
+const CAL_MN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+async function clanArchiveMine() {
+  try {
+    const u = W().myUid(); if (!u) return;
+    const cid = await W().get("clanOf/" + u); if (!cid) return;
+    const m = await W().get("clanMembers/" + cid + "/" + u);
+    if (!m || !m.pm || m.pm >= MK() || !(m.pts > 0)) return;
+    const cl = await W().get("clans/" + cid).catch(() => null);
+    await w("clanHistM/" + m.pm + "/" + cid + "/" + u, { name: String(m.name || "Player").slice(0, 30), pts: m.pts, cn: String((cl && cl.name) || "").slice(0, 24) });
+    await w("clanMembers/" + cid + "/" + u, rec(m));
+  } catch (e) { console.warn("clan archive", e); }
+}
+window.clanCal = (function () {
+  let Y = 0, SEL = 0, ARCH = {}, LIVE = {}, CLANS = {};
+  function month(key) {
+    const b = berlin(), out = {};
+    const put = (cid, cn, u, name, v) => { const c = out[cid] || (out[cid] = { cn: "", p: {} }); if (cn) c.cn = cn; c.p[u] = { name: name, v: v }; };
+    Object.entries(ARCH[key] || {}).forEach(([cid, mm]) => Object.entries(mm || {}).forEach(([u, x]) => put(cid, x.cn, u, x.name, x.pts || 0)));
+    Object.entries(LIVE).forEach(([cid, mm]) => Object.entries(mm || {}).forEach(([u, x]) => { if (x && (x.pm || b.key) === key) put(cid, CLANS[cid] && CLANS[cid].name, u, x.name, x.pts || 0); }));
+    Object.entries(out).forEach(([cid, c]) => { if (!c.cn) c.cn = (CLANS[cid] && CLANS[cid].name) || "Clan"; });
+    return out;
+  }
+  function block(data) {
+    const cl = Object.values(data).map(c => ({ cn: c.cn, p: Object.values(c.p).filter(x => x.v > 0).sort((a, b) => b.v - a.v) })).filter(c => c.p.length)
+      .map(c => Object.assign(c, { t: c.p.reduce((s, x) => s + x.v, 0) })).sort((a, b) => b.t - a.t);
+    if (!cl.length) return '<p class="cl-sub">No results saved for this month.</p>';
+    return cl.map((c, i) => `<div class="cl-card">${rk(i)}<div class="cl-main"><b>🛡 ${esc(c.cn || "Clan")}</b></div><div class="cl-pts">🏆 ${c.t}</div></div>` + c.p.map(x => `<div style="display:flex;justify-content:space-between;padding:3px 14px 3px 54px;font-size:13px;color:#d6d8f5"><span>${esc(x.name)}</span><b>${x.v}</b></div>`).join("")).join("");
+  }
+  function render() {
+    const b = berlin(); let cells = "";
+    for (let m = 1; m <= 12; m++) {
+      const key = Y + "-" + pad2(m), has = Object.values(month(key)).some(c => Object.values(c.p).some(x => x.v > 0)), now = (key === b.key);
+      cells += `<button class="cl-b" style="margin:0;padding:12px 0;${SEL === m ? "background:linear-gradient(135deg,#6c4cff,#c94cff);" : has ? "border-color:#ffd96a;color:#ffd96a;" : "opacity:.5;"}${now ? "outline:2px solid #c94cff;" : ""}" onclick="clanCal.sel(${m})">${CAL_MN[m - 1].slice(0, 3)}</button>`;
+    }
+    const det = SEL ? `<h3>${CAL_MN[SEL - 1]} ${Y}</h3>` + block(month(Y + "-" + pad2(SEL))) : "";
+    overlay(`<button class="cl-b cl-back" onclick="openClans()">← Back</button><h2>📅 Clan history</h2><p class="cl-sub">Monthly clan results are saved forever. Gold = results saved.</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">${btn("clanCal.open(" + (Y - 1) + ")", "◀")}<b>${Y}</b>${btn("clanCal.open(" + (Y + 1) + ")", "▶")}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">${cells}</div>${det}`);
+  }
+  async function open(y) {
+    const b = berlin(); const first = !y; Y = y || b.y; SEL = (Y === b.y) ? b.m : 0;
+    overlay("<p>Loading…</p>");
+    clanArchiveMine();
+    try {
+      const g = p => W().get(p).catch(() => null);
+      const [arch, live, clans] = await Promise.all([g("clanHistM"), g("clanMembers"), g("clans")]);
+      ARCH = arch || {}; LIVE = live || {}; CLANS = clans || {};
+      render();
+    } catch (e) { overlay('<button class="cl-b cl-back" onclick="openClans()">← Back</button><p class="cl-sub">Could not load the history: ' + esc(e && e.message || e) + "</p>"); }
+  }
+  return { open: open, sel: m => { SEL = m; render(); } };
+})();
+
 async function clanAddWin() {
   try {
     const u = W().myUid(); if (!u) return;
     const cid = await W().get("clanOf/" + u); if (!cid) return;
     const m = await W().get("clanMembers/" + cid + "/" + u); if (!m) return;
+    await clanArchiveMine();
     await w("clanMembers/" + cid + "/" + u, rec(m, { pts: pts(m) + 1 }));
   } catch (e) { console.warn("clan win", e); }
 }
