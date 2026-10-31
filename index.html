@@ -2715,14 +2715,17 @@ function _legacyOnline(p) {
   return Date.now() - (p.lastActive || 0) < 3 * 3600 * 1000;   // clientVer fehlt/alt -> Alt-Version
 }
 let _playerSearchToken = 0;
-function _eloHistAppend(arr, pt, seed) {
-  const h = (Array.isArray(arr) ? arr : []).filter(x => x && Number.isFinite(Number(x.elo)));
+function _eloHistAppend(arr, pt, seed, n) {
+  // Max. 100 Punkte fuer die GANZE Zeit: Abstand zwischen den Punkten verdoppelt sich, je mehr Spiele (n = Spiele inkl. diesem)
+  const st = k => { let q = 1; while (k / q > 90) q *= 2; return q; };
+  let h = (Array.isArray(arr) ? arr : []).filter(x => x && Number.isFinite(Number(x.elo))).map(x => ({ ts: x.ts, elo: x.elo }));
   if (!h.length && seed) h.push(seed);
+  n = Math.max(1, Math.floor(Number(n) || 1));
+  const q = st(n);
+  if (q > st(n - 1)) h = h.filter((_, i) => i % 2 === 0 || i === h.length - 1);   // Abstand verdoppelt: jeden 2. alten Punkt entfernen
+  if (h.length > 1 && (n - 1) % q !== 0) h.pop();                                  // vorheriger "aktueller" Punkt ist nur ein Zwischenstand
   h.push(pt);
-  while (h.length > 100) {
-    const tail = h.slice(-30), mid = h.slice(1, h.length - 30).filter((_, i) => i % 2 === 1);
-    h.splice(0, h.length, h[0], ...mid, ...tail);
-  }
+  while (h.length > 100) h = h.filter((_, i) => i === 0 || i === h.length - 1 || i % 2 === 0);
   return h;
 }
 function _oppEloVal(v) { v = Math.round(Number(v) || 0); return v >= 100 ? v : 0; }
@@ -7069,9 +7072,7 @@ async function startSearchingOnline() {
   }, 2000);
   setTimeout(() => tryMatchmake(), 600);
 
-  onlineBotMatchTimeout = setTimeout(() => {
-    if (!onlineMatchId && !arenaSess) startBotMatch();
-  }, 30000);
+  // Kein automatisches Bot-Spiel mehr: nach 10 s erscheint nur das Angebot (Knopf "Play vs Online Bot").
 }
 // Knopf waehrend der Suche: sofort gegen den Online Bot spielen
 function playWithBotNow() {
@@ -13449,7 +13450,7 @@ async function openMinions() {
   _mnSrch = setInterval(() => {
     t++; const a = document.getElementById("onlineSearchAnim"); if (a) a.textContent = t % 2 ? "⌛" : "⏳";
     if (t === 10) { const bb = document.getElementById("botOffer"), bhh = document.getElementById("botHint"); if (bb) bb.style.display = "flex"; if (bhh) bhh.style.display = "none"; }
-    if (t >= mnLim) mnSearchGo();
+    // Kein automatisches Bot-Spiel mehr: nach 10 s erscheint nur das Angebot (Knopf)
   }, 1000);
   if (mnOnl) mnNetSearch(Number(myElo) || 1500);
 }
@@ -13529,7 +13530,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
     const d = r1(d0), e1 = Math.max(100, r1(e0 + d));
     const st = res === 0 ? g("curStreak") + 1 : 0;
     const _mnOppName = dn(M.oppName || "Online Bot");
-    const _mnHist = _eloHistAppend(cur.eloHistory, { ts: Date.now(), elo: e1 }, { ts: Date.now() - 1, elo: e0 });
+    const _mnHist = _eloHistAppend(cur.eloHistory, { ts: Date.now(), elo: e1 }, { ts: Date.now() - 1, elo: e0 }, g("wins") + g("losses") + g("draws") + 1);
     // Best Win / Worst Loss speichern die ELO des GEGNERS (alte Werte < 100 waren ELO-Aenderungen und werden ersetzt)
     const _mnOppE = Math.round(Number(M.oppElo != null ? M.oppElo : MN_BOT_ELO));
     const _mnBW = _oppEloVal(cur.bestWinChange), _mnWL = _oppEloVal(cur.worstLossChange);
@@ -13560,7 +13561,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
         const botLosses = botNum("losses") + (botRes === 1 ? 1 : 0);
         const botDraws = botNum("draws") + (botRes === -1 ? 1 : 0);
         const botStreak = botRes === 0 ? botNum("curStreak") + 1 : 0;
-        const botHistory = _eloHistAppend(botCur.eloHistory, { ts: Date.now(), elo: botNewElo }, { ts: Date.now() - 1, elo: botOldElo });
+        const botHistory = _eloHistAppend(botCur.eloHistory, { ts: Date.now(), elo: botNewElo }, { ts: Date.now() - 1, elo: botOldElo }, botNum("wins") + botNum("losses") + botNum("draws") + 1);
         const botPlayerElo = Math.round(e0);   // Gegner des Bots = der Spieler (ELO vor dem Match)
         const botBW = _oppEloVal(botCur.bestWinChange), botWL = _oppEloVal(botCur.worstLossChange);
         const botBWnew = botRes === 0 && botPlayerElo > botBW, botWLnew = botRes === 1 && (botWL === 0 || botPlayerElo < botWL);
