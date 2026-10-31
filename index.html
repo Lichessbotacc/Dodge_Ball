@@ -13408,7 +13408,7 @@ const MN_TYPES = [
   { key:"8", id:"cha", name:"Chaser",     cost: 28, w:3 }    // follows you
 ];
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
-const MN_CFG = { startPts:10, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
+const MN_CFG = { startPts:50, incBase:4, maxPts:300, hitBonus:15, permMul:3, lives:3, inv:90, warm:40, playerR:14, maxBalls:60, botSpeed:4.6 };
 let MN = null;
 const MN_UNLOCK_AT = Date.UTC(2026, 9, 29, 23, 0, 0);   // Fr 30.10.2026 00:00 Europe/Berlin (MEZ = UTC+1) - ab dann fuer alle
 function mnNow() { try { return srvNow(); } catch (e) { return Date.now(); } }
@@ -13937,7 +13937,7 @@ function mnNetAbort(M, msg) {
   mnNetStop(M, true);
   mnEndOverlay([msg, "Match cancelled – no ELO change"]);
 }
-function mnIncome(tick) { const s = tick / 60; return 2 + s / 20 + s * s / 6000; }
+function mnIncome(tick) { const s = tick / 60; return MN_CFG.incBase + s / 20 + s * s / 6000; }
 function minionsUpdate() {
   const M = MN; if (!M || M.phase !== "play") return;
   const NT = M.net; if (NT && !NT.go) return;   // Online: warten bis beide bereit sind
