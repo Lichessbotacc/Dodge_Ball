@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2615,6 +2616,27 @@ async function getHeadToHeadScore(uidA, uidB) {
 
 // Bot-Score lag bisher nur im localStorage -> Zuschauer (Online-TV) sahen bei Bot-Matches immer 0-0.
 // Jetzt wird er zusaetzlich nach headToHead/{myUid VS bot} gespiegelt (Rules erlauben das).
+// Spielstand gegen den Online Bot: lag nur im localStorage (wird z.B. von Safari/Browser geleert) und wurde dann mit 0-0 in die Datenbank ZURUECKgeschrieben.
+// Jetzt wird der gespeicherte Stand zuerst aus der Datenbank geholt und mit dem lokalen zusammengefuehrt (jeweils der hoehere Wert).
+let _botH2HP = null, _botH2HUid = null;
+function mergeBotH2H() {
+  if (!fbReady || !myUid) return Promise.resolve(null);
+  if (_botH2HP && _botH2HUid === myUid) return _botH2HP;
+  _botH2HUid = myUid;
+  const key = "h2h_bot_" + myUid;
+  _botH2HP = (async () => {
+    let ok = true, rem = null;
+    try { rem = await RPC.getHeadToHead(myUid, ONLINE_BOT_UID); } catch (e) { ok = false; }
+    let loc = { me: 0, bot: 0 }; try { loc = JSON.parse(localStorage.getItem(key) || '{"me":0,"bot":0}') || loc; } catch (e) {}
+    const me = Math.max(Number(loc.me) || 0, rem ? Number(rem[myUid]) || 0 : 0), bot = Math.max(Number(loc.bot) || 0, rem ? Number(rem[ONLINE_BOT_UID]) || 0 : 0);
+    try { localStorage.setItem(key, JSON.stringify({ me, bot })); } catch (e) {}
+    try { const hud = document.getElementById("onlineScoreHUD"); if (hud && onlineVsBot) hud.textContent = me + " - " + bot; } catch (e) {}
+    if (!ok) _botH2HP = null;   // Verbindungsfehler: spaeter nochmal versuchen und bis dahin NICHT in die Datenbank schreiben
+    return { me, bot, ok };
+  })();
+  return _botH2HP;
+}
+window.addEventListener("dobAuthReady", () => { setTimeout(() => { try { mergeBotH2H(); } catch (e) {} }, 1500); });
 function syncBotH2H(botScore) {
   try {
     if (!fbReady || !myUid || !botScore) return;
@@ -5081,7 +5103,7 @@ function campDisqualify(selfCamped) {
 //    • Nicht ueberwacht: "online" (hat eigene Logik oben), "online_tv" (nur Zuschauer).
 //  Regeln (Zone, Warnung 2.5s, Limit 5s) sind dieselben wie online: CAMP_ZONE / CAMP_WARN_MS / CAMP_LIMIT_MS / CAMP_DECAY.
 // ═══════════════════════════════════════════════
-const CAMP_SKIP = { online: 1, online_tv: 1 };
+const CAMP_SKIP = { online: 1, online_tv: 1, minions: 1 };
 const CAMP_ADAPTERS = {
   multi:      { humans: () => players.slice(0, 2) },
   tournament: {
@@ -7297,8 +7319,8 @@ async function startBotMatch() {
       status: "playing",
       createdAt: Date.now(),
       seed: Math.floor(Math.random() * 1000000)
-    }).then(() => {
-      try { syncBotH2H(JSON.parse(localStorage.getItem(`h2h_bot_${myUid}`) || '{"me":0,"bot":0}')); } catch (e) {}
+    }).then(() => mergeBotH2H()).then(m => {
+      if (m && m.ok) { try { syncBotH2H(JSON.parse(localStorage.getItem(`h2h_bot_${myUid}`) || '{"me":0,"bot":0}')); } catch (e) {} }
     }).catch(() => {});
   }
 
@@ -8107,18 +8129,17 @@ async function handleOnlineResult(winnerName, change) {
       getHeadToHeadScore(myUid, oppUid).then(showH2H).catch(() => {});
     });
   } else if (onlineVsBot) {
-    const botScoreKey = `h2h_bot_${myUid}`;
-    const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
-    if (won) {
-      botScore.me++;
-    } else {
-      botScore.bot++;
-    }
-    localStorage.setItem(botScoreKey, JSON.stringify(botScore));
-    syncBotH2H(botScore);
-    if (fbReady && onlineMatchId) RPC.updateMatch(onlineMatchId, { status: "done", winner: winnerName }).catch(() => {});
-    const scoreHUD = document.getElementById("onlineScoreHUD");
-    if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
+    const botScoreKey = `h2h_bot_${myUid}`, _won = won, _mid = onlineMatchId, _wn = winnerName;
+    if (fbReady && _mid) RPC.updateMatch(_mid, { status: "done", winner: _wn }).catch(() => {});
+    (async () => {
+      const merged = await mergeBotH2H();   // erst den gespeicherten Stand holen, damit er nie auf 0-0 zurueckfaellt
+      const botScore = JSON.parse(localStorage.getItem(botScoreKey) || '{"me":0,"bot":0}');
+      if (_won) botScore.me++; else botScore.bot++;
+      localStorage.setItem(botScoreKey, JSON.stringify(botScore));
+      if (merged && merged.ok) syncBotH2H(botScore);
+      const scoreHUD = document.getElementById("onlineScoreHUD");
+      if (scoreHUD) scoreHUD.textContent = `${botScore.me} - ${botScore.bot}`;
+    })();
   }
 
   const myOldExact = onlineAccount.elo;
@@ -13912,7 +13933,27 @@ function mnBotMove(S) {
     if (tx * (MN_AW / 2 - p.x) + ty * (MN_AH / 2 - p.y) < 0) { tx = -tx; ty = -ty; }   // Richtung Mitte: nicht in die Ecke druecken lassen
     chX += (ax * 0.5 + tx) * f * 3; chY += (ay * 0.5 + ty) * f * 3;
   }
-  let vx = moveX * 4 + avoidX * 10 + chX * 9, vy = moveY * 4 + avoidY * 10 + chY * 9;
+  // Dasher: (1) beim Blinken/Stillstand (Phase 1) weit weg + seitlich, denn gleich schiesst er in meine Richtung; (2) waehrend des Dashs (Phase 2, Tempo 9 > Bot-Tempo) quer zur Flugbahn ausweichen
+  let dsX = 0, dsY = 0;
+  for (const b of act) {
+    if (b.type !== "dsh") continue;
+    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1;
+    if (b.dph === 1) {
+      const RC = 270; if (dist >= RC) continue;
+      const f = (RC - dist) / RC, ax = dx / dist, ay = dy / dist;
+      let tx = -ay, ty = ax; if (tx * (MN_AW / 2 - p.x) + ty * (MN_AH / 2 - p.y) < 0) { tx = -tx; ty = -ty; }   // Richtung Mitte: nicht in die Ecke
+      dsX += (ax + tx * 0.5) * (0.6 + f) * 8; dsY += (ay + ty * 0.5) * (0.6 + f) * 8;
+    } else if (b.dph === 2) {
+      const sp = Math.hypot(b.vx, b.vy) || 1, ux = b.vx / sp, uy = b.vy / sp;
+      const along = dx * ux + dy * uy, cross = -dx * uy + dy * ux, rem = b.dash * sp + b.r + R + 30;
+      if (along > -(b.r + R) && along < rem && Math.abs(cross) < b.r + R + 26) {
+        let sg = cross >= 0 ? 1 : -1;
+        if (p.x - uy * sg * 60 < R || p.x - uy * sg * 60 > MN_AW - R || p.y + ux * sg * 60 < R || p.y + ux * sg * 60 > MN_AH - R) sg = -sg;   // nicht in die Wand ausweichen
+        dsX += -uy * sg * 30; dsY += ux * sg * 30;
+      }
+    }
+  }
+  let vx = moveX * 4 + avoidX * 10 + chX * 9 + dsX, vy = moveY * 4 + avoidY * 10 + chY * 9 + dsY;
   vx += (Math.random() - 0.5) * MN_BOT.randomness; vy += (Math.random() - 0.5) * MN_BOT.randomness;
   const len = Math.hypot(vx, vy) || 1;
   p.x += vx / len * MN_BOT.speed; p.y += vy / len * MN_BOT.speed;
@@ -14185,6 +14226,18 @@ function mnBotBroadcast(M, final) {
     RPC.updateMatch(BM.id, d).catch(() => {});
   } catch (e) {}
 }
+// Corner-Camping in Minions: gleiche Regeln wie im 1vs1 (Zone 17 %, Warnung ab 2,5 s, Niederlage ab 5 s, Abbau 25 %); der Bot wird wie im 1vs1 nicht geprueft
+function mnCampTick(M, P, B, NT) {
+  if (M.spec || !onlineAccount || M.phase !== "play") return;
+  const C = M.camp || (M.camp = { me: 0, opp: 0, last: Date.now(), done: false }), now = Date.now(), dt = Math.min(250, now - C.last);
+  C.last = now; if (C.done) return;
+  const z = Math.min(MN_AW, MN_AH) * CAMP_ZONE, deep = S => (S.x < z || S.x > MN_AW - z) && (S.y < z || S.y > MN_AH - z);
+  const upd = (m, S) => S.lives <= 0 ? m : (deep(S) ? m + dt : Math.max(0, m - dt * CAMP_DECAY));
+  C.me = upd(C.me, P); if (NT) C.opp = upd(C.opp, B);
+  if (C.me >= CAMP_WARN_MS) campWarn(true, Math.max(0, Math.ceil((CAMP_LIMIT_MS - C.me) / 1000))); else campWarn(false);
+  if (C.me >= CAMP_LIMIT_MS) { C.done = true; campWarn(false); campBanner("campMsg", "🚫 " + tr("Corner camping is not allowed – you lost the match."), "#ff4444", 8000); P.lives = 0; }
+  else if (NT && C.opp >= CAMP_LIMIT_MS + 1500) { C.done = true; campWarn(false); campBanner("campMsg", "🚫 " + tr("Opponent was disqualified for corner camping – you win!"), "#00ff88", 8000); B.lives = 0; }
+}
 function mnIncome(tick) { const s = tick / 60; return MN_CFG.incBase + s / 20 + s * s / 6000; }
 function minionsUpdate() {
   const M = MN; if (!M || M.phase !== "play") return;
@@ -14217,6 +14270,7 @@ function minionsUpdate() {
     }
     for (const f of S.fx) f.life--; S.fx = S.fx.filter(f => f.life > 0);
   }
+  mnCampTick(M, P, B, NT);
   if (!NT && M.botMatch && M.tick % 6 === 0) mnBotBroadcast(M);
   if (NT) {
     if (M.tick % 6 === 0) mnNetSend(M);
@@ -14230,7 +14284,7 @@ function minionsUpdate() {
     else if (P.lives <= 0 && M.tick - M.deadAt > 40) { mnEnd = true; mnWin = 1; }
   } else if (P.lives <= 0 || B.lives <= 0) { mnEnd = true; mnWin = P.lives <= 0 && B.lives <= 0 ? -1 : (P.lives <= 0 ? 1 : 0); }
   if (mnEnd) {
-    M.phase = "over"; M.winner = mnWin;
+    M.phase = "over"; M.winner = mnWin; campWarn(false);
     if (NT) mnNetStop(M, false); else if (M.botMatch) mnBotBroadcast(M, true);
     const sec = Math.floor(M.tick / 60);
     mnEndOverlay([M.winner === 0 ? "🏆 You win!" : M.winner === 1 ? "💀 " + (M.oppName || "Online Bot") + " wins" : "🤝 Draw", "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") + " · Balls sent: " + M.sent]);
