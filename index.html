@@ -13542,8 +13542,8 @@ const MN_TYPES = [   // nach Preis sortiert (Tasten 1-8 folgen der Reihenfolge)
   { key:"6", id:"gia", name:"Giant",      cost: 26, w:2 },   // huge, 20 s
   { key:"7", id:"cha", name:"Chaser",     cost: 28, w:3 },   // follows you
   { key:"8", id:"spl", name:"Splitter",   cost: 30, w:2 },   // splits into 3 (slower fragments)
-  { key:"9", id:"las", name:"Laser",      cost: 34, w:1 },   // locks on, 1.2 s warning, then a beam (max 2 at a time)
-  { key:"0", id:"spn", name:"Spawner",    cost: 44, w:1 }    // placed, spawns small balls (max 1 at a time)
+  { key:"9", id:"las", name:"Laser",      cost: 34, w:1 },   // locks on, 2.3 s warning, then a beam (max 2 at a time)
+  { key:"0", id:"spn", name:"Spawner",    cost: 64, w:1 }    // placed, stays forever, spawns slow small balls (max 1 at a time)
 ];
 const MN_LEGACY = ["reg","zig","tel","spl","dsh","bul","gia","cha"];   // alte Reihenfolge: Kauf-Events bleiben mit aelteren Versionen kompatibel
 // Preise: alle Ball-Kosten +60 % (gerundet), Dauer-Baelle (perm) nur noch 3x statt 5x
@@ -13902,8 +13902,8 @@ function mnMakeBall(t, S) {
   else if (t === "cha") { r = 13 + R() * 6;  spd = 2.8;  life = 60 * 10;  col = "#ff9d00"; chase = true; turn = 0.03; }
   else if (t === "spl") { r = 28 + R() * 6;  spd = 2.6; life = 60 * 25; col = "#35d6a6"; split = 60 * 20; }
   else if (t === "frg") { r = 9 + R() * 2;   spd = 3.8; life = 60 * 6;  col = "#35d6a6"; }
-  else if (t === "mni") { r = 9;             spd = 3.4; life = 60 * 5;  col = "#b7ff6a"; }   // Mini-Ball vom Spawner
-  else if (t === "spn") { r = 22;            spd = 0;   life = 60 * 14; col = "#8bff3d"; }   // Spawner
+  else if (t === "mni") { r = 9;             spd = 2.2; life = 60 * 5;  col = "#b7ff6a"; }   // Mini-Ball vom Spawner
+  else if (t === "spn") { r = 22;            spd = 0;   life = Infinity; col = "#8bff3d"; }   // Spawner (bleibt fuer immer)
   else if (t === "las") { r = 8;             spd = 0;   life = 60 * 4;  col = "#ff355e"; }   // Laser
   else                  { r = 55 + R() * 15; spd = 3.2;  life = 60 * 10; col = "#b05a5a"; }
   let x = r, y = r, ok = false, n = 0;
@@ -13914,11 +13914,11 @@ function mnMakeBall(t, S) {
   let a = R() * Math.PI * 2;
   if (aim) a = Math.atan2(S.y - y, S.x - x) + (R() - 0.5) * 0.7;
   const o = { type: t, x, y, r, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, spd, life, col, chase, turn, zig, ph: R() * 6, split, tele, dash, dph: 0, warm: MN_CFG.warm, ang: 0, lph: 0, pt: 0, spt: 0 };
-  if (t === "las") {   // Laser sitzt am Rand: Phase 0 zielt (0.7 s), 1 gesperrt+blinkt (0.5 s), 2 Strahl (0.4 s), 3 Pause (nur Perma, 2.5 s)
+  if (t === "las") {   // Laser sitzt am Rand: Phase 0 zielt (1.3 s), 1 gesperrt+blinkt (1.0 s), 2 Strahl (0.4 s), 3 Pause (nur Perma, 2.5 s)
     const side = Math.floor(R() * 4);
     o.x = side === 2 ? 0 : side === 3 ? MN_AW : R() * MN_AW; o.y = side === 0 ? 0 : side === 1 ? MN_AH : R() * MN_AH;
-    o.vx = 0; o.vy = 0; o.warm = 0; o.lph = 0; o.pt = 42; o.ang = Math.atan2(S.y - o.y, S.x - o.x);
-  } else if (t === "spn") { o.vx = 0; o.vy = 0; o.warm = 42; o.spt = 54; }
+    o.vx = 0; o.vy = 0; o.warm = 0; o.lph = 0; o.pt = 78; o.ang = Math.atan2(S.y - o.y, S.x - o.x);
+  } else if (t === "spn") { o.vx = 0; o.vy = 0; o.warm = 42; o.spt = 90; }
   return o;
 }
 // buyer kauft Ball -> landet in der Arena des Gegners
@@ -14004,14 +14004,14 @@ function mnHitAny(S, b) {
 }
 function mnStepLaser(S, b, i) {
   b.lph |= 0;
-  if (b.lph === 0) { b.ang = Math.atan2(S.y - b.y, S.x - b.x); if (--b.pt <= 0) { b.lph = 1; b.pt = 30; } }
+  if (b.lph === 0) { b.ang = Math.atan2(S.y - b.y, S.x - b.x); if (--b.pt <= 0) { b.lph = 1; b.pt = 60; } }
   else if (b.lph === 1) { if (--b.pt <= 0) { b.lph = 2; b.pt = 24; } }
   else if (b.lph === 2) { if (--b.pt <= 0) { if (b.perm) { b.lph = 3; b.pt = 150; } else S.balls.splice(i, 1); } }
-  else if (--b.pt <= 0) { b.lph = 0; b.pt = 42; }
+  else if (--b.pt <= 0) { b.lph = 0; b.pt = 78; }
 }
 function mnStepSpawner(S, b) {
   if (--b.spt > 0) return;
-  b.spt = b.perm ? 132 : 90;                         // alle 1,5 s (Perma: 2,2 s)
+  b.spt = b.perm ? 220 : 150;                        // alle 2,5 s (Perma: 3,7 s)
   if (S.balls.length >= MN_CFG.maxBalls - 1) return;
   const m = mnMakeBall("mni", S), a = Math.atan2(S.y - b.y, S.x - b.x) + (Math.random() - 0.5) * 0.7;
   m.x = b.x; m.y = b.y; m.vx = Math.cos(a) * m.spd; m.vy = Math.sin(a) * m.spd; m.warm = 30;
