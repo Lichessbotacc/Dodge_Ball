@@ -612,6 +612,7 @@ h2::after{
 #lbTable .lb-row.lb-r3 > span:nth-child(1){color:#e8935a;}
 #lbTable .lb-me{position:sticky;bottom:0;background:#0d2a1e;border-top:1px solid var(--neon-green);}
 #lbTable .lb-row.lb-hide{display:none !important;}
+#lbTable .lb-on{display:inline-block;width:9px;height:9px;border-radius:50%;background:#2bff7a;box-shadow:0 0 6px #2bff7a;margin-right:6px;vertical-align:middle;}
 @media (max-width:480px){#lbTable .lb-row{grid-template-columns:44px minmax(0,1fr) auto minmax(48px,auto);gap:8px;padding:9px 10px;}}
 input[type=text],input[type=number],input[type=password],select{
   padding:12px 18px;font-size:18px;border-radius:10px;
@@ -2730,7 +2731,32 @@ function _eloHistAppend(arr, pt, seed, n) {
 }
 function _oppEloVal(v) { v = Math.round(Number(v) || 0); return v >= 100 ? v : 0; }
 function _oppEloText(elo, name) { const e = _oppEloVal(elo); return (name ? escapeHtml(String(name)) : "-") + (e ? " (" + e + " ELO)" : ""); }
+// Gruener Punkt im Leaderboard: Spieler ist gerade online (gleiche Regel wie in der Liste der aktiven Spieler)
+window._lbPlayers = null;
+function lbIsOnline(uid) {
+  if (!uid) return false;
+  if (uid === myUid && onlineAccount) return true;
+  const p = (window._lbPlayers || window._lastPlayersData || {})[uid]; if (!p) return false;
+  return !!(p.status && p.status !== "offline" && (Date.now() - (p.lastActive || 0) < 120000 || (typeof _legacyOnline === "function" && _legacyOnline({ uid, ...p }))));
+}
+function lbMarkOnline() {
+  const t = document.getElementById("lbTable"); if (!t) return;
+  t.querySelectorAll(".lb-row[onclick]").forEach(row => {
+    const m = /openOnlineProfile\('([^']+)'\)/.exec(row.getAttribute("onclick") || ""), nm = row.children[1];
+    if (!m || !nm) return;
+    const dot = nm.querySelector(":scope > .lb-on"), on = lbIsOnline(m[1]);
+    if (on && !dot) { const d = document.createElement("span"); d.className = "lb-on"; d.title = "Online"; nm.insertBefore(d, nm.firstChild); }
+    else if (!on && dot) dot.remove();
+  });
+}
+setInterval(async () => {
+  const sc = document.getElementById("leaderboardScreen");
+  if (!sc || sc.style.display !== "flex" || !fbReady) return;
+  try { const d = await dbGet("players"); if (d) window._lbPlayers = d; } catch (e) {}
+  lbMarkOnline();
+}, 10000);
 function lbApplyFilter() {
+  lbMarkOnline();
   const inp = document.getElementById("lbSearch"), t = document.getElementById("lbTable");
   if (!t) return;
   const q = inp ? inp.value.trim().toLowerCase() : "";
@@ -2984,6 +3010,15 @@ function stopChallengeListener() {
 }
 function hideChallengeBox() { const b = document.getElementById("challengeBox"); if (b) b.remove(); challengeShown = null; }
 
+async function mnLookupElo(uid) {   // Minions-ELO + Minions-Rang eines Spielers (nicht die Survival-1vs1-ELO)
+  try {
+    let mb = null; try { mb = await _dbGetT("minionsBoard"); } catch (e) { mb = await RPC.get("minionsBoard"); }
+    const rows = Object.entries(mb || {}).map(([u, r]) => ({ uid: u, elo: Number(r && r.elo) || 0, g: (Number(r && r.wins) || 0) + (Number(r && r.losses) || 0) + (Number(r && r.draws) || 0) })).filter(r => r.g > 0);
+    const row = rows.find(r => r.uid === uid);
+    if (!row) return { elo: 1500, rank: null };
+    return { elo: Math.round(row.elo), rank: rows.filter(r => r.uid !== uid && r.elo > row.elo).length + 1 };
+  } catch (e) { return null; }
+}
 function renderChallengeBox() {
   if (!challengeUnsub && fbReady && myUid && onlineAccount) startChallengeListener();
   if (challengeUnsub && !onlineAccount) { stopChallengeListener(); return; }
@@ -3010,11 +3045,12 @@ function renderChallengeBox() {
     box.querySelector(".ch-title").textContent = "⚔ " + tr("CHALLENGE RECEIVED");
     box.querySelector(".ch-name").textContent = dn(name);
     box.querySelector(".ch-mode").textContent = incomingGame === "minions" ? "GAME MODE: MINIONS 1vs1" : "GAME MODE: SURVIVAL 1vs1";
-    box.querySelector(".ch-elo b").textContent = "ELO " + elo;
-    box.querySelector(".ch-elo i").textContent = rank ? "#" + rank : "";
+    box.querySelector(".ch-elo b").textContent = incomingGame === "minions" ? "ELO \u2026" : "ELO " + elo;
+    box.querySelector(".ch-elo i").textContent = incomingGame === "minions" ? "" : (rank ? "#" + rank : "");
     box.querySelector(".ch-yes").addEventListener("click", () => acceptChallenge(pick.k));
     box.querySelector(".ch-no").addEventListener("click", () => declineChallenge(pick.k));
     document.body.appendChild(box);
+    if (incomingGame === "minions") mnLookupElo(pick.k).then(r => { if (!r || !box.isConnected) return; box.querySelector(".ch-elo b").textContent = "ELO " + r.elo; box.querySelector(".ch-elo i").textContent = r.rank ? "#" + r.rank : ""; });
     challengeShown = pick.k + ":" + pick.c.ts;
   }
   const bar = box.querySelector(".ch-bar i");
@@ -3569,6 +3605,7 @@ function currentPresenceStatus() {
     const _m = document.getElementById("menu");
     if (_m && _m.style.display === "flex") return "Idle in Menu";
     if (mode === "streak" && document.body.classList.contains("ingame")) return "Playing Streaks";
+    if (mode === "minions" && typeof MN !== "undefined" && MN && MN.spec) return "Watching Online TV";
     if (mode === "minions" && (running || (typeof MN !== "undefined" && MN && MN.phase === "play"))) {
       return "Playing Minions 1vs1 vs " + ((typeof MN !== "undefined" && MN && MN.oppName) || "Online Bot");
     }
@@ -10576,6 +10613,8 @@ function tvBuildBoard(rows) {
 function watchPlayerTV(uid) {
   if (!uid || !fbReady) return;
   if (inMatchOrSurvival()) { challengeToast("You are in a match right now", "#ff8844"); return; }
+  const _wst = String(((window._lastPlayersData || {})[uid] || {}).status || "");
+  if (_wst.indexOf("Playing Minions") === 0) { mnWatch(uid); return; }
   startOnlineTV(uid);
 }
 async function startOnlineTV(targetUid) {
@@ -13495,6 +13534,7 @@ async function mnRefreshMyElo() {
   } catch (e) {}
 }
 setInterval(mnRefreshMyElo, 60000); setTimeout(mnRefreshMyElo, 2000); setTimeout(mnRefreshMyElo, 6000);
+setTimeout(() => { try { const o = localStorage.getItem("mnLastBotDoc"); if (o && fbReady && RPC && myUid && !(MN && MN.botMatch && MN.botMatch.id === o)) { RPC.removeMatch(o).catch(() => {}); localStorage.removeItem("mnLastBotDoc"); } } catch (e) {} }, 8000);
 function updOnlineBtn() {
   const b = document.getElementById("onlineBtn"); if (!b) return;
   if (!b.dataset.base) b.dataset.base = (b.firstChild && b.firstChild.textContent || b.textContent).trim();
@@ -13540,6 +13580,12 @@ function startMinions(net) {
   MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0 };
   mnEndOverlay(null); mnMoveId = null; mnLoadRanks(MN);
   if (net) mnNetInit(net);
+  else if (fbReady && RPC && myUid && onlineAccount && mnUnlocked()) {   // Bot-Spiel: als Match sichtbar machen (Zuschauen)
+    const _id = "BOT__MN__" + myUid + "__" + Date.now(), _M = MN;
+    _M.botMatch = { id: _id, n: 0 };
+    try { const _old = localStorage.getItem("mnLastBotDoc"); if (_old && _old !== _id) RPC.removeMatch(_old).catch(() => {}); localStorage.setItem("mnLastBotDoc", _id); } catch (e) {}
+    RPC.createMatch(_id, { p1uid: myUid, p2uid: ONLINE_BOT_UID, p1: onlineAccount.name, p2: "Online Bot", status: "mn", game: "minions", createdAt: Date.now() }).catch(() => { if (_M.botMatch && _M.botMatch.id === _id) _M.botMatch = null; });
+  }
   running = true; startTime = Date.now();
   try { syncPresence(true); } catch (e) {}
 }
@@ -13645,9 +13691,10 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
 }
 function mnLeave() {   // Match mitten im Spiel verlassen = Niederlage
   const M = MN;
+  if (M && M.spec) { try { M.specUnsub && M.specUnsub(); } catch (e) {} M.phase = "over"; return null; }   // Zuschauer: nichts speichern
   if (mode !== "minions" || !M || M.phase !== "play") return null;
   M.phase = "over"; M.winner = 1;
-  if (M.net) mnNetStop(M, true);
+  if (M.net) mnNetStop(M, true); else if (M.botMatch) mnBotBroadcast(M, true);
   return mnReport(1, true);
 }
 async function mnEloPanel(rows) {
@@ -13837,8 +13884,9 @@ function mnStepBalls(S) {
 const MN_BOT = (() => { const s = 0.17; return { speed: 2.5 + s * 8, awareness: 80 + s * 100, dodgePower: 0.5 + s * 3.5, randomness: (1 - s) * 4 }; })();
 function mnBotMove(S) {
   const p = S, R = MN_CFG.playerR, act = S.balls.filter(b => !(b.warm > 0));
+  const bigX = b => Math.max(0, (b.r || 25) - 25);   // grosse Baelle (Giant) brauchen mehr Abstand: Reichweite waechst mit dem Radius
   let danger = false;
-  for (const b of act) { if (Math.hypot(p.x - b.x, p.y - b.y) < MN_BOT.awareness) { danger = true; break; } }
+  for (const b of act) { if (Math.hypot(p.x - b.x, p.y - b.y) - bigX(b) < MN_BOT.awareness) { danger = true; break; } }
   if (!danger) {
     if (p.targetX == null || p.targetY == null || Math.random() < 0.02) { p.targetX = Math.random() * MN_AW; p.targetY = Math.random() * MN_AH; }
   }
@@ -13850,8 +13898,8 @@ function mnBotMove(S) {
   if (p.y < wm) avoidY += (wm - p.y) * 0.03;
   if (p.y > MN_AH - wm) avoidY -= (p.y - (MN_AH - wm)) * 0.03;
   for (const b of act) {
-    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1;
-    if (dist < MN_BOT.awareness) { const f = Math.max(0, (MN_BOT.awareness - dist) / MN_BOT.awareness) * MN_BOT.dodgePower * 2; avoidX += dx / dist * f; avoidY += dy / dist * f; }
+    const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy) || 1, ex = bigX(b), eff = dist - ex;
+    if (eff < MN_BOT.awareness) { const f = Math.max(0, (MN_BOT.awareness - eff) / MN_BOT.awareness) * MN_BOT.dodgePower * 2 * (1 + ex / 40); avoidX += dx / dist * f; avoidY += dy / dist * f; }
   }
   let chX = 0, chY = 0;
   for (const b of act) {
@@ -13988,9 +14036,158 @@ function mnNetAbort(M, msg) {
   mnNetStop(M, true);
   mnEndOverlay([msg, "Match cancelled – no ELO change"]);
 }
+// ===== Minions: ZUSCHAUEN =====
+// Beide Spieler senden ihre Arena (mnS_p1 / mnS_p2) ins Match; ein Zuschauer liest beide mit, spielt nichts selbst und speichert nichts.
+async function mnWatch(uid) {
+  try {
+    if (mnLocked()) { challengeToast("Minions 1vs1 is still locked", "#ffcc66"); return; }
+    challengeToast("Looking for the match\u2026", "#9ad0ff");
+    const all = await _dbGetT("onlineMatches");
+    let best = null;
+    for (const [id, m] of Object.entries(all || {})) {
+      if (!m || m.game !== "minions" || m.status !== "mn" || (m.p1uid !== uid && m.p2uid !== uid)) continue;
+      if (Date.now() - (Number(m.createdAt) || 0) > 30 * 60 * 1000) continue;
+      if (m.p2uid === ONLINE_BOT_UID) {   // Bot-Spiel: nur wenn gerade Daten gesendet werden (sonst alter Rest)
+        let t = 0; try { t = (JSON.parse(m.mnS_p1 || "null") || {}).t || 0; } catch (e) {}
+        if (Date.now() - Math.max(t, Number(m.createdAt) || 0) > 20000) continue;
+      }
+      if (!best || (m.createdAt || 0) > (best.m.createdAt || 0)) best = { id, m };
+    }
+    if (!best) { challengeToast("No running Minions match found for this player", "#ff8844"); return; }
+    mnSpecStart(best.id, best.m, uid);
+  } catch (e) { console.warn("mnWatch", e); challengeToast("Could not load the match", "#ff4444"); }
+}
+function mnSpecStart(matchId, doc, watchedUid) {
+  try { mnPostClear(); } catch (e) {}
+  try { cleanupOnline(); } catch (e) {}
+  clearAllTimers();
+  waitingQueue = []; matches = []; playerMatchMap.clear();
+  spectateModeActive = false; spectateMatchId = null; followMode = "none"; targetName = null; humanRemovedFromQueue = false;
+  coins = []; mirrorBot = null; myTrail = [];
+  ["coinHUD","opponentInfo","spectatorInfo","profileModal","winnerOverlay","onlineHUD","eloTable"].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = "none"; });
+  document.body.classList.remove("mode-online","mode-tv");
+  mode = "minions"; balls = []; players = []; eliminated = [];
+  hideAllScreensForGame();
+  document.body.classList.add("mode-minions");
+  const wL = watchedUid === doc.p1uid, uidL = wL ? doc.p1uid : doc.p2uid, uidR = wL ? doc.p2uid : doc.p1uid;
+  const SP = { id: matchId, uidL, uidR, roleL: wL ? "p1" : "p2", roleR: wL ? "p2" : "p1", nameL: String((wL ? doc.p1 : doc.p2) || "Player"), nameR: String((wL ? doc.p2 : doc.p1) || "Player"), lastN: [-1, -1], got: false, lastRx: Date.now(), t0: Date.now(), left: [false, false] };
+  MN = { tick: 0, phase: "play", sides: [mnSide(0), mnSide(1)], perm: [false, false], bonus: null, winner: -1, sent: 0, reported: true, spec: SP };
+  mnEndOverlay(null);
+  const M = MN;
+  SP.unsub = RPC.onMatch(matchId, d => mnSpecRx(M, d));
+  M.specUnsub = () => { try { SP.unsub && SP.unsub(); } catch (e) {} SP.unsub = null; };
+  mnSpecRanks(M);
+  running = true; startTime = Date.now();
+  try { syncPresence(true); } catch (e) {}
+}
+async function mnSpecRanks(M) {
+  try {
+    const SP = M.spec; let mb = null;
+    try { mb = await _dbGetT("minionsBoard"); } catch (e) { mb = await RPC.get("minionsBoard"); }
+    const rows = Object.entries(mb || {}).map(([u, r]) => ({ uid: u, elo: Number(r && r.elo) || 0, g: (Number(r && r.wins) || 0) + (Number(r && r.losses) || 0) + (Number(r && r.draws) || 0) })).filter(r => r.g > 0);
+    const f = u => { const r = rows.find(x => x.uid === u); return r ? { e: Math.round(r.elo), k: rows.filter(x => x.uid !== u && x.elo > r.elo).length + 1 } : { e: null, k: null }; };
+    if (MN !== M) return;
+    const a = f(SP.uidL), b = f(SP.uidR);
+    M.rk = { meElo: a.e, meRank: a.k, oppElo: b.e, oppRank: b.k };
+  } catch (e) {}
+}
+function mnSpecApply(S, o) {
+  if (S.lives > 0 && o.l < S.lives) S.fx.push({ x: o.x, y: o.y, life: 20 });
+  const first = S.tx == null || S.x == null || !S._got; S._got = true;
+  S.lives = o.l; S.tx = o.x; S.ty = o.y; S.inv = o.i; S.pts = o.p;
+  if (first) { S.x = o.x; S.y = o.y; }
+  S.balls = (o.b || []).map(a => ({ type: a[0], x: a[1], y: a[2], r: a[3], warm: a[4], chase: !!(a[5] & 1), perm: !!(a[5] & 2), life: (a[5] & 4) ? 60 : 9999, vx: a[6], vy: a[7], col: MN_COL[a[0]] || "#ff4444" }));
+}
+function mnSpecRx(M, d) {
+  const SP = M.spec; if (!SP || MN !== M || !d || M.phase !== "play") return;
+  [SP.roleL, SP.roleR].forEach((role, i) => {
+    const s = d["mnS_" + role];
+    if (typeof s === "string") {
+      let o = null; try { o = JSON.parse(s); } catch (e) {}
+      if (o && o.n !== SP.lastN[i]) {
+        SP.lastN[i] = o.n; SP.lastRx = Date.now(); SP.got = true; mnSpecApply(M.sides[i], o);
+      }
+    }
+    if (d["mnLeft_" + role]) SP.left[i] = true;
+  });
+  if (d.status === "done" && SP.got && !M.deadAt) M.deadAt = M.tick;
+}
+function mnSpecUpdate(M) {
+  const SP = M.spec; if (!SP || M.phase !== "play") return;
+  if (!SP.got) { if (Date.now() - SP.t0 > 25000) mnSpecEnd(M, "Match not found", "It already ended or never started"); return; }
+  M.tick++;
+  for (const S of M.sides) {
+    S.x += ((S.tx == null ? S.x : S.tx) - S.x) * 0.45; S.y += ((S.ty == null ? S.y : S.ty) - S.y) * 0.45;
+    if (S.inv > 0) S.inv--;
+    mnNetExtrap(S);
+    for (const f of S.fx) f.life--; S.fx = S.fx.filter(f => f.life > 0);
+  }
+  const [A, B] = M.sides;
+  if ((A.lives <= 0 || B.lives <= 0 || SP.left[0] || SP.left[1]) && !M.deadAt) M.deadAt = M.tick;
+  if (M.deadAt != null && M.tick - M.deadAt > 40) {
+    const aDead = A.lives <= 0 || SP.left[0], bDead = B.lives <= 0 || SP.left[1];
+    const sec = Math.floor(M.tick / 60), tm = "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+    if (aDead && bDead) mnSpecEnd(M, "Draw", tm);
+    else if (aDead) mnSpecEnd(M, SP.nameR + " wins", tm);
+    else if (bDead) mnSpecEnd(M, SP.nameL + " wins", tm);
+    else mnSpecEnd(M, "Match finished", tm);
+    return;
+  }
+  if (Date.now() - SP.lastRx > 10000) mnSpecEnd(M, "Connection lost", "No more data from the match");
+}
+function mnSpecEnd(M, title, sub) {
+  if (!M || M.phase !== "play") return;
+  M.phase = "over";
+  try { M.specUnsub && M.specUnsub(); } catch (e) {}
+  const o = document.getElementById("winnerOverlay"); if (!o) return;
+  try { mnPostClear(); } catch (e) {}
+  document.getElementById("winnerText").textContent = "\ud83d\udc41 " + title;
+  document.getElementById("winnerEloChange").innerHTML = escapeHtml(sub || "");
+  const pn = document.getElementById("winnerEloPanel"); if (pn) pn.remove();
+  const lg = document.getElementById("winnerLeague"); if (lg) lg.textContent = "";
+  const pc = document.getElementById("postChat"); if (pc) pc.style.display = "none"; o.classList.add("nochat");
+  const btns = document.getElementById("winnerButtons"); btns.innerHTML = "";
+  const b = document.createElement("button"); b.textContent = "\ud83c\udfe0 Home"; b.onclick = () => { o.style.display = "none"; exitToMenu(); }; btns.appendChild(b);
+  o.style.display = "flex";
+}
+function mnSpecLeave() { const M = MN; if (!M || !M.spec) return; try { M.specUnsub && M.specUnsub(); } catch (e) {} M.phase = "over"; exitToMenu(); }
+function mnSpecLeaveRect() { return { x: MN_PX + 10, y: 640, w: 200, h: 44 }; }
+function mnSpecHud(M) {
+  const SP = M.spec, [A, B] = M.sides;
+  ctx.textBaseline = "alphabetic";
+  const row = (S, nm, y, col) => { ctx.textAlign = "left"; ctx.fillStyle = col; ctx.font = "bold 15px Arial"; ctx.fillText(nm, MN_PX + 20, y); ctx.fillStyle = "#ffd700"; ctx.font = "bold 20px Arial"; ctx.textAlign = "right"; ctx.fillText("\ud83d\udcb0 " + Math.floor(S.pts || 0), MN_PX + MN_PWID - 20, y); };
+  ctx.fillStyle = "rgba(255,255,255,.06)"; mnRR(MN_PX + 10, 540, MN_PWID - 20, 84, 14); ctx.fill();
+  row(A, SP.nameL, 574, "#6dff8a"); row(B, SP.nameR, 608, "#ff9a5c");
+  const l = mnSpecLeaveRect();
+  ctx.fillStyle = "rgba(255,255,255,.08)"; mnRR(l.x, l.y, l.w, l.h, 16); ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 2; mnRR(l.x, l.y, l.w, l.h, 16); ctx.stroke();
+  ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "bold 15px Arial"; ctx.fillText("\u2715 Leave", l.x + l.w / 2, l.y + 28);
+  ctx.fillStyle = "rgba(255,255,255,.45)"; ctx.font = "13px Arial"; ctx.textAlign = "right"; ctx.fillText("\ud83d\udc41 Watching live", MN_PX + MN_PWID - 14, 668);
+  if (!SP.got) { ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(0, 0, MN_PX, H()); ctx.fillStyle = "#fff"; ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.fillText("Waiting for match data\u2026", MN_PX / 2, H() / 2); }
+}
+{
+  const hit = (cx, cy) => { if (!(mode === "minions" && MN && MN.spec && MN.phase === "play")) return false; const p = screenToVirtualClamped(cx, cy), l = mnSpecLeaveRect(); return p.x >= l.x && p.x <= l.x + l.w && p.y >= l.y && p.y <= l.y + l.h; };
+  window.addEventListener("pointerdown", e => { if (!mnInCanvas(e, e.clientX, e.clientY)) return; if (hit(e.clientX, e.clientY)) mnSpecLeave(); }, { capture: true });
+  window.addEventListener("touchstart", e => { for (const t of e.changedTouches) if (mnInCanvas(e, t.clientX, t.clientY) && hit(t.clientX, t.clientY)) { e.preventDefault(); mnSpecLeave(); } }, { passive: false, capture: true });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && mode === "minions" && MN && MN.spec && MN.phase === "play") mnSpecLeave(); });
+}
+// Minions gegen den Online Bot: wie beim 1vs1 als Match (p2uid = Bot) veroeffentlichen, damit Zuschauer es sehen koennen
+function mnSnapStr(S, n) {
+  const r2 = v => Math.round(v * 100) / 100;
+  const b = S.balls.map(x => [x.type, Math.round(x.x), Math.round(x.y), Math.round(x.r * 10) / 10, x.warm | 0, (x.chase ? 1 : 0) | (x.perm ? 2 : 0) | (x.life < 120 ? 4 : 0), r2(x.vx), r2(x.vy)]);
+  return JSON.stringify({ n, t: Date.now(), x: Math.round(S.x), y: Math.round(S.y), l: S.lives, i: S.inv, p: Math.round(S.pts), h: 0, b });
+}
+function mnBotBroadcast(M, final) {
+  const BM = M && M.botMatch; if (!BM) return;
+  try {
+    const n = ++BM.n, d = { mnS_p1: mnSnapStr(M.sides[0], n), mnS_p2: mnSnapStr(M.sides[1], n) };
+    if (final) { d.status = "done"; M.botMatch = null; setTimeout(() => { try { RPC.removeMatch(BM.id).catch(() => {}); } catch (e) {} }, 60000); }
+    RPC.updateMatch(BM.id, d).catch(() => {});
+  } catch (e) {}
+}
 function mnIncome(tick) { const s = tick / 60; return MN_CFG.incBase + s / 20 + s * s / 6000; }
 function minionsUpdate() {
   const M = MN; if (!M || M.phase !== "play") return;
+  if (M.spec) { mnSpecUpdate(M); return; }   // Zuschauer: nur Daten anzeigen
   const NT = M.net; if (NT && !NT.go) return;   // Online: warten bis beide bereit sind
   if (!M.cdEnd) M.cdEnd = Date.now() + 3000;
   if (Date.now() < M.cdEnd) return;   // 3-2-1 Countdown
@@ -14019,6 +14216,7 @@ function minionsUpdate() {
     }
     for (const f of S.fx) f.life--; S.fx = S.fx.filter(f => f.life > 0);
   }
+  if (!NT && M.botMatch && M.tick % 6 === 0) mnBotBroadcast(M);
   if (NT) {
     if (M.tick % 6 === 0) mnNetSend(M);
     if (P.lives <= 0 && !M.deadAt) { M.deadAt = M.tick; mnNetSend(M); }
@@ -14032,7 +14230,7 @@ function minionsUpdate() {
   } else if (P.lives <= 0 || B.lives <= 0) { mnEnd = true; mnWin = P.lives <= 0 && B.lives <= 0 ? -1 : (P.lives <= 0 ? 1 : 0); }
   if (mnEnd) {
     M.phase = "over"; M.winner = mnWin;
-    if (NT) mnNetStop(M, false);
+    if (NT) mnNetStop(M, false); else if (M.botMatch) mnBotBroadcast(M, true);
     const sec = Math.floor(M.tick / 60);
     mnEndOverlay([M.winner === 0 ? "🏆 You win!" : M.winner === 1 ? "💀 " + (M.oppName || "Online Bot") + " wins" : "🤝 Draw", "Time " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") + " · Balls sent: " + M.sent]);
     mnReport(M.winner === 0 ? 0 : M.winner === 1 ? 1 : -1, false);
@@ -14057,7 +14255,7 @@ function mnDrawArena(S, ox, oy, sc, mine) {
     const blink = S.inv > 0 && (MN.tick % 8 < 4);
     ctx.globalAlpha = blink ? 0.35 : 1;
     ctx.beginPath(); ctx.arc(S.x, S.y, MN_CFG.playerR, 0, Math.PI * 2);
-    ctx.fillStyle = mine ? (typeof myBallColor === "string" ? myBallColor : "#00ff88") : "#ff8844"; ctx.fill();
+    ctx.fillStyle = mine ? ((MN && MN.spec) ? "#00ff88" : (typeof myBallColor === "string" ? myBallColor : "#00ff88")) : "#ff8844"; ctx.fill();
     ctx.globalAlpha = 1;
   }
   for (const f of S.fx) { ctx.globalAlpha = f.life / 20; ctx.beginPath(); ctx.arc(f.x, f.y, 14 + (20 - f.life) * 2.5, 0, Math.PI * 2); ctx.strokeStyle = "#ff4444"; ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = 1; }
@@ -14088,11 +14286,12 @@ function minionsDraw() {
   mnHearts(18, 40, P.lives, "left");
   const sec = Math.floor(M.tick / 60);
   ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.fillText(Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"), 96, 38);
-  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "13px Arial"; ctx.textAlign = "left"; ctx.fillText("YOU", 20, 70); mnDrawRk(MN.rk && MN.rk.meElo, MN.rk && MN.rk.meRank, 56, 70);
+  ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.font = "13px Arial"; ctx.textAlign = "left"; if (M.spec) { ctx.fillText(M.spec.nameL, 20, 70); mnDrawRk(MN.rk && MN.rk.meElo, MN.rk && MN.rk.meRank, 20 + ctx.measureText(M.spec.nameL).width + 8, 70); } else { ctx.fillText("YOU", 20, 70); mnDrawRk(MN.rk && MN.rk.meElo, MN.rk && MN.rk.meRank, 56, 70); }
   // Gegner-Kopf
   ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.fillRect(MN_PX, 0, MN_PWID, MN_RY);
-  ctx.textAlign = "left"; ctx.fillStyle = "#ff9a5c"; ctx.font = "bold 16px Arial"; { const _lb = MN.net ? "👤 " + MN.oppName : "🤖 Online Bot"; ctx.fillText(_lb, MN_PX + 14, 26); mnDrawRk(MN.rk && MN.rk.oppElo, MN.rk && MN.rk.oppRank, MN_PX + 14 + ctx.measureText(_lb).width + 10, 26); }
+  ctx.textAlign = "left"; ctx.fillStyle = "#ff9a5c"; ctx.font = "bold 16px Arial"; { const _lb = M.spec ? "\ud83d\udc41 " + M.spec.nameR : MN.net ? "👤 " + MN.oppName : "🤖 Online Bot"; ctx.fillText(_lb, MN_PX + 14, 26); mnDrawRk(MN.rk && MN.rk.oppElo, MN.rk && MN.rk.oppRank, MN_PX + 14 + ctx.measureText(_lb).width + 10, 26); }
   mnHearts(MN_PX + MN_PWID - 12, 27, B.lives, "right");
+  if (M.spec) { mnSpecHud(M); return; }
   // Punkte-Leiste
   const py = 526;
   ctx.fillStyle = "rgba(255,255,255,.06)"; mnRR(MN_PX + 10, py, MN_PWID - 220, 32, 12); ctx.fill();
@@ -14142,7 +14341,7 @@ function mnBuyAt(cx, cy) {
   if (bi === MN_TYPES.length) { MN.perm[0] = !MN.perm[0]; return true; }
   mnBuy(0, bi); MN.flash = { i: bi, t: MN.tick }; return true;
 }
-function mnOk() { return mode === "minions" && MN && MN.phase === "play"; }
+function mnOk() { return mode === "minions" && MN && MN.phase === "play" && !MN.spec; }
 function mnInCanvas(e, x, y) {
   if (e.target && e.target.closest && e.target.closest("button,a,input,textarea,select,#mnEnd")) return false;
   const r = canvas.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
@@ -16433,9 +16632,9 @@ async function modDeleteChatMsg(key) {
       if (running && mode === "online" && !survivalActive && !onlineResultHandled) return true;
       if (survivalActive) return true;
       if (mode === "streak" && document.body.classList.contains("ingame")) return true;
-      if (typeof MN !== "undefined" && MN && MN.phase === "play") return true;   // Minions laeuft (inkl. Countdown)
+      if (typeof MN !== "undefined" && MN && MN.phase === "play" && !MN.spec) return true;   // Minions laeuft (inkl. Countdown)
       if (Date.now() < (window._mnSaveUntil || 0)) return true;                   // Minions-Ergebnis wird gerade gespeichert
-      if (running && mode !== "online_tv") return true;                           // jedes andere laufende Spiel (Single, Mirror, Coin, ...)
+      if (running && mode !== "online_tv" && !(typeof MN !== "undefined" && MN && MN.spec)) return true;                           // jedes andere laufende Spiel (Single, Mirror, Coin, ...)
     } catch (e) {}
     return false;
   }
