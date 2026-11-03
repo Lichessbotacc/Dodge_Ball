@@ -1548,12 +1548,18 @@ async function rpcSetOwnPlayer(data) {
   const uid = requireUid();
   return set(ref(db, "players/" + uid), data);
 }
+window.statsBump = function (kinds) {   // Fun-Stats: Spiele pro Tag (g = alle, o = 1v1, s = Survival, k = Streak, d = Daily)
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    ["g"].concat(kinds).forEach(k => { runTransaction(ref(db, "siteStats/" + day + "/" + k), v => (v || 0) + 1).catch(() => {}); });
+  } catch (e) {}
+};
 async function rpcUpdateOwnPlayer(data) {
   requireNotBanned();
   const uid = requireUid();
   let kinds = [];
   try {   // Spiel beendet? (wins/losses/survPlayed/streakPlayed/dailyPlayed gestiegen) -> fuer die Fun-Stats zaehlen
-    const map = { wins: "o", losses: "o", survPlayed: "s", streakPlayed: "k", dailyPlayed: "d" };
+    const map = { wins: "o", losses: "o" };   // nur Online-1v1; Survival/Streak/Daily werden direkt beim Run-Start gezaehlt (countModeRun)
     for (const key of Object.keys(map)) {
       if (typeof data[key] !== "number") continue;
       const old = (await get(ref(db, "players/" + uid + "/" + key))).val() || 0;
@@ -1561,10 +1567,7 @@ async function rpcUpdateOwnPlayer(data) {
     }
   } catch (e) { kinds = []; }
   const res = await update(ref(db, "players/" + uid), data);
-  if (kinds.length) {
-    const day = new Date().toISOString().slice(0, 10);
-    ["g"].concat(kinds).forEach(k => { runTransaction(ref(db, "siteStats/" + day + "/" + k), v => (v || 0) + 1).catch(() => {}); });
-  }
+  if (kinds.length) window.statsBump(kinds);
   return res;
 }
 async function rpcRemoveOwnPlayer() {
@@ -4167,6 +4170,7 @@ function countModeRun(field) {
   if (!onlineAccount) return;
   onlineAccount[field] = (onlineAccount[field] || 0) + 1;
   try { saveAccountLocal(); } catch (e) {}
+  try { window.statsBump && window.statsBump([field === "survPlayed" ? "s" : field === "streakPlayed" ? "k" : "d"]); } catch (e) {}   // Fun-Stats
   // Jeder Start (auch Retry / Try again) zaehlt. Seriell + atomar: nur das eine Feld wird geschrieben,
   // Basis ist der hoehere Wert aus Server und lokal -> schnelle Retries ueberschreiben sich nicht.
   _runCountChain = _runCountChain.then(async () => {
@@ -14193,9 +14197,21 @@ function mnApplySnap(M, o) {
   if ((o.h | 0) > NT.oppHits) { const dh = o.h - NT.oppHits; NT.oppHits = o.h; P.pts = Math.min(MN_CFG.maxPts, P.pts + MN_CFG.hitBonus * dh); M.bonus = { t: M.tick, amt: MN_CFG.hitBonus }; }   // Gegner wurde getroffen -> ich bekomme den Bonus
   B.balls = (o.b || []).map(a => ({ type: a[0], x: a[1], y: a[2], r: a[3], warm: a[4], chase: !!(a[5] & 1), perm: !!(a[5] & 2), life: (a[5] & 4) ? 60 : 9999, vx: a[6], vy: a[7], ang: a[8] || 0, lph: a[9] | 0, col: MN_COL[a[0]] || "#ff4444" }));
 }
-function mnRecvBuy(M, e) {
+function mnRecvBuy0(M, e) {
   const T = (e.t && MN_TYPES.find(x => x.id === e.t)) || MN_TYPES.find(x => x.id === MN_LEGACY[e.i]), P = M.sides[0]; if (!T || M.phase !== "play" || P.balls.length >= MN_CFG.maxBalls || !mnCapOk(T.id, P)) return;
   const nb = mnMakeBall(T.id, P); if (e.pm) { nb.life = Infinity; nb.perm = true; } P.balls.push(nb);
+}
+function mnRecvBuy(M, e) {   // Anti-Cheat: Kauf des Gegners nur annehmen, wenn er sich das verdienen konnte
+  try {
+    const NT = M.net, T = (e && e.t && MN_TYPES.find(x => x.id === e.t)) || (e && MN_TYPES.find(x => x.id === MN_LEGACY[e.i]));
+    if (NT && T && M.phase === "play" && M.cdEnd) {
+      const cost = T.cost * (e.pm ? MN_CFG.permMul : 1), el = Math.max(0, (Date.now() - M.cdEnd) / 1000) + 2;   // +2 s Toleranz (Start/Lag)
+      const allowed = MN_CFG.startPts + mnIncome(el * 60) * el + 30 + MN_CFG.hitBonus * ((NT.myHits | 0) + 1);   // Obergrenze: Startpunkte + max. Einkommen + Treffer-Boni
+      if ((M.oppSpent || 0) + cost > allowed) { M.cheatBuys = (M.cheatBuys || 0) + 1; console.warn("Minions: Kauf des Gegners abgelehnt (mehr ausgegeben als verdient)"); return; }
+      M.oppSpent = (M.oppSpent || 0) + cost;
+    }
+  } catch (err) {}
+  mnRecvBuy0(M, e);
 }
 function mnNetSend(M) {
   const NT = M.net, P = M.sides[0], r2 = v => Math.round(v * 100) / 100;
