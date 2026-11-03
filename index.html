@@ -2060,20 +2060,30 @@ async function rpcLogEloGame(key, data) {
   const uid = requireUid();
   if (!data || data.a !== uid || !data.b) throw new Error("Not your game.");
   key = String(key).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 150);
-  return set(ref(db, "eloGames/" + key), { a: uid, b: String(data.b), d: Math.round((Number(data.d) || 0) * 10) / 10, bot: data.bot ? 1 : 0, ts: Date.now() });
+  return set(ref(db, "eloGames/" + key), Object.assign({ a: uid, b: String(data.b), d: Math.round((Number(data.d) || 0) * 10) / 10, bot: data.bot ? 1 : 0, ts: Date.now() }, data.m ? { m: 1 } : {}));   // m:1 = Minions-ELO
 }
 // Ban: ELO aller Gegner des Gebannten korrigieren (Sieg gegen ihn -> ELO zurueck weg, Niederlage -> ELO zurueck) + Online-Bot
 // + Hinweis an jeden betroffenen Spieler (sanctions/{uid}/banRefunds). Idempotent: verarbeitete Eintraege werden geloescht.
 // Admin: ALLE protokollierten Spiele gegen den Online Bot zuruecksetzen (ELO-Aenderung jedes Spielers wird rueckgaengig gemacht). sinceTs = nur Spiele ab diesem Zeitpunkt (0 = alle). Idempotent (Log-Eintraege werden geloescht).
+function _mnEloFix(up, u, bd, add) {   // Minions-ELO eines Spielers korrigieren (minionsBoard/{uid}); ts muss "now" sein (Rules)
+  if (!bd || typeof bd.elo !== "number") return null;
+  const ne = Math.max(100, Math.round((bd.elo + add) * 10) / 10);
+  up["minionsBoard/" + u + "/elo"] = ne;
+  if (typeof bd.highestElo === "number" && ne > bd.highestElo) up["minionsBoard/" + u + "/highestElo"] = ne;
+  if (typeof bd.lowestElo === "number" && ne < bd.lowestElo) up["minionsBoard/" + u + "/lowestElo"] = ne;
+  up["minionsBoard/" + u + "/ts"] = serverTimestamp();
+  return ne;
+}
 async function rpcModResetBotGames(sinceTs) {
   requireAdmin();
   const BOT = "bot__online_bot", since = Number(sinceTs) || 0;
   const snap = await get(query(ref(db, "eloGames"), orderByChild("b"), equalTo(BOT)));
-  const sum = {}, cnt = {}, del = {};
+  const sum = {}, cnt = {}, del = {}, sumM = {};
   snap.forEach(ch => {
     const g = ch.val() || {};
     if (!g.a || g.a === BOT || (since && (Number(g.ts) || 0) < since)) return;
     del["eloGames/" + ch.key] = null;
+    if (g.m) { sumM[g.a] = (sumM[g.a] || 0) - (Number(g.d) || 0); return; }   // Minions-Spiel -> Minions-ELO
     sum[g.a] = (sum[g.a] || 0) - (Number(g.d) || 0);
     cnt[g.a] = (cnt[g.a] || 0) + 1;
   });
@@ -2088,6 +2098,8 @@ async function rpcModResetBotGames(sinceTs) {
     if (typeof pl.lowestElo === "number" && ne < pl.lowestElo) up["players/" + u + "/lowestElo"] = ne;
     changed++;
   });
+  const uM = Object.keys(sumM), bdM = await Promise.all(uM.map(async u => { try { return (await get(ref(db, "minionsBoard/" + u))).val(); } catch (e) { return null; } }));
+  uM.forEach((u, i) => { if (_mnEloFix(up, u, bdM[i], sumM[u]) != null) changed++; });
   await update(ref(db), Object.assign(up, del));
   return { players: changed, games: Object.keys(del).length };
 }
@@ -2102,11 +2114,13 @@ async function rpcModBanEloRefund(bannedUid) {
   ]);
   const refund = {}, count = {}, del = {};
   let botRefund = 0, botGames = 0;
+  const refundM = {}, countM = {}; let botRefundM = 0, botGamesM = 0;   // Minions
   // Gegner haben ihr Ergebnis selbst protokolliert: d = deren Aenderung -> Korrektur = -d
   vsHim.forEach(ch => {
     const g = ch.val() || {};
     del["eloGames/" + ch.key] = null;
     if (!g.a || g.a === bannedUid || g.a === BOT) return;
+    if (g.m) { refundM[g.a] = (refundM[g.a] || 0) - (Number(g.d) || 0); countM[g.a] = (countM[g.a] || 0) + 1; return; }   // Minions-Spiel
     refund[g.a] = (refund[g.a] || 0) - (Number(g.d) || 0);
     count[g.a] = (count[g.a] || 0) + 1;
   });
@@ -2114,7 +2128,7 @@ async function rpcModBanEloRefund(bannedUid) {
   hisGames.forEach(ch => {
     const g = ch.val() || {};
     del["eloGames/" + ch.key] = null;
-    if (g.b === BOT) { botRefund += (Number(g.d) || 0); botGames++; }
+    if (g.b === BOT) { if (g.m) { botRefundM += Math.max(-10, Math.min(10, Number(g.d) || 0)); botGamesM++; } else { botRefund += (Number(g.d) || 0); botGames++; } }   // Minions: Bot-Aenderung war auf +-10 begrenzt
   });
   const uids = Object.keys(refund).filter(u => refund[u] !== 0 || count[u]);
   const up = {}, now = Date.now(), banId = "b" + now;
@@ -2139,9 +2153,29 @@ async function rpcModBanEloRefund(bannedUid) {
       }
     } catch (e) {}
   }
+  // Minions: Gegner des Gebannten bekommen ihre Minions-ELO zurueck, ebenso der Online Bot (minionsElo)
+  const uidsM = Object.keys(refundM), bdM = await Promise.all(uidsM.map(async u => { try { return (await get(ref(db, "minionsBoard/" + u))).val(); } catch (e) { return null; } }));
+  uidsM.forEach((u, i) => {
+    const ne = _mnEloFix(up, u, bdM[i], refundM[u]); if (ne == null) return;
+    up["sanctions/" + u + "/banRefunds/" + banId + "m"] = { ts: now, delta: Math.round((ne - bdM[i].elo) * 10) / 10, games: countM[u], mn: 1 };
+  });
+  if (botGamesM && botRefundM !== 0) {
+    try {
+      const bp = (await get(ref(db, "players/" + BOT))).val(), cur = bp ? Number(bp.minionsElo) : NaN;
+      if (Number.isFinite(cur)) {
+        const ne = Math.max(100, Math.round((cur + botRefundM) * 10) / 10), ms = bp.minionsStats;
+        up["players/" + BOT + "/minionsElo"] = ne;
+        if (ms && typeof ms.elo === "number") {
+          up["players/" + BOT + "/minionsStats/elo"] = ne;
+          if (typeof ms.highestElo === "number" && ne > ms.highestElo) up["players/" + BOT + "/minionsStats/highestElo"] = ne;
+          if (typeof ms.lowestElo === "number" && ne < ms.lowestElo) up["players/" + BOT + "/minionsStats/lowestElo"] = ne;
+        }
+      }
+    } catch (e) {}
+  }
   // Erst Korrekturen schreiben, dann (im selben Schritt) die verarbeiteten Log-Eintraege loeschen -> kein doppeltes Erstatten
   await update(ref(db), Object.assign(up, del));
-  return { players: uids.length, games: Object.keys(del).length, bot: botRefund };
+  return { players: uids.length, minions: uidsM.length, games: Object.keys(del).length, bot: botRefund, botMinions: botRefundM };
 }
 // Mod: Rekorde eines Spielers komplett loeschen (Rangliste, Profil, Replays). what = { survival, streak, daily, winstreak }
 async function rpcModDeleteRecords(uid, what) {
@@ -8108,10 +8142,10 @@ function pushBallState() {
 // bot-stat writes are now uid-keyed. The player's own profile write
 // still goes only to players/{myUid} via pushAccountToFirebase().
 // ELO-Protokoll: eigenes Ergebnis (gegen oppUid, meine ELO-Aenderung d) fuer die Ban-Rueckrechnung speichern
-function logEloGame(oppUid, d, isBot) {
+function logEloGame(oppUid, d, isBot, mn) {
   try {
     if (!fbReady || !RPC || !myUid || !oppUid || !Number.isFinite(Number(d)) || Number(d) === 0) return;
-    RPC.logEloGame(Date.now() + "_" + myUid + "_" + Math.floor(Math.random() * 1e6), { a: myUid, b: oppUid, d: Number(d), bot: !!isBot })
+    RPC.logEloGame(Date.now() + "_" + myUid + "_" + Math.floor(Math.random() * 1e6), { a: myUid, b: oppUid, d: Number(d), bot: !!isBot, m: !!mn })
       .catch(e => console.warn("elo log failed", e));
   } catch (e) {}
 }
@@ -13761,6 +13795,7 @@ async function mnReport(res, left) {   // res: 0 = Sieg, 1 = Niederlage, -1 = Un
       bestWinChange: _mnBestWin, bestWinOpp: _mnBestWinOpp, worstLossChange: _mnWorstLoss, worstLossOpp: _mnWorstLossOpp, eloHistory: _mnHist
     });
     try { delete _DB_CACHE["minionsBoard"]; } catch (e) {}
+    try { logEloGame(M.net ? M.net.opp.uid : ONLINE_BOT_UID, d, !M.net, true); } catch (e) {}   // Ban-Rueckrechnung: Minions-ELO-Aenderung gegen diesen Gegner (Online Bot zaehlt mit)
     if (!M.net) {
       try {
         // Mirror the result from the bot's point of view so its public profile
@@ -15641,22 +15676,25 @@ async function _modApplyBanRefunds() {
   if (!fresh.length) return;
   _modRefundBusy = true;
   fresh.forEach(id => { try { localStorage.setItem("dob_mod_br_" + _modUid + "_" + id, "1"); } catch (e) {} });
-  let delta = 0, games = 0;
-  fresh.forEach(id => { delta += Number(br[id].delta) || 0; games += Number(br[id].games) || 0; });
+  let delta = 0, games = 0, mDelta = 0, mGames = 0, hasNorm = false, hasMn = false;
+  fresh.forEach(id => { const r = br[id]; if (r.mn) { hasMn = true; mDelta += Number(r.delta) || 0; mGames += Number(r.games) || 0; } else { hasNorm = true; delta += Number(r.delta) || 0; games += Number(r.games) || 0; } });
   try { await pullAccountFromServer(); } catch (e) {}      // neue ELO uebernehmen, damit sie nicht mit altem lokalen Stand ueberschrieben wird
   try { updateAccountBtn(); } catch (e) {}
-  _modShowRefundPopup(delta, games);
+  if (hasNorm) _modShowRefundPopup(delta, games);
+  if (hasMn) _modShowRefundPopup(mDelta, mGames, "Minions");
   _modRefundBusy = false;
 }
-function _modShowRefundPopup(delta, games) {
-  const old = document.getElementById("banRefundPopup"); if (old) old.remove();
+function _modShowRefundPopup(delta, games, label) {
+  const popId = label ? "banRefundPopupMn" : "banRefundPopup";
+  const old = document.getElementById(popId); if (old) old.remove();
   const col = delta > 0 ? "#00ff88" : delta < 0 ? "#ff4444" : "#cfd3e0";
   const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
-  const ov = document.createElement("div"); ov.id = "banRefundPopup";
+  const ov = document.createElement("div"); ov.id = popId;
   ov.style.cssText = "position:fixed;inset:0;z-index:31500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);padding:16px;box-sizing:border-box;";
   const box = document.createElement("div");
   box.style.cssText = "width:min(420px,94vw);background:#0d0f16;border:1px solid " + col + ";border-radius:16px;padding:22px;color:#eaf2fb;font:15px sans-serif;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6);";
   const h = document.createElement("div"); h.style.cssText = "font-weight:800;font-size:18px;margin-bottom:10px;color:#ffd700;"; h.textContent = tr("A player you've played against got banned"); box.appendChild(h);
+  if (label) h.textContent += " – " + label;
   const big = document.createElement("div"); big.style.cssText = "font-size:44px;font-weight:800;margin:6px 0 10px;color:" + col + ";"; big.textContent = sign + fmtElo(delta) + " ELO"; box.appendChild(big);
   const ex = document.createElement("div"); ex.style.cssText = "font-size:13px;line-height:1.5;color:#b8bfd0;margin-bottom:16px;";
   ex.textContent = tr("All games against banned players are removed from the ranking. ELO you lost against them was given back, ELO you gained against them was taken back.") + " (" + games + " " + tr(games === 1 ? "game" : "games") + ")";
