@@ -17741,6 +17741,17 @@ if (typeof module !== "undefined") module.exports = { BotSim, botMkRng };
       ".fsR span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fsS{color:#a9acd0;font-size:12px;margin:4px 0}";
     document.head.appendChild(st);
   }
+  async function cleanBanned(sa, pl) {
+    const R = window._dobRPC, todo = Object.entries(sa || {}).filter(([u, v]) => v && v.banned && pl[u]).map(([u]) => u);
+    if (!todo.length) return;
+    if (!confirm(todo.length + " banned player(s) still have public data (profile, leaderboards). Delete it now?\nA backup is saved, so Unban can restore it.")) return;
+    for (const u of todo) {
+      try {
+        if (!(sa[u] && sa[u].backup)) { const [a, b, c] = await Promise.all([R.get("players/" + u), R.get("survival/" + u), R.get("streakBoard/" + u)]); await R.modSetSanction(u, { backup: { player: a || null, survival: b || null, streak: c || null } }); }
+        await R.modPurgeUser(u, (pl[u] && pl[u].name) || "");
+      } catch (e) { console.warn("cleanup failed", u, e); }
+    }
+  }
   window.openFunStats = async function () {
     css();
     let ov = document.getElementById("fsOv");
@@ -17748,10 +17759,11 @@ if (typeof module !== "undefined") module.exports = { BotSim, botMkRng };
     const X = '<button class="fsX" onclick="document.getElementById(\'fsOv\').style.display=\'none\'">✕ Close</button>';
     ov.innerHTML = '<div class="fsIn">' + X + "<h2>📊 Fun Stats</h2>" + note("Loading…") + "</div>";
     ov.style.display = "block";
-    const isAdm = (() => { try { return typeof _modIsAdmin === "function" && _modIsAdmin(); } catch (e) { return false; } })();
+    const isAdm = (() => { try { return window._dobRPC.myUid() === "6O1c9OKTRlbwzDlPuBG2ceMRdz63"; } catch (e) { return false; } })();
     const [pl, ss, cl, cm, idle, str, sur, mn, sa] = await Promise.all([G("players"), G("siteStats"), G("clans"), G("clanMembers"), G("idleBoard"), G("streakBoard"), G("survival"), G("minionsBoard"), isAdm ? G("sanctions") : null]);
     if (!pl) { ov.innerHTML = '<div class="fsIn">' + X + "<h2>📊 Fun Stats</h2>" + note("Could not load the stats. Check your connection and try again.") + "</div>"; return; }
     const BAN = new Set(Object.entries(sa || {}).filter(([u, v]) => v && v.banned).map(([u]) => u));
+    if (isAdm && sa) { try { await cleanBanned(sa, pl); } catch (e) {} }   // Admin: oeffentliche Daten Gebannter entfernen (Backup bleibt fuer Unban)
     const P = Object.entries(pl || {}).filter(([u, p]) => p && !u.startsWith("bot__") && !BAN.has(u) && p.name).map(([u, p]) => ({ name: p.name || "?", elo: +p.elo || 0, w: +p.wins || 0, l: +p.losses || 0, t: Math.max(0, Math.min(3, +p.leagueTier || 0)), c: +p.createdAt || 0, sv: +p.survPlayed || 0, sk: +p.streakPlayed || 0, dl: +p.dailyPlayed || 0 }));
     P.forEach(p => { p.g = p.w + p.l; });
     const V = new Set(Object.entries(pl).filter(([u, p]) => p && !u.startsWith("bot__") && !BAN.has(u) && p.name).map(([u]) => u));
@@ -17807,7 +17819,7 @@ if (typeof module !== "undefined") module.exports = { BotSim, botMkRng };
     f.push("Players who never played a 1v1: <b>" + fmt(P.length - placed.length) + "</b>");
     f.push("Players per league tier: " + tv.map((v, i) => tierName(i).trim() + " = " + fmt(v)).join(" · "));
     out.push(card("🤓 Fun facts", f.map(x => '<div class="fsR"><span style="white-space:normal">' + x + "</span></div>").join("")));
-    ov.innerHTML = '<div class="fsIn">' + X + "<h2>📊 Fun Stats</h2>" + note("Live numbers about this website – all in one place.") + out.join("") + "</div>";
+    ov.innerHTML = '<div class="fsIn">' + X + "<h2>📊 Fun Stats</h2>" + note("Live numbers about this website – all in one place." + (isAdm ? " · Admin: " + BAN.size + " banned player(s) hidden" : "")) + out.join("") + "</div>";
   };
 })();
 </script>
