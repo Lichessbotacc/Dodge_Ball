@@ -150,6 +150,7 @@ try {
     _auth = initializeAuth(_app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   } catch(e) { _auth = getAuth(_app); }
   try { getAnalytics(_app); } catch(e) {}
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}   // Speicher als "dauerhaft" anfordern -> Login-Sitzung wird seltener geloescht
   // ADDED: explicit LOCAL persistence. This is already the web SDK's
   // default, but we set it explicitly so the session survives tab
   // closes / browser restarts on the SAME device — it does NOT make
@@ -249,8 +250,13 @@ async function dobRegisterWithPassword(username, password) {
 async function dobLoginWithPassword(username, password) {
   if (!_fbReady) throw new Error("Firebase not ready.");
   const email = usernameToEmail(username);
-  const cred = await signInWithEmailAndPassword(_auth, email, password);
-  return cred.user.uid;
+  const tries = [password, password.trim(), password.normalize("NFC").trim()].filter((p, i, a) => p && a.indexOf(p) === i);   // Handy-Tastaturen haengen gern ein Leerzeichen an
+  let lastErr = null;
+  for (const p of tries) {
+    try { const cred = await signInWithEmailAndPassword(_auth, email, p); return cred.user.uid; }
+    catch (e) { lastErr = e; if (!e || ["auth/invalid-credential", "auth/wrong-password"].indexOf(e.code) < 0) throw e; }
+  }
+  throw lastErr;
 }
 
 async function dobLogout() {
@@ -6632,15 +6638,16 @@ function showAccountAuthScreen(mode) {
   if (mode !== "login" && onlineAccount && deviceHasAccount() && !(window._dobAuth && window._dobAuth.isPasswordAccount())) {
     showAccountAuthScreen("login");
     const u = document.getElementById("authUsername"); if (u) u.value = onlineAccount.name;
-    const i = document.getElementById("accountInfo"); if (i) { i.textContent = "Session expired – please log in again."; i.style.color = "#ffd700"; }
+    const i = document.getElementById("accountInfo"); if (i) { i.textContent = "Session expired – please log in again." + (_inAppBrowser() ? " (In-app browsers like TikTok/Instagram delete logins often – use Chrome or Safari.)" : ""); i.style.color = "#ffd700"; }
     return;
   }
   if (mode === "login") {
     document.getElementById("accountContent").innerHTML = `
       <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Log in to your account</p>
-      <input type="text" id="authUsername" placeholder="Username" maxlength="20" autocomplete="username">
+      ${_inAppBrowser() ? '<p style="color:#ffd96a;font-size:13px;max-width:340px;margin:0 auto 14px;line-height:1.5;">⚠️ You are in an in-app browser (TikTok, Instagram…). These often delete your login. For a stable login open this page in Chrome or Safari.</p>' : ""}
+      <input type="text" id="authUsername" placeholder="Username" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
       <br>
-      <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+      <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
       <br>
       <div id="accountInfo"></div>
       <br>
@@ -6658,11 +6665,11 @@ function showAccountAuthScreen(mode) {
   } else {
     document.getElementById("accountContent").innerHTML = `
       <p style="color:#aaa;margin-bottom:18px;font-size:16px;">Create your account</p>
-      <input type="text" id="authUsername" placeholder="Username" maxlength="20" autocomplete="username">
+      <input type="text" id="authUsername" placeholder="Username" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
       <br>
-      <input type="password" id="authPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
+      <input type="password" id="authPassword" placeholder="Password (min 6 characters)" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false">
       <br>
-      <input type="password" id="authPasswordConfirm" placeholder="Confirm password" autocomplete="new-password">
+      <input type="password" id="authPasswordConfirm" placeholder="Confirm password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false">
       <br>
       <div id="accountInfo"></div>
       <br>
@@ -6711,7 +6718,7 @@ function showDeleteAccountScreen() {
   document.getElementById("accountContent").innerHTML = `
     <p style="color:#ff6666;font-size:20px;font-weight:700;margin-bottom:8px;">⚠ ${tr("Delete account permanently?")}</p>
     <p style="color:#cfd6e4;font-size:13px;max-width:340px;margin:0 auto 14px;line-height:1.5;">${tr("Your name, ELO, stats and league progress will be deleted and cannot be restored. Afterwards you can create a new account.")}</p>
-    <input type="password" id="deletePassword" placeholder="${tr("Password")}" autocomplete="current-password">
+    <input type="password" id="deletePassword" placeholder="${tr("Password")}" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
     <br>
     <div id="accountInfo"></div>
     <br>
@@ -6773,6 +6780,7 @@ async function createAccount() {
   if (nameFormatProblem(name))           { info.textContent = NAME_FORMAT_MSG[nameFormatProblem(name)]; info.style.color="#f44"; return; }
   if (nameIsBlocked(name))               { info.textContent = NAME_FORMAT_MSG[nameFormatProblem(name)] || "This name is not allowed."; info.style.color="#f44"; return; }
   if (!password || password.length < 6)  { info.textContent = "Password must be at least 6 characters."; info.style.color="#f44"; return; }
+  if (password !== password.trim())      { info.textContent = "The password must not start or end with a space."; info.style.color="#f44"; return; }
   if (password !== passwordConfirm)      { info.textContent = "Passwords do not match."; info.style.color="#f44"; return; }
   if (!fbReady || !window._dobAuth)      { info.textContent = "Still connecting — please try again in a moment."; info.style.color="#f44"; return; }
 
@@ -6856,6 +6864,7 @@ async function createAccount() {
 // fetch the player's saved data from Firebase (NOT from localStorage
 // — this is what makes it work on a brand-new device/browser) and
 // use that as the account.
+function _inAppBrowser() { try { return /Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|BytedanceWebview|Snapchat|MicroMessenger|LinkedInApp|Pinterest|Twitter/i.test(navigator.userAgent || ""); } catch (e) { return false; } }
 async function loginAccount() {
   const name     = document.getElementById("authUsername").value.trim();
   const password = document.getElementById("authPassword").value;
@@ -6904,11 +6913,12 @@ async function loginAccount() {
 
     showScreen("menu");
   } catch(e) {
-    if (e && ["auth/invalid-credential","auth/wrong-password","auth/user-not-found"].includes(e.code)) {
-      info.textContent = "Incorrect username or password.";
-    } else {
-      info.textContent = "Error: " + (e && (e.code || e.message));
-    }
+    const _c = e && e.code;
+    if (["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found"].includes(_c)) info.textContent = "Incorrect username or password. The username is not case-sensitive, the password is. Check for typos.";
+    else if (_c === "auth/too-many-requests") info.textContent = "Too many attempts. Please wait a few minutes and try again.";
+    else if (_c === "auth/network-request-failed") info.textContent = "No connection to the server." + (_inAppBrowser() ? " In-app browsers (TikTok, Instagram…) often block logins – open the game in Chrome or Safari." : " Check your internet connection.");
+    else if (_c === "auth/user-disabled") info.textContent = "This account has been disabled.";
+    else info.textContent = "Error: " + (e && (e.code || e.message));
     info.style.color = "#f44";
     console.warn("loginAccount failed", e);
   }
